@@ -27,5 +27,5 @@ Updated: 25 July 2026
 - [x] Production environment variables are documented.
 - [x] Principal pages and both report types were visually inspected.
 - [x] Known limitations are documented.
-- [ ] Verified release candidate is deployed to `https://sumkora.com`.
-- [ ] Post-deployment sign-up/login, existing data and export smoke tests pass.
+- [x] Verified release candidate is deployed to `https://sumkora.com`.
+- [x] Post-deployment login, existing-data and export smoke tests pass.

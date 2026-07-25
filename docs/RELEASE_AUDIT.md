@@ -2,9 +2,11 @@
 
 Updated: 25 July 2026
 
-The local release candidate was compared with `https://sumkora.com`. The live
-site was intentionally left unchanged during the audit and still displayed
-the previous product name; deployment occurs only after the full checks pass.
+The local release candidate was compared with `https://sumkora.com`, passed
+the checks below, and was then deployed. Post-deployment checks confirmed the
+Sumkora title and metadata, existing student and researcher login, persistent
+data access, a valid Sumkora-named research PDF export and clean recent
+production logs.
 
 ## Route audit
 

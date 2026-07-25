@@ -123,5 +123,17 @@ pdftoppm -png -r 120 output/pdf/research-report.pdf tmp/pdfs/research-report
 
 ## Deployment status
 
-The release candidate has not yet been uploaded. The final deployment and
-post-deployment smoke-test result will be recorded before handoff.
+The release candidate was uploaded to Railway and deployment
+`3ba94d74-fcdd-4884-ad8c-61b20f7b0058` completed successfully in Singapore.
+Post-deployment checks confirmed:
+
+- `https://sumkora.com/login` serves the Sumkora title, canonical URL, Open
+  Graph metadata, manifest and favicon.
+- The public OpenAPI description uses Sumkora.
+- Existing student and researcher accounts can log in and reach their
+  respective dashboards.
+- The research PDF endpoint returns a valid PDF with a
+  `sumkora-research-experiment-1-report.pdf` filename.
+- The persistent Railway volume remains attached and unchanged at
+  `/app/data`; the application can read the existing data.
+- Recent production logs contain no warnings or errors.
