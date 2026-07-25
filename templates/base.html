@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
   <title>{% block title %}{{ t.app_name }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/tailwind.css">
   <script>
@@ -14,33 +15,63 @@
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen">
-  <nav class="bg-indigo-700 text-white shadow">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-      <a href="/" class="font-semibold text-lg">Numera</a>
-      <div class="flex items-center gap-4 text-sm">
-        <a href="/lang/{{ other_lang }}" class="bg-white/15 hover:bg-white/25 px-2 py-1 rounded text-xs font-medium">{{ t.lang_switch }}</a>
-        {% if user %}
-        <span>{{ user.name }} ({% if is_researcher %}Researcher{% else %}Student{% endif %})</span>
+<body class="app-page {% if is_researcher %}research-mode{% endif %}">
+  <a href="#main-content" class="skip-link">Skip to content</a>
+  <header class="app-header">
+    <div class="nav-shell">
+      <a href="/" class="brand-mark" aria-label="Numera home">
+        <span class="brand-symbol" aria-hidden="true">N</span>
+        <span>Numera</span>
+      </a>
+
+      {% if user %}
+      <nav class="desktop-nav" aria-label="Primary navigation">
         {% if is_researcher %}
-        <a href="/research" class="hover:underline">Overview</a>
-        <a href="/research/experiments" class="hover:underline">Experiments</a>
-        <a href="/research/ocr" class="hover:underline">OCR</a>
-        <a href="/research/grading" class="hover:underline">Grading</a>
-        <a href="/research/failures" class="hover:underline">Failures</a>
+        <a href="/research" {% if current_path == '/research' %}aria-current="page"{% endif %}>Overview</a>
+        <a href="/research/experiments" {% if current_path.startswith('/research/experiments') %}aria-current="page"{% endif %}>Experiments</a>
+        <a href="/research/ocr" {% if current_path == '/research/ocr' %}aria-current="page"{% endif %}>OCR</a>
+        <a href="/research/grading" {% if current_path == '/research/grading' %}aria-current="page"{% endif %}>Grading</a>
+        <a href="/research/failures" {% if current_path == '/research/failures' %}aria-current="page"{% endif %}>Failures</a>
         {% else %}
-        <a href="/student" class="hover:underline">Dashboard</a>
-        <a href="/student/analyse" class="hover:underline">Analyse paper</a>
-        <a href="/student/papers" class="hover:underline">My papers</a>
-        <a href="/student/compare" class="hover:underline">Compare</a>
-        <a href="/student/skills" class="hover:underline">Strengths</a>
+        <a href="/student" {% if current_path == '/student' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="/student/analyse" {% if current_path == '/student/analyse' %}aria-current="page"{% endif %}>Analyse a paper</a>
+        <a href="/student/papers" {% if current_path.startswith('/student/papers') %}aria-current="page"{% endif %}>My papers</a>
+        <a href="/student/compare" {% if current_path == '/student/compare' %}aria-current="page"{% endif %}>Compare</a>
+        <a href="/student/skills" {% if current_path == '/student/skills' %}aria-current="page"{% endif %}>Strengths</a>
         {% endif %}
-        <a href="/logout" class="hover:underline opacity-80">{{ t.logout }}</a>
-        {% endif %}
+      </nav>
+
+      <div class="nav-account">
+        <a href="/lang/{{ other_lang }}" class="language-link">{{ t.lang_switch }}</a>
+        <details class="account-menu">
+          <summary>
+            <span class="avatar" aria-hidden="true">{{ user.name[:1]|upper }}</span>
+            <span class="account-name">{{ user.name }}</span>
+          </summary>
+          <div class="account-popover">
+            <p>{{ 'Researcher' if is_researcher else 'Student' }}</p>
+            {% if not is_researcher %}<a href="/student/settings">Settings</a>{% endif %}
+            <a href="/logout">Log out</a>
+          </div>
+        </details>
       </div>
+
+      <details class="mobile-menu">
+        <summary aria-label="Open navigation">Menu</summary>
+        <nav aria-label="Mobile navigation">
+          {% if is_researcher %}
+          <a href="/research">Overview</a><a href="/research/experiments">Experiments</a><a href="/research/ocr">OCR laboratory</a><a href="/research/grading">Grading evaluation</a><a href="/research/failures">Failure gallery</a><a href="/research/student-models">Student models</a><a href="/research/taxonomy">Taxonomy</a>
+          {% else %}
+          <a href="/student">Dashboard</a><a href="/student/analyse">Analyse a paper</a><a href="/student/papers">My papers</a><a href="/student/compare">Compare</a><a href="/student/skills">Strengths and weaknesses</a><a href="/student/settings">Settings</a>
+          {% endif %}
+          <a href="/lang/{{ other_lang }}">{{ t.lang_switch }}</a>
+          <a href="/logout">Log out</a>
+        </nav>
+      </details>
+      {% endif %}
     </div>
-  </nav>
-  <main class="max-w-6xl mx-auto px-4 py-8">
+  </header>
+  <main id="main-content" class="page-shell">
     {% block content %}{% endblock %}
   </main>
 </body>

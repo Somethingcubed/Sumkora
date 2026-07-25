@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}Numera{% endblock %}</title>
+  <link rel="stylesheet" href="/static/tailwind.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-page">
+  <main class="auth-layout">
+    <section class="auth-brand" aria-label="About Numera">
+      <a class="brand-mark" href="/" aria-label="Numera home">
+        <span class="brand-symbol" aria-hidden="true">N</span>
+        <span>Numera</span>
+      </a>
+      <div class="auth-brand-copy">
+        <p class="eyebrow eyebrow-light">Mathematics, made clearer</p>
+        <h1>Understand every paper. Build on every result.</h1>
+        <p>Upload your work, see where marks were lost, and follow your progress over time.</p>
+      </div>
+      <p class="auth-footnote">Cambridge IGCSE Additional Mathematics · 0606</p>
+    </section>
+    <section class="auth-panel">
+      <a href="/lang/{{ other_lang }}" class="auth-language">{{ t.lang_switch }}</a>
+      <div class="auth-card">
+        {% block auth_content %}{% endblock %}
+      </div>
+    </section>
+  </main>
+  <script>
+    document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const input = document.getElementById(button.dataset.passwordToggle);
+        const reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        button.textContent = reveal ? "Hide" : "Show";
+        button.setAttribute("aria-pressed", String(reveal));
+      });
+    });
+    document.querySelectorAll("form[data-submit-label]").forEach((form) => {
+      form.addEventListener("submit", () => {
+        const button = form.querySelector('button[type="submit"]');
+        if (!button || button.disabled) return;
+        button.disabled = true;
+        button.textContent = form.dataset.submitLabel;
+        form.setAttribute("aria-busy", "true");
+      });
+    });
+  </script>
+</body>
+</html>

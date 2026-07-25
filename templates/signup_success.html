@@ -1,0 +1,14 @@
+{% extends "auth_base.html" %}
+{% block title %}Account created — Numera{% endblock %}
+{% block auth_content %}
+<div class="success-mark" aria-hidden="true">✓</div>
+<p class="eyebrow">Account created</p>
+<h2 class="auth-title">Welcome to Numera, {{ user.name }}</h2>
+<p class="auth-subtitle">Save this recovery code somewhere private. It is shown only once.</p>
+
+<div class="recovery-code" aria-label="Recovery code">{{ recovery_code }}</div>
+<p class="field-help">You can use it once to reset your password if you forget it.</p>
+
+<a href="/student/analyse" class="button button-primary button-block">Analyse your first paper</a>
+<a href="/student" class="button button-secondary button-block">Go to dashboard</a>
+{% endblock %}

@@ -2,9 +2,9 @@
 {% block title %}Processing {{ version.paper_title }} — Numera{% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto">
-  <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
-    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Student-owned analysis v{{ version.version_number }}</p><h1 class="text-3xl font-bold mt-1">{{ version.paper_title }}</h1><p class="text-slate-600 mt-1">You may leave this page. The version and every completed stage are persisted.</p></div>
-    <span id="job-status" class="badge badge-{{ version.status }}">{{ version.status }}</span>
+  <div class="page-header">
+    <div><p class="eyebrow">Paper analysis · v{{ version.version_number }}</p><h1>{{ version.paper_title }}</h1><p>You can leave this page and return later.</p></div>
+    <span id="job-status" class="badge badge-{{ version.status }}" role="status" aria-live="polite">{{ version.status.replace('_', ' ')|capitalize }}</span>
   </div>
   <section class="card">
     <div class="h-2 rounded-full bg-slate-100 overflow-hidden mb-6"><div id="overall-progress" class="h-full bg-indigo-600 transition-all" style="width:0%"></div></div>
@@ -17,7 +17,7 @@
       {% endfor %}
     </ol>
     <div id="failure" class="hidden mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700"></div>
-    <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 inline-flex bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm font-semibold">Open analysis result →</a>
+    <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 button button-primary">View paper analysis</a>
   </section>
 </div>
 <script>
@@ -27,7 +27,8 @@
     const response = await fetch("/student/analysis/{{ version.id }}/status", {credentials:"same-origin"});
     if (!response.ok) return;
     const job = await response.json();
-    document.getElementById("job-status").textContent = job.status;
+    const visibleStatus = String(job.status || "").replaceAll("_", " ");
+    document.getElementById("job-status").textContent = visibleStatus.charAt(0).toUpperCase() + visibleStatus.slice(1);
     const current = job.current_stage === "completed" ? stages.length : Math.max(0, Number(job.stage_index || 0));
     document.getElementById("overall-progress").style.width = `${Math.round(100 * current / stages.length)}%`;
     document.querySelectorAll("[data-stage]").forEach((node,index) => {

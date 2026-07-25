@@ -3,8 +3,11 @@ import json
 import csv
 import hashlib
 import io
+import sqlite3
 import uuid
+from collections import defaultdict, deque
 from datetime import datetime
+from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -12,8 +15,19 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import config
+from accounts import (
+    count_label,
+    generate_recovery_code,
+    normalize_username,
+    recovery_code_hash,
+    recovery_code_matches,
+    student_explanation,
+    validate_password,
+    validate_username,
+)
 from assessment import (
     compare_papers,
     marks_lost_breakdown,
@@ -33,6 +47,7 @@ from auth import create_session_token, get_current_user, require_researcher, req
 from db import (
     compute_topic_mastery,
     execute,
+    hash_password,
     init_db,
     query_all,
     query_one,
@@ -90,6 +105,47 @@ templates = Jinja2Templates(directory="templates")
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+def rate_limited(
+    request: Request,
+    action: str,
+    limit: int,
+    window_seconds: int = 900,
+) -> bool:
+    client_host = request.client.host if request.client else "unknown"
+    key = f"{action}:{client_host}"
+    now = monotonic()
+    attempts = rate_limit_buckets[key]
+    while attempts and attempts[0] < now - window_seconds:
+        attempts.popleft()
+    if len(attempts) >= limit:
+        return True
+    attempts.append(now)
+    return False
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_page(request: Request, exc: StarletteHTTPException):
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    user = get_current_user(request)
+    return render(
+        request,
+        "error.html",
+        {
+            "user": user,
+            "status_code": exc.status_code,
+            "heading": "Page not found" if exc.status_code == 404 else "Something went wrong",
+            "message": (
+                "The page you’re looking for does not exist."
+                if exc.status_code == 404
+                else "We couldn’t complete that request."
+            ),
+        },
+        status_code=exc.status_code,
+    )
 
 
 @app.middleware("http")
@@ -141,6 +197,9 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "role_label": lambda r: role_label(lang, r),
         "topic_label": lambda top: topic_label(lang, top),
         "question_type_label": lambda key: question_type_label(lang, key),
+        "count_label": count_label,
+        "student_explanation": student_explanation,
+        "current_path": request.url.path,
         "is_researcher": bool(
             context.get("user")
             and user_has_role(context["user"]["id"], "researcher", "owner")
@@ -218,6 +277,19 @@ def pdf_response(content: bytes, filename: str):
     )
 
 
+def set_session_cookie(response, user_id: int):
+    response.set_cookie(
+        "session",
+        create_session_token(user_id),
+        httponly=True,
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
+        max_age=config.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
+    return response
+
+
 @app.get("/lang/{lang_code}")
 def switch_language(lang_code: str, request: Request):
     target = local_redirect_target(request)
@@ -239,31 +311,276 @@ def home(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return render(request, "login.html", {"error": None, "user": None})
+    return render(
+        request,
+        "login.html",
+        {
+            "error": None,
+            "user": None,
+            "identifier": "",
+            "success": request.query_params.get("success"),
+        },
+    )
 
 
 @app.post("/login")
-def login_submit(request: Request, email: str = Form(...), password: str = Form(...)):
-    user = query_one("SELECT * FROM users WHERE email = ?", (email.strip(),))
+def login_submit(
+    request: Request,
+    password: str = Form(...),
+    identifier: str = Form(""),
+    email: str = Form(""),
+):
+    supplied_identifier = (identifier or email).strip()
+    if rate_limited(request, "login", limit=60):
+        return render(
+            request,
+            "login.html",
+            {
+                "error": "Too many sign-in attempts. Please wait and try again.",
+                "user": None,
+                "identifier": supplied_identifier,
+                "success": None,
+            },
+            status_code=429,
+        )
+    normalized = normalize_username(supplied_identifier)
+    user = query_one(
+        """
+        SELECT * FROM users
+        WHERE username_normalized = ? OR lower(email) = ?
+        LIMIT 1
+        """,
+        (normalized, supplied_identifier.lower()),
+    )
     if not user or not verify_password(password, user["password_hash"]):
         return render(
             request,
             "login.html",
-            {"error": strings(get_lang(request))["invalid_login"], "user": None},
+            {
+                "error": "That username or password is not correct.",
+                "user": None,
+                "identifier": supplied_identifier,
+                "success": None,
+            },
             status_code=400,
         )
-    token = create_session_token(user["id"])
     response = RedirectResponse("/", status_code=303)
-    response.set_cookie(
-        "session",
-        token,
-        httponly=True,
-        secure=config.COOKIE_SECURE,
-        samesite="lax",
-        max_age=config.SESSION_MAX_AGE_SECONDS,
-        path="/",
+    return set_session_cookie(response, user["id"])
+
+
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse("/", status_code=303)
+    return render(
+        request,
+        "signup.html",
+        {
+            "user": None,
+            "error": None,
+            "error_field": None,
+            "username": "",
+            "display_name": "",
+        },
     )
-    return response
+
+
+@app.post("/signup", response_class=HTMLResponse)
+def signup_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    password_confirmation: str = Form(...),
+    display_name: str = Form(""),
+):
+    form_context = {
+        "user": None,
+        "username": username.strip(),
+        "display_name": display_name.strip(),
+    }
+    if rate_limited(request, "signup", limit=20):
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": "Too many registration attempts. Please wait and try again.",
+                "error_field": None,
+            },
+            status_code=429,
+        )
+    normalized, username_error = validate_username(username)
+    if username_error:
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": username_error,
+                "error_field": "username",
+            },
+            status_code=400,
+        )
+    password_error = validate_password(password)
+    if password_error:
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": password_error,
+                "error_field": "password",
+            },
+            status_code=400,
+        )
+    if password != password_confirmation:
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": "Passwords do not match.",
+                "error_field": "password_confirmation",
+            },
+            status_code=400,
+        )
+    if query_one(
+        "SELECT 1 FROM users WHERE username_normalized = ?",
+        (normalized,),
+    ):
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": "This username is already taken.",
+                "error_field": "username",
+            },
+            status_code=400,
+        )
+    recovery_code = generate_recovery_code()
+    internal_email = f"student-{uuid.uuid4().hex}@accounts.numera.invalid"
+    original_username = username.strip()
+    safe_display_name = display_name.strip()[:60] or original_username
+    try:
+        user_id = execute(
+            """
+            INSERT INTO users
+            (email, username, username_normalized, password_hash, name, role,
+             recovery_code_hash)
+            VALUES (?, ?, ?, ?, ?, 'student', ?)
+            """,
+            (
+                internal_email,
+                original_username,
+                normalized,
+                hash_password(password),
+                safe_display_name,
+                recovery_code_hash(recovery_code),
+            ),
+        )
+    except sqlite3.IntegrityError:
+        return render(
+            request,
+            "signup.html",
+            {
+                **form_context,
+                "error": "This username is already taken.",
+                "error_field": "username",
+            },
+            status_code=400,
+        )
+    execute(
+        """
+        INSERT INTO user_roles (user_id, role, created_at)
+        VALUES (?, 'student', ?)
+        """,
+        (user_id, datetime.now().isoformat()),
+    )
+    response = render(
+        request,
+        "signup_success.html",
+        {
+            "user": query_one("SELECT * FROM users WHERE id = ?", (user_id,)),
+            "recovery_code": recovery_code,
+        },
+    )
+    return set_session_cookie(response, user_id)
+
+
+@app.get("/recover", response_class=HTMLResponse)
+def recovery_page(request: Request):
+    return render(
+        request,
+        "recover.html",
+        {"user": None, "error": None, "username": ""},
+    )
+
+
+@app.post("/recover", response_class=HTMLResponse)
+def recovery_submit(
+    request: Request,
+    username: str = Form(...),
+    recovery_code: str = Form(...),
+    password: str = Form(...),
+    password_confirmation: str = Form(...),
+):
+    context = {"user": None, "username": username.strip()}
+    if rate_limited(request, "recover", limit=12):
+        return render(
+            request,
+            "recover.html",
+            {
+                **context,
+                "error": "Too many recovery attempts. Please wait and try again.",
+            },
+            status_code=429,
+        )
+    password_error = validate_password(password)
+    if password_error:
+        return render(
+            request,
+            "recover.html",
+            {**context, "error": password_error},
+            status_code=400,
+        )
+    if password != password_confirmation:
+        return render(
+            request,
+            "recover.html",
+            {**context, "error": "Passwords do not match."},
+            status_code=400,
+        )
+    user = query_one(
+        """
+        SELECT * FROM users
+        WHERE username_normalized = ? AND role = 'student'
+        """,
+        (normalize_username(username),),
+    )
+    if not user or not recovery_code_matches(
+        recovery_code,
+        user["recovery_code_hash"],
+    ):
+        return render(
+            request,
+            "recover.html",
+            {
+                **context,
+                "error": "We couldn’t verify that username and recovery code.",
+            },
+            status_code=400,
+        )
+    execute(
+        """
+        UPDATE users
+        SET password_hash = ?, recovery_code_hash = NULL
+        WHERE id = ?
+        """,
+        (hash_password(password), user["id"]),
+    )
+    response = RedirectResponse("/student?recovered=1", status_code=303)
+    return set_session_cookie(response, user["id"])
 
 
 @app.get("/logout")
@@ -1516,7 +1833,89 @@ def student_dashboard(request: Request):
             "attempts": attempts,
             "skill_profile": skill_profile,
             "direct": direct,
+            "notice": (
+                "Your password has been reset."
+                if request.query_params.get("recovered")
+                else None
+            ),
         },
+    )
+
+
+@app.get("/student/settings", response_class=HTMLResponse)
+def student_settings_page(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "student/settings.html",
+        {
+            "user": user,
+            "error": None,
+            "success": request.query_params.get("success"),
+        },
+    )
+
+
+@app.post("/student/settings/profile", response_class=HTMLResponse)
+def student_settings_profile(
+    request: Request,
+    display_name: str = Form(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    cleaned = display_name.strip()
+    if not 1 <= len(cleaned) <= 60:
+        return render(
+            request,
+            "student/settings.html",
+            {
+                "user": user,
+                "error": "Display name must be between 1 and 60 characters.",
+                "success": None,
+            },
+            status_code=400,
+        )
+    execute("UPDATE users SET name = ? WHERE id = ?", (cleaned, user["id"]))
+    return RedirectResponse(
+        "/student/settings?success=profile",
+        status_code=303,
+    )
+
+
+@app.post("/student/settings/password", response_class=HTMLResponse)
+def student_settings_password(
+    request: Request,
+    current_password: str = Form(...),
+    password: str = Form(...),
+    password_confirmation: str = Form(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    error = None
+    if not verify_password(current_password, user["password_hash"]):
+        error = "Your current password is not correct."
+    elif password != password_confirmation:
+        error = "Passwords do not match."
+    else:
+        error = validate_password(password)
+    if error:
+        return render(
+            request,
+            "student/settings.html",
+            {"user": user, "error": error, "success": None},
+            status_code=400,
+        )
+    execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (hash_password(password), user["id"]),
+    )
+    return RedirectResponse(
+        "/student/settings?success=password",
+        status_code=303,
     )
 
 
@@ -2755,7 +3154,11 @@ def research_student_models(request: Request, student_id: Optional[int] = None):
     if not user:
         return redirect_login()
     students = query_all(
-        "SELECT id, name, email FROM users WHERE role = 'student' ORDER BY name"
+        """
+        SELECT id, name, username
+        FROM users WHERE role = 'student'
+        ORDER BY name
+        """
     )
     selected_id = student_id or (students[0]["id"] if students else None)
     observations = query_all(

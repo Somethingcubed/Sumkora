@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import hashlib
 from datetime import datetime, timedelta
 
 import bcrypt
@@ -25,9 +26,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
+            username TEXT,
+            username_normalized TEXT,
             password_hash TEXT NOT NULL,
             name TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('teacher', 'student'))
+            role TEXT NOT NULL CHECK(role IN ('teacher', 'student')),
+            recovery_code_hash TEXT
         );
 
         CREATE TABLE IF NOT EXISTS classes (
@@ -563,6 +567,48 @@ def init_db():
         row["name"]
         for row in conn.execute("PRAGMA table_info(questions)").fetchall()
     }
+    user_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    user_column_defs = {
+        "username": "TEXT",
+        "username_normalized": "TEXT",
+        "recovery_code_hash": "TEXT",
+    }
+    for column, definition in user_column_defs.items():
+        if column not in user_columns:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_normalized
+        ON users(username_normalized)
+        WHERE username_normalized IS NOT NULL
+        """
+    )
+    for row in conn.execute(
+        """
+        SELECT id, email FROM users
+        WHERE role = 'student' AND username_normalized IS NULL
+        """
+    ).fetchall():
+        candidate = row["email"].split("@", 1)[0].strip().lower()
+        if (
+            3 <= len(candidate) <= 24
+            and all(character.isalnum() or character in "_-" for character in candidate)
+            and not conn.execute(
+                "SELECT 1 FROM users WHERE username_normalized = ?",
+                (candidate,),
+            ).fetchone()
+        ):
+            conn.execute(
+                """
+                UPDATE users
+                SET username = ?, username_normalized = ?
+                WHERE id = ?
+                """,
+                (candidate, candidate, row["id"]),
+            )
     if "question_text" not in columns:
         conn.execute(
             "ALTER TABLE questions ADD COLUMN question_text TEXT NOT NULL DEFAULT ''"
@@ -704,11 +750,20 @@ def init_db():
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    digest = hashlib.sha256(password.encode("utf-8")).digest()
+    encoded = bcrypt.hashpw(digest, bcrypt.gensalt()).decode()
+    return f"bcrypt-sha256${encoded}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+    try:
+        if password_hash.startswith("bcrypt-sha256$"):
+            encoded = password_hash.removeprefix("bcrypt-sha256$")
+            digest = hashlib.sha256(password.encode("utf-8")).digest()
+            return bcrypt.checkpw(digest, encoded.encode())
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode())
+    except (ValueError, TypeError):
+        return False
 
 
 def seed_if_empty():
@@ -726,12 +781,20 @@ def seed_if_empty():
         ("teacher@school.edu", teacher_hash, "Ms. Chen", "teacher"),
     )
     conn.execute(
-        "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-        ("student@school.edu", student_hash, "Alex Student", "student"),
+        """
+        INSERT INTO users
+        (email, username, username_normalized, password_hash, name, role)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("student@school.edu", "student", "student", student_hash, "Alex Student", "student"),
     )
     conn.execute(
-        "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-        ("student2@school.edu", student_hash, "Jamie Lee", "student"),
+        """
+        INSERT INTO users
+        (email, username, username_normalized, password_hash, name, role)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("student2@school.edu", "student2", "student2", student_hash, "Jamie Lee", "student"),
     )
 
     teacher_id = conn.execute(

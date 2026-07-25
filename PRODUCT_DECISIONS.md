@@ -21,6 +21,12 @@ Scripts, marks and profiles are personal educational records. Every
 student-facing read is constrained by authenticated `student_id`; a URL alone
 does not grant access. Research access is a different role and export mode.
 
+Students register with a case-insensitive username and password, without email
+or classroom data. Public registration always creates the student role. A
+one-time recovery code is shown once at signup because the product does not
+collect contact details; its digest is stored separately from the password and
+the code is consumed when used.
+
 ## Longitudinal and paper-centered
 
 A single paper is noisy evidence, so profile claims require repeated attempts

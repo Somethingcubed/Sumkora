@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Settings — Numera{% endblock %}
+{% block content %}
+<div class="page-header compact-header">
+  <div>
+    <p class="eyebrow">Your account</p>
+    <h1>Settings</h1>
+    <p>Manage how your name appears and update your password.</p>
+  </div>
+</div>
+
+{% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
+{% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">Your display name has been updated.</div>{% endif %}
+{% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">Your password has been updated.</div>{% endif %}
+
+<div class="settings-grid">
+  <section class="surface">
+    <h2>Profile</h2>
+    <dl class="account-summary">
+      <div><dt>Username</dt><dd>{{ user.username or 'Legacy account' }}</dd></div>
+      <div><dt>Account type</dt><dd>Student</dd></div>
+    </dl>
+    <form method="post" action="/student/settings/profile" class="form-stack mt-6">
+      <label class="form-label" for="display-name">Display name</label>
+      <input class="field" id="display-name" name="display_name" value="{{ user.name }}" maxlength="60" required autocomplete="name">
+      <button class="button button-primary" type="submit">Save profile</button>
+    </form>
+  </section>
+
+  <section class="surface">
+    <h2>Password</h2>
+    <form method="post" action="/student/settings/password" class="form-stack mt-5">
+      <label class="form-label" for="current-password">Current password</label>
+      <input class="field" id="current-password" type="password" name="current_password" autocomplete="current-password" required>
+      <label class="form-label" for="new-password">New password</label>
+      <input class="field" id="new-password" type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+      <label class="form-label" for="new-password-confirmation">Confirm new password</label>
+      <input class="field" id="new-password-confirmation" type="password" name="password_confirmation" minlength="8" maxlength="128" autocomplete="new-password" required>
+      <button class="button button-secondary" type="submit">Update password</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

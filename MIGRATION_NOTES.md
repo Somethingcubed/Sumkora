@@ -80,6 +80,20 @@ SameSite; trusted-host/security-header and same-origin POST middleware were
 added. Multi-role authorization is stored in `user_roles`. The old `users.role`
 column remains for compatibility.
 
+The additive SQLite migration also adds nullable `username`,
+`username_normalized` and `recovery_code_hash` columns plus a partial unique
+index on normalized usernames. Valid, unique legacy student email local-parts
+are backfilled as usernames. New public students receive a UUID-based internal
+placeholder in the still-required legacy `email` column; it is never requested
+from or shown to the student. A later schema migration can make that column
+nullable after all compatibility queries have been removed.
+
+New password values are prefixed `bcrypt-sha256$`: the UTF-8 password is first
+reduced with SHA-256 and the digest is then processed by bcrypt. Verification
+still accepts the inherited raw bcrypt records, so existing credentials remain
+valid. Recovery codes are normalized and stored as HMAC-SHA-256 digests keyed
+by the application secret; a successful reset clears the digest.
+
 ## Legacy records
 
 Legacy 0580 classes, assignments, practice records and importer code remain

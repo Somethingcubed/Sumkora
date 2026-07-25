@@ -20,6 +20,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from accounts import student_explanation
+
 from analytics import (
     analytics_practice,
     difficulty_label,
@@ -408,7 +410,7 @@ def self_service_assessment_report(
         """,
         (version["id"],),
     )
-    title = f"Paper analysis - {paper['title']}"
+    title = f"Paper analysis: {paper['title']}"
     story = [p(title, styles["title"])]
     story.append(
         p(
@@ -422,10 +424,13 @@ def self_service_assessment_report(
     )
     story.append(Spacer(1, 8))
     summary = [
-        ["Confirmed minimum", version["confirmed_min_score"]],
-        ["Provisional score", version["provisional_score"]],
-        ["Possible maximum", version["possible_max_score"]],
-        ["Paper maximum", paper["maximum_marks"]],
+        ["Score", f"{version['provisional_score']} / {paper['maximum_marks']}"],
+        [
+            "Score range",
+            f"{version['confirmed_min_score']} - {version['possible_max_score']}",
+        ],
+        ["Maximum mark", paper["maximum_marks"]],
+        ["Questions analysed", len(rows)],
     ]
     story.append(table(summary, widths=[7 * cm, 8 * cm], header=False, lang=lang))
 
@@ -445,10 +450,10 @@ def self_service_assessment_report(
     story.append(p(", ".join(needs[:8]) or "No clear priority from this paper.", styles["body"]))
 
     story.append(p("Question-by-question analysis", styles["h2"]))
-    data = [["Question", "Topic / skill", "Mark", "Confidence", "Concise explanation"]]
+    data = [["Question", "Topic / skill", "Mark", "What this shows"]]
     for row in rows:
         mark = row["human_mark"] if row["human_mark"] is not None else row["ai_mark"]
-        explanation = row["ai_rationale"]
+        explanation = student_explanation(row["ai_rationale"])
         if row["error_mechanism"]:
             explanation = f"{explanation} Lost marks: {row['error_mechanism']}"
         data.append(
@@ -456,14 +461,13 @@ def self_service_assessment_report(
                 row["question_label"],
                 f"{row['topic']} / {row['skill']}",
                 f"{mark}/{row['maximum_marks']}",
-                f"{round(float(row['ai_confidence'] or 0) * 100)}%",
                 explanation[:420],
             ]
         )
     story.append(
         table(
             data,
-            widths=[2 * cm, 4.1 * cm, 2 * cm, 2.2 * cm, 6.1 * cm],
+            widths=[2 * cm, 4.2 * cm, 2.1 * cm, 8.1 * cm],
             lang=lang,
         )
     )
@@ -492,7 +496,7 @@ def research_experiment_report(experiment_id: int):
         """,
         (experiment_id,),
     )
-    title = f"Research experiment - {experiment['title']}"
+    title = f"Research experiment: {experiment['title']}"
     story = [p(title, styles["title"])]
     story.append(
         p(
@@ -504,9 +508,9 @@ def research_experiment_report(experiment_id: int):
     story.append(
         table(
             [
-                ["Research question", experiment["research_question"]],
-                ["Hypothesis", experiment["hypothesis"]],
-                ["Description", experiment["description"]],
+                ["Research question", experiment["research_question"] or "Not recorded"],
+                ["Hypothesis", experiment["hypothesis"] or "Not recorded"],
+                ["Description", experiment["description"] or "Not recorded"],
             ],
             widths=[4 * cm, 11 * cm],
             header=False,
@@ -527,7 +531,23 @@ def research_experiment_report(experiment_id: int):
     ]
     story.append(table([["Variable", "Value", "Prompt"]] + configuration, widths=[4 * cm, 6 * cm, 6 * cm]))
     story.append(p("Dataset selection", styles["h2"]))
-    story.append(p(experiment["dataset_selection"], styles["small"]))
+    try:
+        dataset_selection = json.loads(experiment["dataset_selection"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        dataset_selection = {"selection": experiment["dataset_selection"]}
+    if dataset_selection:
+        story.append(
+            table(
+                [["Parameter", "Value"]]
+                + [
+                    [str(key).replace("_", " ").capitalize(), json.dumps(value)]
+                    for key, value in dataset_selection.items()
+                ],
+                widths=[5 * cm, 10 * cm],
+            )
+        )
+    else:
+        story.append(p("All eligible records.", styles["body"]))
     story.append(p("Experiment runs and metrics", styles["h2"]))
     run_rows = [["Run", "Status", "Baseline", "Sample size", "Metrics"]]
     for run in runs:
@@ -542,6 +562,8 @@ def research_experiment_report(experiment_id: int):
                 metric_text or run["result_summary"],
             ]
         )
+    if not runs:
+        run_rows.append(["-", "No runs", "-", "n=0", "No evaluation metrics recorded."])
     story.append(
         table(
             run_rows,

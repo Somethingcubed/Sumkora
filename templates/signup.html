@@ -1,0 +1,77 @@
+{% extends "auth_base.html" %}
+{% block title %}Create an account — Numera{% endblock %}
+{% block auth_content %}
+<p class="eyebrow">Start your progress record</p>
+<h2 class="auth-title">Create your Numera account</h2>
+<p class="auth-subtitle">Track your papers, understand where marks were lost, and follow your progress over time.</p>
+
+{% if error %}
+<div class="form-message form-message-error" id="signup-error" role="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/signup" class="form-stack" data-submit-label="Creating account…">
+  <label class="form-label" for="username">Username</label>
+  <input
+    class="field"
+    id="username"
+    name="username"
+    value="{{ username }}"
+    minlength="3"
+    maxlength="24"
+    pattern="[A-Za-z0-9_-]{3,24}"
+    autocomplete="username"
+    autocapitalize="none"
+    spellcheck="false"
+    required
+    aria-describedby="username-help{% if error_field == 'username' %} signup-error{% endif %}"
+  >
+  <p class="field-help" id="username-help">3–24 letters, numbers, underscores, or hyphens.</p>
+
+  <label class="form-label" for="display-name">Display name <span>Optional</span></label>
+  <input
+    class="field"
+    id="display-name"
+    name="display_name"
+    value="{{ display_name }}"
+    maxlength="60"
+    autocomplete="name"
+  >
+
+  <label class="form-label" for="signup-password">Password</label>
+  <div class="password-field">
+    <input
+      class="field"
+      id="signup-password"
+      type="password"
+      name="password"
+      minlength="8"
+      maxlength="128"
+      autocomplete="new-password"
+      required
+      aria-describedby="password-help{% if error_field == 'password' %} signup-error{% endif %}"
+    >
+    <button type="button" data-password-toggle="signup-password" aria-pressed="false">Show</button>
+  </div>
+  <p class="field-help" id="password-help">At least 8 characters.</p>
+
+  <label class="form-label" for="password-confirmation">Confirm password</label>
+  <div class="password-field">
+    <input
+      class="field"
+      id="password-confirmation"
+      type="password"
+      name="password_confirmation"
+      minlength="8"
+      maxlength="128"
+      autocomplete="new-password"
+      required
+      {% if error_field == 'password_confirmation' %}aria-describedby="signup-error"{% endif %}
+    >
+    <button type="button" data-password-toggle="password-confirmation" aria-pressed="false">Show</button>
+  </div>
+
+  <button type="submit" class="button button-primary button-block">Create account</button>
+</form>
+
+<p class="auth-switch">Already have an account? <a href="/login">Log in</a></p>
+{% endblock %}

@@ -13,7 +13,8 @@ Open `http://127.0.0.1:8000`.
 
 ## 2. Student journey
 
-1. Sign in with `student@school.edu` / `student123`.
+1. Sign in with `student` / `student123`, or choose **Create account** to make
+   a student account without an email address.
 2. Choose **Analyse paper**.
 3. Upload a question-paper PDF, completed answer-script PDF or image, and
    mark-scheme PDF. No class or assignment is needed.

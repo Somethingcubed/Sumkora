@@ -2,44 +2,57 @@
 {% block title %}Analyse a paper — Numera{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto">
-  <div class="rounded-2xl bg-gradient-to-br from-indigo-700 to-indigo-900 text-white p-7 mb-6 shadow-lg">
-    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Student self-service</p>
-    <h1 class="text-3xl font-bold mt-2">Analyse a paper</h1>
-    <p class="mt-2 max-w-2xl text-indigo-100">Upload the paper, your completed work, and its mark scheme. Numera will detect the structure, let you correct it, then create a versioned analysis.</p>
+  <div class="page-header">
+    <div>
+      <p class="eyebrow">New paper analysis</p>
+      <h1>Analyse a paper</h1>
+      <p>Add the three files Numera needs to mark your work.</p>
+    </div>
   </div>
 
-  {% if error %}<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 mb-6">{{ error }}</div>{% endif %}
+  {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
 
-  <form method="post" action="/student/analyse" enctype="multipart/form-data" class="card">
-    <div class="grid md:grid-cols-3 gap-5">
-      <label class="upload-tile">
-        <span class="upload-number">1</span>
-        <span class="font-semibold">Question paper</span>
-        <span class="text-xs text-slate-500">PDF · official, mock, school, revision, or custom</span>
-        <input class="mt-4 text-sm" type="file" name="question_paper" accept=".pdf,application/pdf" required>
+  <form method="post" action="/student/analyse" enctype="multipart/form-data" class="surface" data-upload-form>
+    <div class="grid md:grid-cols-3 gap-4">
+      {% for number, title, copy, name, accept in [
+        (1,'Question paper','The original questions in PDF format.','question_paper','.pdf,application/pdf'),
+        (2,'Completed work','Your completed PDF or clear images.','answer_script','.pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*'),
+        (3,'Mark scheme','The marking instructions in PDF format.','mark_scheme','.pdf,application/pdf')
+      ] %}
+      <label class="upload-tile" for="{{ name }}">
+        <span class="upload-number">{{ number }}</span>
+        <span class="font-semibold">{{ title }}</span>
+        <span class="text-sm text-slate-500 mt-1">{{ copy }}</span>
+        <input id="{{ name }}" type="file" name="{{ name }}" accept="{{ accept }}" required data-file-input>
+        <span class="text-xs text-slate-500 mt-2" data-file-status>No file selected</span>
       </label>
-      <label class="upload-tile">
-        <span class="upload-number">2</span>
-        <span class="font-semibold">Completed work</span>
-        <span class="text-xs text-slate-500">PDF, PNG, JPEG, or WebP scan</span>
-        <input class="mt-4 text-sm" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*" required>
-      </label>
-      <label class="upload-tile">
-        <span class="upload-number">3</span>
-        <span class="font-semibold">Mark scheme</span>
-        <span class="text-xs text-slate-500">PDF · required for dependable marking</span>
-        <input class="mt-4 text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf" required>
-      </label>
+      {% endfor %}
     </div>
-    <div class="mt-6 border-t pt-5">
-      <label class="block text-sm font-medium">Custom title <span class="font-normal text-slate-500">(optional)</span>
-        <input name="title" maxlength="160" class="mt-2 w-full border border-slate-300 rounded-xl px-4 py-3" placeholder="e.g. June Additional Mathematics Mock">
-      </label>
+
+    <div class="mt-6 pt-5 border-t border-slate-200">
+      <label class="form-label" for="paper-title">Paper title <span>Optional</span></label>
+      <input id="paper-title" name="title" maxlength="160" class="field" placeholder="June Additional Mathematics mock">
       <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">Each document may be up to 25 MB. Nothing is analysed until you review the detected information.</p>
-        <button class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl text-sm font-semibold">Detect paper information →</button>
+        <p class="text-xs text-slate-500">Maximum file size: 25 MB each.</p>
+        <button type="submit" class="button button-primary" data-submit-button>Review paper details</button>
       </div>
     </div>
   </form>
 </div>
+<script>
+  document.querySelectorAll("[data-file-input]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const status = input.parentElement.querySelector("[data-file-status]");
+      status.textContent = input.files.length ? input.files[0].name : "No file selected";
+      status.classList.toggle("text-emerald-700", input.files.length > 0);
+    });
+  });
+  document.querySelector("[data-upload-form]").addEventListener("submit", (event) => {
+    if (!event.currentTarget.checkValidity()) return;
+    const button = event.currentTarget.querySelector("[data-submit-button]");
+    button.disabled = true;
+    button.textContent = "Preparing your paper…";
+    event.currentTarget.setAttribute("aria-busy", "true");
+  });
+</script>
 {% endblock %}

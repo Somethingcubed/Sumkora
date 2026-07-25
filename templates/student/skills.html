@@ -1,35 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Strengths and weaknesses — Numera{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-1">Strengths and weaknesses</h1>
-<p class="text-slate-600 mb-6">States come from weighted criterion evidence. Untested never means weak.</p>
+<div class="page-header">
+  <div><p class="eyebrow">Your learning profile</p><h1>Strengths and weaknesses</h1><p>Patterns become clearer as you complete more papers.</p></div>
+</div>
 
-<div class="grid lg:grid-cols-2 gap-6 mb-6">
-  <section class="card">
-    <h2 class="font-semibold text-emerald-800">Demonstrated strengths and improvement</h2>
-    <div class="mt-3 space-y-3">
+<div class="grid lg:grid-cols-2 gap-5 mb-5">
+  <section class="surface">
+    <h2 class="text-lg font-semibold">Strengths and improvement</h2>
+    <div class="mt-4 space-y-3">
       {% for item in profile.strengths %}
-      <div class="border rounded-lg p-3"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-final">{{ item.status }}</span></div><p class="text-xs text-slate-500 mt-1">{{ item.evidence_count }} observations across {{ item.distinct_papers }} papers · current estimate {{ (item.current_estimate * 100)|round|int }}%</p></div>
-      {% else %}<p class="text-sm text-slate-500">More repeated evidence is needed before a strength is claimed.</p>{% endfor %}
+      <div class="rounded-xl border border-slate-200 p-4"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-completed">{{ item.status.replace('_', ' ')|capitalize }}</span></div><p class="text-xs text-slate-500 mt-2">{{ count_label(item.evidence_count, 'observation') }} across {{ count_label(item.distinct_papers, 'paper') }}</p></div>
+      {% else %}<p class="text-sm text-slate-500">Complete more papers to build a reliable picture of your strengths.</p>{% endfor %}
     </div>
   </section>
-  <section class="card">
-    <h2 class="font-semibold text-amber-800">Concerns to review</h2>
-    <div class="mt-3 space-y-3">
+  <section class="surface">
+    <h2 class="text-lg font-semibold">Areas to revisit</h2>
+    <div class="mt-4 space-y-3">
       {% for item in profile.concerns %}
-      <div class="border rounded-lg p-3"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-pending">{{ item.status }}</span></div><p class="text-xs text-slate-500 mt-1">{{ item.evidence_count }} observations across {{ item.distinct_papers }} papers · uncertainty ±{{ (item.uncertainty * 100)|round|int }}%</p></div>
-      {% else %}<p class="text-sm text-slate-500">No recurring concern has enough evidence yet.</p>{% endfor %}
+      <div class="rounded-xl border border-slate-200 p-4"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-pending">{{ item.status.replace('_', ' ')|capitalize }}</span></div><p class="text-xs text-slate-500 mt-2">{{ count_label(item.evidence_count, 'observation') }} across {{ count_label(item.distinct_papers, 'paper') }}</p></div>
+      {% else %}<p class="text-sm text-slate-500">No recurring concern is clear yet.</p>{% endfor %}
     </div>
   </section>
 </div>
 
-<section class="card">
-  <h2 class="font-semibold">Syllabus areas not yet evidenced</h2>
-  <p class="text-sm text-slate-500 mt-1">These are coverage gaps, not weaknesses.</p>
+<details class="surface">
+  <summary class="cursor-pointer font-semibold">Not yet covered ({{ profile.untested|length }})</summary>
+  <p class="text-sm text-slate-500 mt-2">These areas have not appeared in enough of your work. They are not weaknesses.</p>
   <div class="mt-4 grid md:grid-cols-2 gap-2">
     {% for item in profile.untested %}
-    <div class="rounded-lg bg-slate-50 border p-3 text-sm"><p class="font-medium">{{ item.skill }}</p><p class="text-slate-500">{{ item.topic }} · untested</p></div>
+    <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm"><p class="font-medium">{{ item.skill }}</p><p class="text-slate-500 mt-1">{{ item.topic }}</p></div>
     {% endfor %}
   </div>
-</section>
+</details>
 {% endblock %}

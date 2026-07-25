@@ -1,35 +1,72 @@
 {% extends "base.html" %}
-{% block title %}Review detected paper — Numera{% endblock %}
+{% block title %}Review paper details — Numera{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto">
-  <div class="flex flex-wrap justify-between gap-4 mb-6">
-    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Analysis v{{ version.version_number }} · review before running</p><h1 class="text-3xl font-bold mt-1">Confirm detected information</h1><p class="text-slate-600 mt-1">Correct anything Numera misunderstood. Your three original documents are already preserved for this version.</p></div>
-    <span class="badge badge-review">Not analysed yet</span>
+  <div class="page-header">
+    <div>
+      <p class="eyebrow">Analysis v{{ version.version_number }}</p>
+      <h1>Review paper details</h1>
+      <p>Check the information below before analysis begins.</p>
+    </div>
+    <span class="badge badge-review">Ready to review</span>
   </div>
-  {% if error %}<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 mb-6">{{ error }}</div>{% endif %}
-  {% if warnings %}<div class="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-6"><p class="font-semibold text-amber-900">Detection notes</p><ul class="list-disc pl-5 mt-2 text-sm text-amber-800">{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul></div>{% endif %}
-  <form method="post" action="/student/analysis/{{ version.id }}/run" class="space-y-6">
-    <section class="card">
-      <h2 class="font-semibold text-lg">Paper details</h2>
+
+  {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
+  {% if warnings %}
+  <details class="surface mb-6">
+    <summary class="cursor-pointer font-semibold">Items to check ({{ warnings|length }})</summary>
+    <ul class="list-disc pl-5 mt-3 text-sm text-slate-600 space-y-1">{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  <form method="post" action="/student/analysis/{{ version.id }}/run" class="space-y-5" data-run-form>
+    <section class="surface">
+      <h2 class="text-lg font-semibold">Paper details</h2>
       <div class="grid md:grid-cols-3 gap-4 mt-4">
-        <label class="md:col-span-2 text-sm font-medium">Title<input class="field" name="title" required value="{{ metadata.title or '' }}"></label>
-        <label class="text-sm font-medium">Syllabus<input class="field" name="syllabus_code" value="{{ metadata.syllabus_code or '0606' }}"></label>
-        <label class="text-sm font-medium">Paper/component<input class="field" name="paper_number" value="{{ metadata.paper_number or '' }}"></label>
-        <label class="text-sm font-medium">Year<input class="field" name="paper_year" inputmode="numeric" value="{{ metadata.paper_year or '' }}"></label>
-        <label class="text-sm font-medium">Session<input class="field" name="examination_session" value="{{ metadata.examination_session or '' }}"></label>
-        <label class="text-sm font-medium">Calculator policy<select class="field" name="calculator_policy"><option value="unknown" {% if metadata.calculator_policy == 'unknown' %}selected{% endif %}>Unknown</option><option value="non-calculator" {% if metadata.calculator_policy == 'non-calculator' %}selected{% endif %}>Non-calculator</option><option value="calculator" {% if metadata.calculator_policy == 'calculator' %}selected{% endif %}>Calculator allowed</option></select></label>
-        <label class="text-sm font-medium">Maximum mark<input class="field" name="maximum_marks" type="number" min="1" step="1" value="{{ metadata.maximum_marks or 0 }}"></label>
-        <label class="text-sm font-medium">Paper type<select class="field" name="source_type"><option value="custom">Custom / school paper</option><option value="official" {% if metadata.source_type == 'official' %}selected{% endif %}>Official Cambridge paper</option><option value="mock">Mock examination</option><option value="revision">Revision paper</option></select></label>
+        <label class="md:col-span-2 form-label">Title<input class="field" name="title" required value="{{ metadata.title or '' }}"></label>
+        <label class="form-label">Syllabus<input class="field" name="syllabus_code" value="{{ metadata.syllabus_code or '0606' }}"></label>
+        <label class="form-label">Paper or component<input class="field" name="paper_number" value="{{ metadata.paper_number or '' }}"></label>
+        <label class="form-label">Year<input class="field" name="paper_year" inputmode="numeric" value="{{ metadata.paper_year or '' }}"></label>
+        <label class="form-label">Session<input class="field" name="examination_session" value="{{ metadata.examination_session or '' }}"></label>
+        <label class="form-label">Calculator use<select class="field" name="calculator_policy"><option value="unknown" {% if metadata.calculator_policy == 'unknown' %}selected{% endif %}>Not specified</option><option value="non-calculator" {% if metadata.calculator_policy == 'non-calculator' %}selected{% endif %}>Not allowed</option><option value="calculator" {% if metadata.calculator_policy == 'calculator' %}selected{% endif %}>Allowed</option></select></label>
+        <label class="form-label">Maximum mark<input class="field" name="maximum_marks" type="number" min="1" step="1" value="{{ metadata.maximum_marks or 0 }}"></label>
+        <label class="form-label">Paper type<select class="field" name="source_type"><option value="custom">Custom or school paper</option><option value="official" {% if metadata.source_type == 'official' %}selected{% endif %}>Official Cambridge paper</option><option value="mock" {% if metadata.source_type == 'mock' %}selected{% endif %}>Mock examination</option><option value="revision" {% if metadata.source_type == 'revision' %}selected{% endif %}>Revision paper</option></select></label>
       </div>
     </section>
-    <section class="card">
-      <div class="flex justify-between gap-3"><div><h2 class="font-semibold text-lg">Question mapping</h2><p class="text-sm text-slate-500 mt-1">Advanced review: edit labels, marks, answer pages, topics, question text, scheme text, or criteria as JSON.</p></div><span class="text-xs text-slate-500">{{ questions|length }} detected</span></div>
-      <textarea name="question_plan" rows="22" spellcheck="false" class="mt-4 w-full rounded-xl border border-slate-300 bg-slate-950 text-slate-100 p-4 font-mono text-xs leading-5">{{ question_plan_json }}</textarea>
+
+    <section class="surface">
+      <div class="flex flex-wrap justify-between gap-3">
+        <div><h2 class="text-lg font-semibold">Questions found</h2><p class="text-sm text-slate-500 mt-1">{{ count_label(questions|length, 'question') }} detected</p></div>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+        {% for question in questions %}
+        <div class="rounded-xl border border-slate-200 p-3">
+          <div class="flex justify-between gap-3"><p class="font-medium">{{ question.label }}</p><p class="text-sm">{{ question.maximum_marks }} marks</p></div>
+          <p class="text-xs text-slate-500 mt-1">{{ question.topic or 'Topic not identified' }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <details class="mt-5 rounded-xl border border-slate-200 p-4">
+        <summary class="cursor-pointer font-medium text-sm">Edit question mapping</summary>
+        <p class="text-xs text-slate-500 mt-2">Use this only if a question, page, mark, or topic was detected incorrectly.</p>
+        <label class="sr-only" for="question-plan">Question mapping JSON</label>
+        <textarea id="question-plan" name="question_plan" rows="18" spellcheck="false" class="mt-4 w-full rounded-xl border border-slate-300 bg-slate-950 text-slate-100 p-4 font-mono text-xs leading-5">{{ question_plan_json }}</textarea>
+      </details>
     </section>
-    <div class="sticky bottom-4 rounded-2xl border border-indigo-200 bg-white/95 backdrop-blur p-4 shadow-xl flex flex-wrap justify-between items-center gap-3">
-      <p class="text-sm text-slate-600">Running creates analysis v{{ version.version_number }}. Earlier versions are never overwritten.</p>
-      <button class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl text-sm font-semibold">Confirm and run analysis →</button>
+
+    <div class="sticky bottom-3 surface flex flex-wrap justify-between items-center gap-3 shadow-lg">
+      <p class="text-sm text-slate-500">You can return to this paper and run a new version later.</p>
+      <button class="button button-primary" type="submit" data-run-button>Run analysis</button>
     </div>
   </form>
 </div>
+<script>
+  document.querySelector("[data-run-form]").addEventListener("submit", (event) => {
+    if (!event.currentTarget.checkValidity()) return;
+    const button = event.currentTarget.querySelector("[data-run-button]");
+    button.disabled = true;
+    button.textContent = "Starting analysis…";
+    event.currentTarget.setAttribute("aria-busy", "true");
+  });
+</script>
 {% endblock %}

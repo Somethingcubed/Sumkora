@@ -22,11 +22,13 @@ Open `http://127.0.0.1:8000`.
 Development accounts:
 
 - Researcher: `teacher@school.edu` / `teacher123`
-- Student: `student@school.edu` / `student123`
+- Student: `student` / `student123`
 
 The research credential keeps its inherited email and internal `teacher`
 compatibility role, but the active product has no teacher or classroom
-experience.
+experience. New students choose **Create account** and register with only a
+username, an optional display name and a password; Numera does not ask them
+for an email address.
 
 Add the deterministic longitudinal demo with:
 

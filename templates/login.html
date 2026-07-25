@@ -1,36 +1,49 @@
-<!DOCTYPE html>
-<html lang="{{ lang }}">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ t.sign_in }} — Numera</title>
-  <link rel="stylesheet" href="/static/tailwind.css">
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body class="bg-slate-100 min-h-screen flex items-center justify-center">
-  <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-md relative">
-    <a href="/lang/{{ other_lang }}" class="absolute top-4 right-4 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-2 py-1 rounded text-xs font-medium">{{ t.lang_switch }}</a>
-    <p class="text-xs font-semibold uppercase tracking-widest text-indigo-500 mb-2">Cambridge IGCSE 0606</p>
-    <h1 class="text-2xl font-bold text-indigo-800 mb-2">Numera</h1>
-    <p class="text-slate-600 text-sm mb-6">Evidence-based marking and progress for Additional Mathematics.</p>
-    {% if error %}
-    <div class="bg-red-50 text-red-700 px-3 py-2 rounded mb-4 text-sm">{{ error }}</div>
-    {% endif %}
-    <form method="post" action="/login" class="space-y-4">
-      <div>
-        <label class="block text-sm font-medium mb-1">{{ t.email }}</label>
-        <input type="email" name="email" required class="w-full border rounded-lg px-3 py-2" placeholder="teacher@school.edu">
-      </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">{{ t.password }}</label>
-        <input type="password" name="password" required class="w-full border rounded-lg px-3 py-2" placeholder="••••••••">
-      </div>
-      <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">{{ t.sign_in }}</button>
-    </form>
-    <div class="mt-6 text-xs text-slate-500 border-t pt-4 space-y-1">
-    <p><strong>Demo researcher:</strong> teacher@school.edu / teacher123</p>
-      <p><strong>{{ t.demo_student }}</strong> student@school.edu / student123</p>
-    </div>
+{% extends "auth_base.html" %}
+{% block title %}Log in — Numera{% endblock %}
+{% block auth_content %}
+<p class="eyebrow">Welcome back</p>
+<h2 class="auth-title">Log in to Numera</h2>
+<p class="auth-subtitle">Continue to your papers and progress.</p>
+
+{% if success %}
+<div class="form-message form-message-success" role="status">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="form-message form-message-error" id="login-error" role="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/login" class="form-stack" data-submit-label="Logging in…">
+  <label class="form-label" for="identifier">Username or email</label>
+  <input
+    class="field"
+    id="identifier"
+    name="identifier"
+    value="{{ identifier }}"
+    autocomplete="username"
+    autocapitalize="none"
+    spellcheck="false"
+    required
+    {% if error %}aria-describedby="login-error"{% endif %}
+  >
+
+  <div class="label-row">
+    <label class="form-label" for="login-password">Password</label>
+    <a href="/recover" class="quiet-link">Forgot password?</a>
   </div>
-</body>
-</html>
+  <div class="password-field">
+    <input
+      class="field"
+      id="login-password"
+      type="password"
+      name="password"
+      autocomplete="current-password"
+      required
+    >
+    <button type="button" data-password-toggle="login-password" aria-pressed="false">Show</button>
+  </div>
+
+  <button type="submit" class="button button-primary button-block">Log in</button>
+</form>
+
+<p class="auth-switch">New to Numera? <a href="/signup">Create an account</a></p>
+{% endblock %}

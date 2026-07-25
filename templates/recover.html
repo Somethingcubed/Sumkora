@@ -1,0 +1,29 @@
+{% extends "auth_base.html" %}
+{% block title %}Reset password — Numera{% endblock %}
+{% block auth_content %}
+<p class="eyebrow">Account recovery</p>
+<h2 class="auth-title">Reset your password</h2>
+<p class="auth-subtitle">Use the one-time recovery code you saved when you created your account.</p>
+
+{% if error %}
+<div class="form-message form-message-error" id="recovery-error" role="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/recover" class="form-stack" data-submit-label="Resetting password…">
+  <label class="form-label" for="recovery-username">Username</label>
+  <input class="field" id="recovery-username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" required>
+
+  <label class="form-label" for="recovery-code">Recovery code</label>
+  <input class="field recovery-input" id="recovery-code" name="recovery_code" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+
+  <label class="form-label" for="recovery-password">New password</label>
+  <input class="field" id="recovery-password" type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+
+  <label class="form-label" for="recovery-confirmation">Confirm new password</label>
+  <input class="field" id="recovery-confirmation" type="password" name="password_confirmation" minlength="8" maxlength="128" autocomplete="new-password" required>
+
+  <button type="submit" class="button button-primary button-block">Reset password</button>
+</form>
+
+<p class="auth-switch"><a href="/login">Back to login</a></p>
+{% endblock %}
