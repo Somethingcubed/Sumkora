@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from datetime import datetime
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from db import execute, hash_password, query_all, query_one
 from main import app
+from pdf_utils import get_page_image_base64
 
 
 client = TestClient(app)
@@ -20,6 +22,21 @@ def pdf_bytes(text: str) -> bytes:
     payload = document.tobytes()
     document.close()
     return payload
+
+
+def test_metadata_rotated_scans_render_upright(tmp_path):
+    path = tmp_path / "rotated-scan.pdf"
+    document = fitz.open()
+    page = document.new_page(width=842, height=1191)
+    page.insert_text((72, 120), "Question 1")
+    page.set_rotation(270)
+    document.save(path)
+    document.close()
+
+    rendered = fitz.Pixmap(
+        base64.b64decode(get_page_image_base64(str(path), 1, 90))
+    )
+    assert rendered.height > rendered.width
 
 
 def create_user(email: str, role: str):
@@ -131,6 +148,66 @@ def test_student_self_service_without_class_and_three_document_upload():
     )["n"] >= 1
 
 
+def test_upload_validation_handles_duplicates_invalid_and_unicode_files():
+    create_user("validation@student.local", "student")
+    login("validation@student.local")
+    repeated = pdf_bytes("Repeated document")
+    duplicate = client.post(
+        "/student/analyse",
+        files={
+            "question_paper": ("question.pdf", repeated, "application/pdf"),
+            "answer_script": ("answers.pdf", repeated, "application/pdf"),
+            "mark_scheme": ("scheme.pdf", repeated, "application/pdf"),
+        },
+        follow_redirects=False,
+    )
+    assert duplicate.status_code == 400
+    assert "different document" in duplicate.text
+
+    invalid = client.post(
+        "/student/analyse",
+        files={
+            "question_paper": ("question.pdf", b"not a pdf", "application/pdf"),
+            "answer_script": (
+                "answers.pdf",
+                pdf_bytes("Q1 answer"),
+                "application/pdf",
+            ),
+            "mark_scheme": (
+                "scheme.pdf",
+                pdf_bytes("Q1 mark scheme"),
+                "application/pdf",
+            ),
+        },
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 400
+    assert "valid PDF" in invalid.text
+
+    unicode_upload = client.post(
+        "/student/analyse",
+        files={
+            "question_paper": (
+                "试题卷.pdf",
+                pdf_bytes("Q1 Differentiate x squared. [2]"),
+                "application/pdf",
+            ),
+            "answer_script": (
+                "已完成的答卷.pdf",
+                pdf_bytes("Q1 2x"),
+                "application/pdf",
+            ),
+            "mark_scheme": (
+                "评分标准.pdf",
+                pdf_bytes("Q1 M1 power rule A1 2x [2]"),
+                "application/pdf",
+            ),
+        },
+        follow_redirects=False,
+    )
+    assert unicode_upload.status_code == 303
+
+
 def test_direct_results_are_owned_and_legacy_teacher_routes_are_archived():
     owner_id = create_user("owner-v2@research.local", "teacher")
     execute(
@@ -207,6 +284,31 @@ def test_rerun_preserves_versions_and_original_results():
         )
     ]
     assert preserved == original_results
+
+
+def test_failed_analysis_hides_provider_details_and_offers_retry():
+    create_user("retry@student.local", "student")
+    paper, version, _ = upload_direct_paper("retry@student.local")
+    execute(
+        """
+        UPDATE paper_analysis_versions
+        SET status = 'failed',
+            failure_message = 'HTTP 503 from provider-internal.example'
+        WHERE id = ?
+        """,
+        (version["id"],),
+    )
+
+    status = client.get(f"/student/analysis/{version['id']}/status")
+    assert status.status_code == 200
+    assert status.json()["status"] == "failed"
+    assert "provider-internal" not in status.json()["failure_message"]
+    assert "Try again" in status.json()["failure_message"]
+
+    page = client.get(f"/student/analysis/{version['id']}/processing")
+    assert page.status_code == 200
+    assert f'href="/student/papers/{paper["id"]}/rerun"' in page.text
+    assert "Try again" in page.text
 
 
 def test_multiple_experiments_edit_run_and_separate_human_label():
@@ -298,17 +400,22 @@ def test_student_and_research_pdfs_render():
         f"/student/papers/{paper['id']}/report?version={version['id']}"
     )
     assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert 'filename="sumkora-' in disposition
+    assert disposition.endswith('-paper-report.pdf"')
     student_pdf = fitz.open(stream=response.content, filetype="pdf")
     assert len(student_pdf) >= 1
     assert all(page.rect.width > 500 and page.rect.height > 700 for page in student_pdf)
-    assert "Paper analysis" in "".join(page.get_text() for page in student_pdf)
+    student_text = "".join(page.get_text() for page in student_pdf)
+    assert "Paper analysis" in student_text
+    assert "Sumkora" in student_text
     assert all(
         0 <= block[0] <= block[2] <= page.rect.width
         and 0 <= block[1] <= block[3] <= page.rect.height
         for page in student_pdf
         for block in page.get_text("blocks")
     )
-    qa_dir = os.getenv("NUMERA_PDF_QA_DIR")
+    qa_dir = os.getenv("SUMKORA_PDF_QA_DIR") or os.getenv("NUMERA_PDF_QA_DIR")
     if qa_dir:
         Path(qa_dir).mkdir(parents=True, exist_ok=True)
         Path(qa_dir, "student-report.pdf").write_bytes(response.content)
@@ -330,9 +437,15 @@ def test_student_and_research_pdfs_render():
         f"/research/experiments/{experiment_id}/report"
     )
     assert research_pdf.status_code == 200
+    assert (
+        f"sumkora-research-experiment-{experiment_id}-report.pdf"
+        in research_pdf.headers["content-disposition"]
+    )
     document = fitz.open(stream=research_pdf.content, filetype="pdf")
     assert len(document) >= 1
-    assert "Research experiment" in "".join(page.get_text() for page in document)
+    research_text = "".join(page.get_text() for page in document)
+    assert "Research experiment" in research_text
+    assert "Sumkora" in research_text
     assert all(
         0 <= block[0] <= block[2] <= page.rect.width
         and 0 <= block[1] <= block[3] <= page.rect.height

@@ -1,5 +1,5 @@
 {
-  "name": "numera-frontend-assets",
+  "name": "sumkora-frontend-assets",
   "private": true,
   "scripts": {
     "build:css": "tailwindcss -i ./static/tailwind-input.css -o ./static/tailwind.css --minify",

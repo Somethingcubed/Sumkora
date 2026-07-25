@@ -1,10 +1,10 @@
 # Deployment guide
 
-## Current public-site relationship
+## Current public deployment
 
-`https://numera.coze.site` is a separate 0580-era Next.js/Coze prototype. No
-deployment manifest or API configuration in this repository connects to it.
-Do not overwrite it without owner approval and a data-migration plan.
+The active public website is `https://sumkora.com`, deployed from this
+repository to a single Railway service in Singapore. A separate 0580-era
+prototype remains historical and is not part of the deployment.
 
 ## Recommended production architecture
 
@@ -19,8 +19,8 @@ after its privacy and authentication behavior is approved.
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-docker build -t numera:local .
-docker run --rm -p 8000:8000 --env-file .env numera:local
+docker build -t sumkora:local .
+docker run --rm -p 8000:8000 --env-file .env sumkora:local
 ```
 
 Without Docker:
@@ -37,7 +37,7 @@ Required:
 - `APP_ENV=production`
 - `SECRET_KEY` as a long random secret
 - `COOKIE_SECURE=true`
-- `TRUSTED_HOSTS=app.example.com`
+- `TRUSTED_HOSTS=sumkora.com`
 - `DB_PATH` only for a single-instance pilot; replace with a PostgreSQL URL
 - private object-store endpoint/bucket/access credentials after adapter work
 - `CXSEE_API_KEY`, `CXSEE_BASE_URL`
@@ -47,7 +47,7 @@ Required:
 
 Never put secrets in the image, Git, browser bundle or Coze page.
 
-## Required platform work before public use
+## Required platform work before broader public use
 
 1. Add versioned PostgreSQL migrations and convert SQLite queries/adapters.
 2. Implement the S3/R2 storage adapter, encryption, retention and deletion.
@@ -65,11 +65,6 @@ object storage, set environment variables, run migrations, then map the chosen
 domain's CNAME/A record to the platform and enforce HTTPS. Add the exact host
 to `TRUSTED_HOSTS`.
 
-For Coze, first create a separate staging deployment, configure secrets through
-its environment-variable workflow, validate private database/storage and
-backup/export behavior, then connect a custom domain using Coze's documented
-domain settings. Do not upload real scripts during this evaluation.
-
 ## Alternative pilot
 
 A single HTTPS container with a persistent volume can demonstrate the system
@@ -79,10 +74,10 @@ launch architecture.
 
 ## Unresolved owner/account actions
 
-- Choose hosting region/vendor and public domain.
-- Approve Coze's role or keep the existing prototype unchanged.
 - Approve provider student-data terms and retention.
 - Provision PostgreSQL, Redis, object storage and deployment credentials.
 - Decide retention/deletion policy and user onboarding/account recovery.
 
-No public deployment was performed in this session.
+The current pilot is deployed at `https://sumkora.com`. Production changes are
+uploaded manually with the Railway CLI; no automatic Git deployment source is
+connected.

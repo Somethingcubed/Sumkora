@@ -4,16 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
-  <title>{% block title %}Numera{% endblock %}</title>
+  <meta name="theme-color" content="#312e81">
+  <title>{% block title %}Sumkora{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Understand every mathematics paper and build on every result with Sumkora.{% endblock %}">
+  <link rel="canonical" href="https://sumkora.com{{ request.url.path }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sumkora">
+  <meta property="og:title" content="{{ self.title()|striptags }}">
+  <meta property="og:description" content="{{ self.meta_description()|striptags }}">
+  <meta property="og:url" content="https://sumkora.com{{ request.url.path }}">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/static/site.webmanifest">
   <link rel="stylesheet" href="/static/tailwind.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="auth-page">
   <main class="auth-layout">
-    <section class="auth-brand" aria-label="{{ tr('About Numera', '关于 Numera') }}">
-      <a class="brand-mark" href="/" aria-label="{{ tr('Numera home', 'Numera 首页') }}">
-        <span class="brand-symbol" aria-hidden="true">N</span>
-        <span>Numera</span>
+    <section class="auth-brand" aria-label="{{ tr('About Sumkora', '关于 Sumkora') }}">
+      <a class="brand-mark" href="/" aria-label="{{ tr('Sumkora home', 'Sumkora 首页') }}">
+        <span class="brand-symbol" aria-hidden="true">S</span>
+        <span>Sumkora</span>
       </a>
       <div class="auth-brand-copy">
         <p class="eyebrow eyebrow-light">{{ tr('Mathematics, made clearer', '让数学学习更清晰') }}</p>

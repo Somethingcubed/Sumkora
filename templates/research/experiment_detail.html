@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ experiment.title }} — Numera Research{% endblock %}
+{% block title %}{{ experiment.title }} — Sumkora research{% endblock %}
 {% block content %}
 <div class="flex flex-wrap justify-between gap-4 mb-6"><div><div class="flex gap-2 items-center"><p class="text-xs uppercase tracking-[0.18em] text-indigo-600 font-semibold">Experiment {{ experiment.id }}</p><span class="badge badge-{{ experiment.status }}">{{ experiment.status.replace('_', ' ')|capitalize }}</span></div><h1 class="text-3xl font-bold mt-2">{{ experiment.title }}</h1><p class="text-slate-600 mt-1">{{ experiment.research_question }}</p></div><div class="flex gap-2"><a href="/research/experiments/{{ experiment.id }}/report" class="border px-4 py-2 rounded-lg text-sm">PDF report</a><a href="/research/experiments/{{ experiment.id }}/edit" class="border px-4 py-2 rounded-lg text-sm">Edit</a><form method="post" action="/research/experiments/{{ experiment.id }}/duplicate"><button class="border px-4 py-2 rounded-lg text-sm">Duplicate</button></form><form method="post" action="/research/experiments/{{ experiment.id }}/run"><button class="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm">Run evaluation</button></form></div></div>
 <div class="grid lg:grid-cols-3 gap-6">

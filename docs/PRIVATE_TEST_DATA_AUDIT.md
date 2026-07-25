@@ -6,7 +6,9 @@ Audit date: 25 July 2026
 
 Four owner-provided PDFs were copied into ignored local storage. Each file has
 two raster pages with 270-degree rotation metadata, handwriting and red
-teacher annotations; no useful native text layer was present.
+teacher annotations; no useful native text layer was present. The shared page
+renderer now normalizes these pages to portrait before OCR and evidence
+preview generation without altering the source files.
 
 - `20260422125354420_0001.pdf`
 - `20260422125354420_0002 (1).pdf`
@@ -26,10 +28,10 @@ authorization; the fallback model returned a usable transcription.
 ## Official 0606 material
 
 The seven supplied October/November 2025 files contain components 11, 12 and
-13 question papers/mark schemes plus a grade-threshold file. They have native
-text and zero-degree rotation. The local importer registered three packs and
-produced 77 question/subpart rows and 260 criterion rows, all marked
-`parsed_requires_review`.
+13 question papers/mark schemes plus a grade-threshold file. They are
+zero-degree portrait scans without a useful native text layer. The local
+importer registered three packs and produced 77 question/subpart rows and 260
+criterion rows, all marked `parsed_requires_review`.
 
 ## Handling
 

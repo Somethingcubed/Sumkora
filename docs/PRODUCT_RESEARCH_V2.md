@@ -41,9 +41,9 @@ Sources:
 Product consequence: keep the requested latest model as primary, but record
 fallbacks and surface availability instead of silently switching models.
 
-## Current Coze prototype
+## Historical prototype
 
-`https://numera.coze.site` is reachable and presents a separate Next.js,
+The previous public prototype is reachable and presents a separate Next.js,
 0580-era student tracker with login, dashboard analytics, recommendations and
 assignments. No local configuration establishes a build or data connection
 between it and this repository.
@@ -55,7 +55,7 @@ terms also make independent backup and retention planning important.
 
 Sources:
 
-- [Current Numera prototype](https://numera.coze.site)
+- Previous prototype retained as historical product evidence
 - [Coze Space](https://www.coze.com/space)
 - [Coze CLI package documentation](https://www.npmjs.com/package/@coze/cli)
 - [Coze privacy policy](https://www.coze.com/legal/privacy)

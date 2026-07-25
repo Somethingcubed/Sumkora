@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 
-TEST_ROOT = tempfile.mkdtemp(prefix="numera-tests-")
+TEST_ROOT = tempfile.mkdtemp(prefix="sumkora-tests-")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["DB_PATH"] = os.path.join(TEST_ROOT, "test.db")
 os.environ["UPLOAD_DIR"] = os.path.join(TEST_ROOT, "uploads")

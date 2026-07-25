@@ -1,176 +1,127 @@
-# Numera student signup and interface refinement status
+# Sumkora release-candidate status
 
 Updated: 25 July 2026
 
-## Outcome
+## Starting state and safety checkpoint
 
-The inherited FastAPI prototype has been preserved and upgraded in place.
-Numera now has exactly two active experiences: a public student assessment
-product and a separate private researcher/owner workbench. Students can create
-their own username-based accounts without providing email, class or teacher
-details. The class, assignment and teacher-review product is archived from
-active routing.
+- Starting commit: `1a3e9e4100c9705d53a4223412df8096129be70d`
+- Previous branch: `feat/numera-0606-upgrade`
+- Release branch: `chore/sumkora-release-candidate`
+- Public site: `https://sumkora.com`
+- Deployment: manual Railway upload; no automatic Git source is connected.
+- Runtime: one Singapore service, one persistent volume, SQLite and private
+  local uploads.
+- `.env`, databases, uploads, private papers, API documents and PDFs are
+  ignored by both Git and the deployment image.
+- A local database backup was created under `/tmp`. Railway could not download
+  the production database because the account has no SSH key, so the
+  production volume was not touched.
 
-This is a tested development build, not a production deployment.
+## Changes made
 
-## What worked before this refinement
+### Product rename
 
-- FastAPI, Jinja, SQLite and a compact Tailwind-style interface.
-- Separate teacher/student logins, classes, assignments and uploads.
-- Page rendering, OCR adapters, AI-assisted whole-question marking.
-- Teacher review, final marks, reports and basic student analytics.
-- An inherited 0580 ingest path and regression harness.
+- All active page titles, navigation, authentication, student/research copy,
+  bilingual strings, API metadata, PDF footers, filenames and active
+  documentation now use Sumkora.
+- Added canonical `https://sumkora.com` URLs, Open Graph metadata, a Sumkora
+  manifest and an accessible S favicon.
+- New internal placeholder emails use `accounts.sumkora.invalid`.
+- Student reports use `sumkora-...-paper-report.pdf`; progress and research
+  reports use equivalent Sumkora names.
+- `MIGRATION_NOTES.md` records the previous public name.
 
-## What changed and now works
+### OCR and pipeline
 
-- Public student registration asks only for a username, optional display name,
-  password and confirmation. It can never create a researcher account.
-- Usernames are trimmed, validated, unique and matched case-insensitively.
-  Existing students can sign in with their migrated username; the inherited
-  researcher continues to use the private email credential.
-- New password hashes use a versioned SHA-256-plus-bcrypt construction that
-  handles Unicode and long passwords safely. Existing bcrypt hashes continue
-  to verify and are not invalidated.
-- Each new student receives a high-entropy recovery code that is shown once,
-  stored only as a keyed digest and consumed after a successful reset.
-- Login, signup and recovery endpoints have practical per-IP throttling for
-  this single-process development build.
-- Students upload a question paper, completed work and mark scheme directly;
-  no title, syllabus, component, year, session, class, assignment, teacher
-  registration or approval is required.
-- Analysis starts immediately after upload. Paper metadata and top-level
-  questions are inferred automatically from OCR/native text, reconciled across
-  the question paper and mark scheme, naturally sorted and matched to answer
-  pages without exposing editable mapping JSON to students.
-- Official 0606, mocks and custom mathematics papers share the same path.
-- Reruns create immutable analysis versions and can replace any source file.
-- Each version retains OCR, AI decisions, evidence, models, prompts and score
-  range; the latest version drives the current longitudinal profile.
-- Backend ownership checks protect student results and PDF downloads.
-- Research access is a separate `researcher`/`owner` role. The inherited
-  internal `teacher` role remains a temporary compatibility alias only.
-- `/teacher` is disabled at middleware level; the researcher lands on
-  `/research` and sees no classroom functionality.
-- Same-origin POST checks, trusted hosts, security headers, timed cookies and
-  production-secure-cookie configuration were added.
-- Uploads have size/page validation, hashes, rotation warnings, processing
-  stages, failure states and status polling.
-- CXSee calls record model, prompt version, raw response, warnings and timing.
-- Marking evidence is persisted at criterion level; uncertain marks produce
-  confirmed/provisional/possible score ranges.
-- Marks lost are grouped by topic, subtopic, skill, category and mechanism.
-- A recency-weighted Beta evidence model distinguishes early signal,
-  recurring concern, improving, secure/strong and untested.
-- Students have paper history, comparison, skill and question-evidence pages.
-- Researchers can create, edit, duplicate, archive and run multiple configured
-  experiments; inspect OCR and grading evidence; preserve separate human
-  labels; tag failures; rebuild profiles; version taxonomies; and export
-  identified, pseudonymized or anonymized CSV/JSON/JSONL datasets.
-- Student and technical experiment PDFs are distinct report types.
-- The auth, student and research surfaces now share a restrained design system,
-  consistent navigation, sentence-case copy, labelled fields, visible focus
-  states, progressive disclosure and responsive layouts.
-- A persistent `EN / 中文` control restores bilingual authentication,
-  navigation and principal student workflows for students in China.
-- The inherited demo researcher is displayed as Oscar.
-- Local Tailwind CSS replaces the fragile development CDN.
+- Fixed sideways OCR/evidence rendering for scanner PDFs with 90/270-degree
+  rotation metadata while preserving genuine landscape pages.
+- The original PDFs remain unchanged.
+- Live benchmark calls recorded the requested/actual model, fallback and
+  latency without logging secrets or raw private transcriptions.
+- Failed analysis status now hides provider/internal details and provides a
+  clear retry route.
 
-## Live versus deterministic behavior
+### Upload and privacy
 
-- Live CXSee authentication and model listing succeeded with the local key.
-- `qwen-vl-ocr-latest` is configured as primary, but was not in the provider's
-  returned model list and returned HTTP 503 during the check.
-- `qwen-vl-ocr` also returned 503. The auditable fallback
-  `qwen3-vl-plus` successfully transcribed both a synthetic image and one
-  owner-authorized private scan page.
-- Automated grading tests disable external providers and are deterministic.
-- The supplied official pack parser is real but conservative: all extracted
-  records remain `parsed_requires_review`.
+- Added duplicate-document detection across question paper, completed work and
+  mark scheme.
+- Verified invalid PDFs, empty/size limits and Unicode filenames.
+- Preserved ownership checks for result pages, original documents, PDFs and
+  research routes.
 
-## Commands
+### Interface and reports
+
+- Preserved the existing restrained design rather than redesigning it.
+- Verified zero-paper dashboard, upload, paper, comparison, skills, settings
+  and research pages at desktop, tablet and mobile sizes.
+- Removed internal corrected-mapping wording from the student report.
+- Rendered and inspected student and research PDFs with Sumkora footers.
+
+## Test results
+
+- `.venv/bin/pytest -q`: 26 passed.
+- `.venv/bin/python scripts/regression_checks.py`: 10 checks passed.
+- `.venv/bin/python scripts/demo_flow.py`: completed and finalized a demo
+  submission.
+- `pnpm build`: passed.
+- Python compile check: passed.
+- Live OCR subset: 2 unique pages, 13 selected checks; primary unavailable,
+  fallback completed. See `docs/OCR_BENCHMARK.md`.
+- Browser audit: principal local student and research routes had no old-brand
+  text, horizontal overflow or console warnings/errors.
+- PDF render: both sample files passed text-bound checks and PNG inspection.
+
+## Intentionally retained legacy identifiers
+
+These are not shown to students or researchers:
+
+1. `auth.py` keeps the `numera-session-v2` signing salt so existing sessions
+   remain valid.
+2. OCR readers accept the old `_numera` metadata key so stored runs remain
+   readable; new runs write `_sumkora`.
+3. The PDF QA test accepts the old `NUMERA_PDF_QA_DIR` variable as a fallback;
+   the active variable is `SUMKORA_PDF_QA_DIR`.
+4. `numera` remains a reserved username to prevent impersonation of old links
+   or support identities.
+5. Existing older student rows may retain hidden
+   `@accounts.numera.invalid` placeholders; new rows use the Sumkora domain.
+6. Railway's internal project/service names and generated
+   `RAILWAY_SERVICE_NUMERA_URL` remain unchanged to avoid unnecessary
+   deployment-resource churn. The public host and canonical URL are Sumkora.
+7. The previous Railway subdomain remains a compatibility address but is not
+   linked from the public product.
+8. The single previous-name sentence in `MIGRATION_NOTES.md` is intentional
+   project history.
+
+## Known limitations
+
+- The configured primary OCR model was unavailable in the measured live calls;
+  fallback processing took 31-88 seconds per sampled page.
+- The two-page OCR benchmark is evidence, not a general accuracy claim.
+- The grading gold set is synthetic and too small for examiner-level claims.
+- Processing is an in-process background task; a restart can interrupt it.
+- SQLite and local volume storage support only a small single-instance pilot.
+- Recovery codes have no email fallback; loss requires manual owner help.
+- Shared rate limiting, malware scanning, MFA and durable worker cancellation
+  are not implemented.
+- Provider student-data terms/retention and PyMuPDF licensing require review.
+
+## Exact verification commands
 
 ```bash
 cd "/Users/oscar/Desktop/Math /IGCSE Math AnAn"
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-pnpm install --frozen-lockfile
+.venv/bin/pytest -q
+.venv/bin/python scripts/regression_checks.py
+.venv/bin/python scripts/demo_flow.py
+.venv/bin/python -m compileall -q . -x '(.venv|node_modules|tmp|data)'
 pnpm build
-.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+SUMKORA_PDF_QA_DIR=output/pdf .venv/bin/pytest -q \
+  tests/test_v2_refinement.py::test_student_and_research_pdfs_render
+pdftoppm -png -r 120 output/pdf/student-report.pdf tmp/pdfs/student-report
+pdftoppm -png -r 120 output/pdf/research-report.pdf tmp/pdfs/research-report
 ```
 
-Combined repeat start after dependencies are installed:
+## Deployment status
 
-```bash
-pnpm build && .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-## Verification
-
-- `.venv/bin/pytest -q`: 22 passed.
-- `.venv/bin/python scripts/regression_checks.py`: 10 checks passed,
-  including archived teacher-route mutation checks.
-- Python compile check: passed.
-- Tailwind production build: passed.
-- Browser checks cover the principal auth, student and research pages at
-  390 px mobile and 1440 px desktop widths with no horizontal overflow or
-  console errors.
-- Both report types were rendered and visually inspected; automated checks
-  also verify that report text stays inside page bounds.
-- Tests cover signup validation, case-insensitive uniqueness/login, Unicode
-  password hashing, single-use recovery, direct upload without classes,
-  ownership, researcher isolation, rerun preservation, experiments, human
-  labels, content conventions and PDF generation.
-- No PDF or API key is tracked by Git.
-
-## Database and deployment
-
-SQLite runtime migrations preserve the local prototype database. Legacy 0580
-records remain available for migration/audit but are filtered out of new 0606
-student analytics. Production still needs PostgreSQL migrations, a durable job
-queue and private object storage. The Dockerfile and environment contract make
-the app deployable once those adapters and hosting accounts are configured.
-No public deployment was attempted because owner permission was not given.
-
-## Known limitations and security concerns
-
-- Paper-to-question detection is heuristic. It now combines OCR/native text
-  from both source documents and answer-page labels, but unusual layouts still
-  need inspection in the private research workbench.
-- Direct processing is sequential and runs in the web process; a durable queue
-  with progress cancellation is still required for production.
-- The experiment runner currently evaluates saved configuration snapshots
-  against available human labels. It does not yet batch-rerun external models,
-  pause/cancel running jobs or provide a full image-level A/B execution engine.
-- The OCR lab records corrections and evaluation labels, but enhanced/cropped
-  image previews and one-click OCR reruns are not yet implemented.
-- Run comparison is presently configuration/metric/version comparison rather
-  than a complete changed/improved/worsened question diff interface.
-- Dataset selection is stored as editable structured configuration; reusable
-  named dataset-builder UI is incomplete.
-- Taxonomies are versioned, but granular topic/skill mapping editing remains
-  incomplete.
-- Processing runs in a web-process background task; restarts can interrupt it.
-- SQLite and local private storage are development-only for multiple servers.
-- Recovery depends on the one-time code. A lost or already-consumed code
-  currently requires a manual account reset; there is deliberately no
-  email-based recovery.
-- Rate limits are held in process memory. A multi-server deployment needs a
-  shared durable limiter. MFA, invite workflows and malware scanning are not
-  implemented.
-- Username moderation uses a conservative fixed reserved-name list, not a
-  comprehensive language or abuse-screening service.
-- Provider data residency/retention must be approved before real student use.
-- PyMuPDF's AGPL/commercial licensing must be reviewed for the deployment.
-- The mark scheme is intentionally required; no weaker mark-scheme-free mode is
-  exposed.
-
-## Next five priorities
-
-1. Build durable, cancellable experiment/OCR/grading workers with true model
-   A/B reruns and question-level diffs.
-2. Add enhanced/cropped image assets and side-by-side OCR comparison.
-3. Complete the reusable visual dataset builder and granular taxonomy editor.
-4. Move to PostgreSQL, private object storage, a durable worker queue and a
-   shared rate limiter.
-5. Complete privacy/security review, malware scanning, recovery-code
-   regeneration/MFA and production deployment under HTTPS.
+The release candidate has not yet been uploaded. The final deployment and
+post-deployment smoke-test result will be recorded before handoff.

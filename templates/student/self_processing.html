@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ tr('Analysing', '正在分析') }} {{ version.paper_title }} — Numera{% endblock %}
+{% block title %}{{ tr('Analysing', '正在分析') }} {{ version.paper_title }} — Sumkora{% endblock %}
 {% block content %}
 {% set stage_labels = {
   'validation': tr('Checking files', '检查文件'),
@@ -27,6 +27,7 @@
       {% endfor %}
     </ol>
     <div id="failure" class="hidden mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700"></div>
+    <a id="retry-link" href="/student/papers/{{ version.student_paper_id }}/rerun" class="hidden mt-4 button button-secondary">{{ tr('Try again', '重试') }}</a>
     <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 button button-primary">{{ tr('View paper analysis', '查看试卷分析') }}</a>
   </section>
 </div>
@@ -52,7 +53,13 @@
       else if (index === current && job.status === "processing") { dot.className="stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse"; note.textContent={{ tr('In progress', '进行中')|tojson }}; }
     });
     if (job.status === "completed") { document.getElementById("overall-progress").style.width="100%"; document.getElementById("result-link").classList.remove("hidden"); return; }
-    if (job.status === "failed") { const el=document.getElementById("failure"); el.textContent=job.failure_message || {{ tr('Analysis failed. Your files and previous versions are safe.', '分析失败。你的文件和之前的版本仍然安全。')|tojson }}; el.classList.remove("hidden"); return; }
+    if (job.status === "failed") {
+      const el=document.getElementById("failure");
+      el.textContent=job.failure_message || {{ tr('We could not complete this analysis. Try again; your files and previous results are safe.', '无法完成此次分析。请重试；你的文件和之前的结果仍然安全。')|tojson }};
+      el.classList.remove("hidden");
+      document.getElementById("retry-link").classList.remove("hidden");
+      return;
+    }
     window.setTimeout(refresh,1500);
   }
   refresh();

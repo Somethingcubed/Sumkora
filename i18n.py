@@ -1,6 +1,6 @@
 STRINGS = {
     "en": {
-        "app_name": "Numera",
+        "app_name": "Sumkora",
         "app_tagline": "Evidence-based marking and progress for Cambridge IGCSE Additional Mathematics 0606.",
         "email": "Email",
         "student": "Student",
@@ -204,7 +204,7 @@ STRINGS = {
         "students": "students",
     },
     "zh": {
-        "app_name": "Numera",
+        "app_name": "Sumkora",
         "app_tagline": "Cambridge IGCSE 附加数学 0606 的证据化批改与学习进展平台。",
         "email": "邮箱",
         "student": "学生",

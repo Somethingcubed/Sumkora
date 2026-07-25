@@ -25,15 +25,15 @@ Live result: authentication/model listing worked; requested
 succeeded as an auditable fallback. Unanswered: contractual retention, data
 residency, student-data terms, published rate limits and latest-model rollout.
 
-## Coze and comparable product evidence
+## Historical prototype and comparable product evidence
 
-- [Current Numera Coze prototype](https://numera.coze.site)
+- The previous Coze prototype is retained only as historical product evidence.
 - [Coze Space](https://www.coze.com/space)
 - [`@coze/cli`](https://www.npmjs.com/package/@coze/cli)
 - [Coze privacy policy](https://www.coze.com/legal/privacy)
 
-The public site is useful product/UI evidence, not a verified deployment of
-this repository. No competitor source code or proprietary content was copied.
+That historical site is not a deployment of this repository. No competitor
+source code or proprietary content was copied.
 A broader competitor benchmark was intentionally deferred in favor of
 implementation and security testing.
 

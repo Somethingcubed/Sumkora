@@ -60,7 +60,7 @@ def demo_pdf(component: str) -> bytes:
     page.insert_text(
         (72, 72),
         (
-            f"Numera 0606 synthetic paper {component}\n"
+            f"Sumkora 0606 synthetic paper {component}\n"
             "Q1: differentiation working\n"
             "Q2: integration working\n"
             "Q3: algebra working\n"
@@ -94,7 +94,7 @@ def seed_paper(
     days_ago: int,
     marks: tuple[int, int, int],
 ) -> int:
-    title = f"[Numera 0606 Demo] Paper {component}"
+    title = f"[Sumkora 0606 Demo] Paper {component}"
     assignment = query_one(
         "SELECT id FROM assignments WHERE class_id = ? AND title = ?",
         (class_id, title),
@@ -194,7 +194,7 @@ def seed_paper(
         conn.close()
     else:
         path = save_upload(
-            f"numera_0606_demo_{component}.pdf",
+            f"sumkora_0606_demo_{component}.pdf",
             demo_pdf(component),
         )
         submission_id = execute(
@@ -261,7 +261,7 @@ def main():
         for paper in PAPERS
     ]
     print(
-        "Seeded Numera 0606 longitudinal demo submissions: "
+        "Seeded Sumkora 0606 longitudinal demo submissions: "
         + ", ".join(str(item) for item in submission_ids)
     )
 

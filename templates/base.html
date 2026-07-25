@@ -4,7 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#312e81">
   <title>{% block title %}{{ t.app_name }}{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Private mathematics paper analysis and progress evidence for students.{% endblock %}">
+  <link rel="canonical" href="https://sumkora.com{{ request.url.path }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sumkora">
+  <meta property="og:title" content="{{ self.title()|striptags }}">
+  <meta property="og:description" content="{{ self.meta_description()|striptags }}">
+  <meta property="og:url" content="https://sumkora.com{{ request.url.path }}">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/static/site.webmanifest">
   <link rel="stylesheet" href="/static/tailwind.css">
   <script>
     window.MathJax = {
@@ -19,9 +29,9 @@
   <a href="#main-content" class="skip-link">{{ tr('Skip to content', '跳至主要内容') }}</a>
   <header class="app-header">
     <div class="nav-shell">
-      <a href="/" class="brand-mark" aria-label="{{ tr('Numera home', 'Numera 首页') }}">
-        <span class="brand-symbol" aria-hidden="true">N</span>
-        <span>Numera</span>
+      <a href="/" class="brand-mark" aria-label="{{ tr('Sumkora home', 'Sumkora 首页') }}">
+        <span class="brand-symbol" aria-hidden="true">S</span>
+        <span>Sumkora</span>
       </a>
 
       {% if user %}

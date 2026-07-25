@@ -117,7 +117,7 @@ def draw_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#64748b"))
-    canvas.drawString(1.5 * cm, 1.0 * cm, "Numera")
+    canvas.drawString(1.5 * cm, 1.0 * cm, "Sumkora")
     canvas.drawRightString(A4[0] - 1.5 * cm, 1.0 * cm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -474,7 +474,7 @@ def self_service_assessment_report(
     story.append(p("Interpretation", styles["h2"]))
     story.append(
         p(
-            "Scores with uncertainty are ranges, not hidden precision. Reanalyse with a clearer scan or corrected mapping when evidence is weak.",
+            "Scores with uncertainty are ranges, not hidden precision. Reanalyse with a clearer scan or review the paper when evidence is weak.",
             styles["body"],
         )
     )

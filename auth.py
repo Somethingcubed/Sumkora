@@ -6,6 +6,8 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import config
 from db import get_user_by_id, user_has_role
 
+# This legacy salt is intentionally retained so the public-name migration
+# does not invalidate existing signed sessions.
 serializer = URLSafeTimedSerializer(config.SECRET_KEY, salt="numera-session-v2")
 
 

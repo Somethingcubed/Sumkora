@@ -1,9 +1,9 @@
 {% extends "auth_base.html" %}
-{% block title %}{{ tr('Account created', '账号已创建') }} — Numera{% endblock %}
+{% block title %}{{ tr('Account created', '账号已创建') }} — Sumkora{% endblock %}
 {% block auth_content %}
 <div class="success-mark" aria-hidden="true">✓</div>
 <p class="eyebrow">{{ tr('Account created', '账号已创建') }}</p>
-<h2 class="auth-title">{{ tr('Welcome to Numera', '欢迎使用 Numera') }}，{{ user.name }}</h2>
+<h2 class="auth-title">{{ tr('Welcome to Sumkora', '欢迎使用 Sumkora') }}，{{ user.name }}</h2>
 <p class="auth-subtitle">{{ tr('Save this recovery code somewhere private. It is shown only once.', '请将此恢复码保存在安全的地方。它只显示一次。') }}</p>
 
 <div class="recovery-code" aria-label="Recovery code">{{ recovery_code }}</div>

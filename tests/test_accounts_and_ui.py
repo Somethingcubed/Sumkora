@@ -57,7 +57,7 @@ def test_student_signup_needs_no_email_and_creates_only_student_access():
         "SELECT * FROM users WHERE username_normalized = 'paperpilot'"
     )
     assert user["role"] == "student"
-    assert user["email"].endswith("@accounts.numera.invalid")
+    assert user["email"].endswith("@accounts.sumkora.invalid")
     roles = [
         row["role"]
         for row in query_all(
@@ -260,7 +260,7 @@ def test_language_switch_translates_the_student_product():
     client.cookies.clear()
     client.get("/lang/zh", headers={"referer": "http://testserver/signup"})
     signup = client.get("/signup")
-    assert "创建 Numera 账号" in signup.text
+    assert "创建 Sumkora 账号" in signup.text
     assert 'href="/lang/en"' in signup.text
     assert 'href="/lang/zh"' in signup.text
 
@@ -269,6 +269,20 @@ def test_language_switch_translates_the_student_product():
     dashboard = client.get("/student")
     assert "从一份已完成的试卷开始" in dashboard.text
     assert "分析试卷" in dashboard.text
+
+
+def test_sumkora_branding_metadata_and_assets_are_consistent():
+    client.cookies.clear()
+    login_page = client.get("/login")
+    assert login_page.status_code == 200
+    assert "<title>Log in — Sumkora</title>" in login_page.text
+    assert 'rel="canonical" href="https://sumkora.com/login"' in login_page.text
+    assert 'property="og:site_name" content="Sumkora"' in login_page.text
+    assert "Numera" not in login_page.text
+    assert client.get("/static/favicon.svg").status_code == 200
+    manifest = client.get("/static/site.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.json()["name"] == "Sumkora"
 
 
 def test_existing_student_and_researcher_logins_still_work():

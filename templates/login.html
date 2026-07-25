@@ -1,8 +1,8 @@
 {% extends "auth_base.html" %}
-{% block title %}{{ tr('Log in', '登录') }} — Numera{% endblock %}
+{% block title %}{{ tr('Log in', '登录') }} — Sumkora{% endblock %}
 {% block auth_content %}
 <p class="eyebrow">{{ tr('Welcome back', '欢迎回来') }}</p>
-<h2 class="auth-title">{{ tr('Log in to Numera', '登录 Numera') }}</h2>
+<h2 class="auth-title">{{ tr('Log in to Sumkora', '登录 Sumkora') }}</h2>
 <p class="auth-subtitle">{{ tr('Continue to your papers and progress.', '继续查看你的试卷与学习进展。') }}</p>
 
 {% if success %}
@@ -45,5 +45,5 @@
   <button type="submit" class="button button-primary button-block">{{ tr('Log in', '登录') }}</button>
 </form>
 
-<p class="auth-switch">{{ tr('New to Numera?', '第一次使用 Numera？') }} <a href="/signup">{{ tr('Create an account', '创建账号') }}</a></p>
+<p class="auth-switch">{{ tr('New to Sumkora?', '第一次使用 Sumkora？') }} <a href="/signup">{{ tr('Create an account', '创建账号') }}</a></p>
 {% endblock %}

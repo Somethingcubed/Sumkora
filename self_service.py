@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -17,6 +19,9 @@ from db import execute, query_all, query_one
 from grading import grade_question
 from ocr import cxsee_vl_ocr_detailed
 from pdf_utils import get_page_image_base64, is_valid_pdf, save_upload
+
+
+logger = logging.getLogger(__name__)
 
 
 SELF_SERVICE_STAGES = [
@@ -383,6 +388,12 @@ def create_student_paper_draft(
     mark_scheme_filename: str,
     mark_scheme_content: bytes,
 ) -> tuple[int, int]:
+    document_hashes = {
+        hashlib.sha256(content).hexdigest()
+        for content in (question_content, answer_content, mark_scheme_content)
+    }
+    if len(document_hashes) != 3:
+        raise ValueError("Each upload must be a different document.")
     if not is_valid_pdf(question_content):
         raise ValueError("Question paper must be a valid PDF.")
     if not is_valid_pdf(mark_scheme_content):
@@ -637,7 +648,11 @@ def _extract_analysis_document(
                     text = vision_text
                     confidence = vision_confidence or 0.0
                     provider = "cxsee"
-                    meta = raw.get("_numera", {}) if isinstance(raw, dict) else {}
+                    meta = (
+                        raw.get("_sumkora", raw.get("_numera", {}))
+                        if isinstance(raw, dict)
+                        else {}
+                    )
                     model = meta.get("used_model", version["ocr_model"])
                     if meta.get("warning"):
                         warnings.append(meta["warning"])
@@ -977,6 +992,11 @@ def run_self_service_analysis(version_id: int) -> dict:
         )
         return {"status": "completed", "paper_id": version["student_paper_id"]}
     except Exception as exc:
+        logger.exception("Paper analysis version %s failed", version_id)
+        public_message = (
+            "We could not complete this analysis. Try again; your files and "
+            "previous results are safe."
+        )
         execute(
             """
             UPDATE paper_analysis_versions
@@ -984,13 +1004,13 @@ def run_self_service_analysis(version_id: int) -> dict:
                 finished_at = ?
             WHERE id = ?
             """,
-            (str(exc), now_iso(), now_iso(), version_id),
+            (public_message, now_iso(), now_iso(), version_id),
         )
         execute(
             "UPDATE student_papers SET status = 'failed', updated_at = ? WHERE id = ?",
             (now_iso(), version["student_paper_id"]),
         )
-        return {"status": "failed", "error": str(exc)}
+        return {"status": "failed", "error": public_message}
 
 
 def student_owned_papers(student_id: int):

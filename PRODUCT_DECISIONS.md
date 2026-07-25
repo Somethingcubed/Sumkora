@@ -5,7 +5,7 @@
 The repository already had most of the classroom and assessment workflow.
 The reliable assessment and authentication foundations were extended in place,
 while the obsolete teacher/classroom experience was removed from the active
-product. Numera now has exactly two meaningful surfaces: the student product
+product. Sumkora now has exactly two meaningful surfaces: the student product
 and a private researcher workbench.
 
 ## Student-owned attempts
@@ -30,7 +30,7 @@ the code is consumed when used.
 ## Automatic paper detection
 
 Students provide only the question paper, completed work and mark scheme.
-Numera detects paper metadata and top-level questions during processing,
+Sumkora detects paper metadata and top-level questions during processing,
 reconciles the question paper with the mark scheme, and uses OCR labels to
 match answer pages. The internal mapping remains available to researchers but
 is not presented as a student form or editable JSON.
@@ -50,7 +50,7 @@ question, criterion and excerpt.
 
 ## Untested is not weak
 
-No evidence is different from evidence of error. Numera lists untouched 0606
+No evidence is different from evidence of error. Sumkora lists untouched 0606
 skills as `untested` and does not infer a weakness from absence. A first error
 is an early signal; recurrence needs multiple papers.
 

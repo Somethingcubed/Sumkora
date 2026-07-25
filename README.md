@@ -1,6 +1,6 @@
-# Numera
+# Sumkora
 
-Numera is an evidence-based Cambridge IGCSE Additional Mathematics 0606
+Sumkora is an evidence-based Cambridge IGCSE Additional Mathematics 0606
 assessment application. Students upload completed papers, inspect
 question/criterion evidence, compare attempts and build a longitudinal
 strengths-and-weaknesses profile. A separate private researcher workbench
@@ -27,7 +27,7 @@ Development accounts:
 The research credential keeps its inherited email and internal `teacher`
 compatibility role, but the active product has no teacher or classroom
 experience. New students choose **Create account** and register with only a
-username, an optional display name and a password; Numera does not ask them
+username, an optional display name and a password; Sumkora does not ask them
 for an email address. The active authentication and student experience can be
 switched between English and Simplified Chinese from the persistent `EN / 中文`
 control.

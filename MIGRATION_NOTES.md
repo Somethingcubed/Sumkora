@@ -1,5 +1,7 @@
 # Migration notes
 
+Numera was the previous project name. The public product is now Sumkora.
+
 ## Preserved foundations
 
 The FastAPI/Jinja monolith, login/session implementation, PDF rendering, OCR

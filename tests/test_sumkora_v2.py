@@ -1,3 +1,5 @@
+"""Compatibility and evidence-model tests for the Sumkora v2 application."""
+
 from datetime import datetime, timedelta
 
 import fitz

@@ -12,6 +12,7 @@ import fitz
 
 import config
 from db import execute, query_all, query_one
+from pdf_utils import page_render_matrix
 
 OCR_PROMPT = (
     "Transcribe this IGCSE mathematics student-work page. Preserve visible "
@@ -59,7 +60,8 @@ def render_page_base64(path: str, page_number: int) -> str:
         return ""
     index = max(0, min(page_number - 1, len(doc) - 1))
     page = doc.load_page(index)
-    pix = page.get_pixmap(dpi=getattr(config, "OCR_RENDER_DPI", 200))
+    dpi = getattr(config, "OCR_RENDER_DPI", 200)
+    pix = page.get_pixmap(matrix=page_render_matrix(page, dpi))
     data = base64.b64encode(pix.tobytes("png")).decode("ascii")
     doc.close()
     return data
@@ -230,7 +232,7 @@ def cxsee_vl_ocr_detailed(image_b64: str) -> tuple[str, Optional[float], dict]:
     for candidate in candidates:
         try:
             result = cxsee_chat_completion(candidate, content)
-            result["_numera"] = {
+            result["_sumkora"] = {
                 "requested_model": model,
                 "used_model": candidate,
                 **(
@@ -449,7 +451,10 @@ def run_submission_ocr(submission_id: int, pdf_path: str, force: bool = False):
             if provider == "cxsee_vl":
                 run_id = start_model_run(submission_id, "ocr", model)
                 text, confidence, raw_result = cxsee_vl_ocr_detailed(image_b64)
-                provider_meta = raw_result.get("_numera", {})
+                provider_meta = raw_result.get(
+                    "_sumkora",
+                    raw_result.get("_numera", {}),
+                )
                 model = provider_meta.get("used_model", model)
             else:
                 text, confidence = run_page_ocr(provider, image_b64)

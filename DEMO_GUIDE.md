@@ -1,4 +1,4 @@
-# Numera demo guide
+# Sumkora demo guide
 
 ## 1. Start the application
 
@@ -18,7 +18,7 @@ Open `http://127.0.0.1:8000`.
 2. Choose **Analyse paper**.
 3. Upload a question-paper PDF, completed answer-script PDF or image, and
    mark-scheme PDF. No title, paper metadata, class or assignment is needed.
-4. Analysis starts immediately. Numera reads the documents, detects naturally
+4. Analysis starts immediately. Sumkora reads the documents, detects naturally
    ordered top-level questions and matches answer pages during OCR.
 5. Follow the processing stages to the paper result. Inspect the score range,
    marks lost, question evidence and concise recommendations.
@@ -56,4 +56,4 @@ Open `http://127.0.0.1:8000`.
 - Paper B: repeated error → recurring concern.
 - Paper C: success → improving.
 
-The same transitions are asserted in `tests/test_numera_v2.py`.
+The same transitions are asserted in `tests/test_sumkora_v2.py`.

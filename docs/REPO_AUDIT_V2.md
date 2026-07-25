@@ -7,7 +7,7 @@ Audit date: 25 July 2026
 The original archive remains at `/Users/oscar/Desktop/IGCSE Math AnAn.zip`.
 It was extracted into a new working directory. Git was initialized, the
 unmodified imported state was committed as `00b0ed3`, and work continued on
-`feat/numera-0606-upgrade`.
+the previous feature checkpoint.
 
 ## Existing architecture
 
@@ -29,7 +29,7 @@ unmodified imported state was committed as `00b0ed3`, and work continued on
 The imported application already supported teacher/student login, separate
 classes, published assignments, student/bulk uploads, OCR caching, AI grading,
 teacher review and overrides, reports, dashboards and an 11-check regression
-harness. The public `numera.coze.site` prototype exposes a similar 0580-era
+harness. The historical public prototype exposes a similar 0580-era
 student experience but is a separate Next.js/Coze deployment; no repository
 configuration links this FastAPI source to it.
 

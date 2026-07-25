@@ -100,7 +100,13 @@ seed_if_empty()
 for warning in getattr(config, "CONFIG_WARNINGS", []):
     print(f"CONFIG WARNING: {warning}")
 
-app = FastAPI(title="Numera - Cambridge IGCSE Additional Mathematics 0606")
+app = FastAPI(
+    title="Sumkora - Cambridge IGCSE Additional Mathematics 0606",
+    description=(
+        "Private paper analysis and progress evidence for Cambridge IGCSE "
+        "Additional Mathematics students."
+    ),
+)
 templates = Jinja2Templates(directory="templates")
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -460,7 +466,7 @@ def signup_submit(
             status_code=400,
         )
     recovery_code = generate_recovery_code()
-    internal_email = f"student-{uuid.uuid4().hex}@accounts.numera.invalid"
+    internal_email = f"student-{uuid.uuid4().hex}@accounts.sumkora.invalid"
     original_username = username.strip()
     safe_display_name = display_name.strip()[:60] or original_username
     try:
@@ -781,11 +787,21 @@ def student_self_service_status(request: Request, version_id: int):
     version = _owned_analysis_version(user["id"], version_id)
     if not version:
         return JSONResponse({"detail": "Not found."}, status_code=404)
+    failure_message = None
+    if version["status"] == "failed":
+        failure_message = (
+            "无法完成此次分析。请重试；你的文件和之前的结果仍然安全。"
+            if get_lang(request) == "zh"
+            else (
+                "We could not complete this analysis. Try again; your files "
+                "and previous results are safe."
+            )
+        )
     return {
         "status": version["status"],
         "current_stage": version["current_stage"],
         "stage_index": version["stage_index"],
-        "failure_message": version["failure_message"],
+        "failure_message": failure_message,
         "paper_id": version["student_paper_id"],
         "version_number": version["version_number"],
     }
@@ -858,7 +874,7 @@ def student_self_service_report(
         return JSONResponse({"detail": "Report is not available."}, status_code=404)
     return pdf_response(
         content,
-        f"{safe_filename(paper['title'])}-analysis.pdf",
+        f"sumkora-{safe_filename(paper['title'])}-paper-report.pdf",
     )
 
 
@@ -953,7 +969,10 @@ def student_paper_document(
     return FileResponse(
         path,
         media_type="application/pdf",
-        filename=f"numera-{document_type}-v{result['version']['version_number']}.pdf",
+        filename=(
+            f"sumkora-{document_type}-"
+            f"v{result['version']['version_number']}.pdf"
+        ),
     )
 
 
@@ -1897,7 +1916,10 @@ def student_profile_report(request: Request):
     if not user:
         return redirect_login()
     content = profile_report(user["id"], lang=get_lang(request), variant="student")
-    return pdf_response(content, f"{safe_filename(user['name'])}-profile.pdf")
+    return pdf_response(
+        content,
+        f"sumkora-{safe_filename(user['name'])}-progress-report.pdf",
+    )
 
 
 @app.get("/student/assignments/{assignment_id}", response_class=HTMLResponse)
@@ -2141,7 +2163,10 @@ def student_assessment_report(request: Request, submission_id: int):
     content = assessment_report(submission_id, lang=get_lang(request), variant="student")
     return pdf_response(
         content,
-        f"{safe_filename(user['name'])}-{safe_filename(submission['assignment_title'])}.pdf",
+        (
+            f"sumkora-{safe_filename(user['name'])}-"
+            f"{safe_filename(submission['assignment_title'])}-paper-report.pdf"
+        ),
     )
 
 
@@ -2287,7 +2312,7 @@ def student_submission_file(request: Request, submission_id: int):
     return FileResponse(
         submission["file_path"],
         media_type="application/pdf",
-        filename=f"numera-submission-{submission_id}.pdf",
+        filename=f"sumkora-submission-{submission_id}.pdf",
     )
 
 
@@ -2628,7 +2653,7 @@ def research_experiment_pdf(request: Request, experiment_id: int):
         return JSONResponse({"detail": "Not found."}, status_code=404)
     return pdf_response(
         content,
-        f"numera-experiment-{experiment_id}.pdf",
+        f"sumkora-research-experiment-{experiment_id}-report.pdf",
     )
 
 
@@ -3359,7 +3384,7 @@ def research_export(
         media_type=media_type,
         headers={
             "Content-Disposition": (
-                f'attachment; filename="numera-{dataset}-{mode}.{suffix}"'
+                f'attachment; filename="sumkora-{dataset}-{mode}.{suffix}"'
             )
         },
     )

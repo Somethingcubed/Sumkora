@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Student-model laboratory — Numera Research{% endblock %}
+{% block title %}Student-model laboratory — Sumkora research{% endblock %}
 {% block content %}
 <div class="flex flex-wrap justify-between gap-4 mb-6"><div><p class="text-xs uppercase tracking-[0.18em] text-indigo-600 font-semibold">Derived evidence model</p><h1 class="text-3xl font-bold mt-1">Student-model laboratory</h1><p class="text-slate-600 mt-1">Inspect raw observations and rebuild derived states.</p></div><form method="get"><label class="sr-only" for="student-model-student">Student</label><select id="student-model-student" name="student_id" class="field" onchange="this.form.submit()">{% for student in students %}<option value="{{ student.id }}" {% if student.id == selected_id %}selected{% endif %}>{{ student.name }}{% if student.username %} · @{{ student.username }}{% endif %}</option>{% endfor %}</select></form></div>
 {% if selected_id %}<form method="post" action="/research/student-models/{{ selected_id }}/rebuild" class="mb-6"><button class="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm">Rebuild profile from raw observations</button></form>{% endif %}

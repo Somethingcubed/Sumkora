@@ -14,6 +14,8 @@ RESERVED_USERNAMES = {
     "help",
     "login",
     "moderator",
+    # Keep the previous product name reserved so it cannot be used to
+    # impersonate historical support links or accounts.
     "numera",
     "owner",
     "research",
@@ -21,6 +23,7 @@ RESERVED_USERNAMES = {
     "root",
     "signup",
     "staff",
+    "sumkora",
     "support",
     "system",
     "teacher",
