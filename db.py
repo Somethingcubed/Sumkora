@@ -14,6 +14,7 @@ def connect():
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -120,6 +121,237 @@ def init_db():
             text TEXT NOT NULL,
             source TEXT DEFAULT 'seed'
         );
+
+        CREATE TABLE IF NOT EXISTS user_roles (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK(role IN ('student', 'teacher', 'researcher', 'owner')),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, role)
+        );
+
+        CREATE TABLE IF NOT EXISTS paper_packs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            syllabus_code TEXT NOT NULL DEFAULT '0606',
+            syllabus_version TEXT NOT NULL DEFAULT '2025-2027',
+            year INTEGER NOT NULL,
+            examination_session TEXT NOT NULL,
+            component TEXT NOT NULL,
+            paper_number TEXT NOT NULL,
+            calculator_policy TEXT NOT NULL CHECK(calculator_policy IN ('calculator', 'non-calculator', 'unknown')),
+            maximum_marks INTEGER NOT NULL DEFAULT 80,
+            question_paper_path TEXT,
+            mark_scheme_path TEXT,
+            grade_threshold_path TEXT,
+            question_paper_hash TEXT,
+            mark_scheme_hash TEXT,
+            threshold_hash TEXT,
+            provenance TEXT NOT NULL DEFAULT '',
+            ingestion_status TEXT NOT NULL DEFAULT 'registered',
+            parser_version TEXT NOT NULL DEFAULT 'paper-pack-v1',
+            parsing_confidence REAL,
+            raw_metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(syllabus_code, year, examination_session, component)
+        );
+
+        CREATE TABLE IF NOT EXISTS paper_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paper_pack_id INTEGER NOT NULL REFERENCES paper_packs(id) ON DELETE CASCADE,
+            parent_question_id INTEGER REFERENCES paper_questions(id) ON DELETE CASCADE,
+            question_number TEXT NOT NULL,
+            subpart TEXT NOT NULL DEFAULT '',
+            source_pages TEXT NOT NULL DEFAULT '[]',
+            prompt_text TEXT NOT NULL DEFAULT '',
+            prompt_latex TEXT NOT NULL DEFAULT '',
+            maximum_marks INTEGER NOT NULL DEFAULT 0,
+            topic TEXT NOT NULL DEFAULT 'Unclassified',
+            subtopic TEXT NOT NULL DEFAULT '',
+            skills TEXT NOT NULL DEFAULT '[]',
+            calculator_policy TEXT NOT NULL DEFAULT 'unknown',
+            question_demand TEXT NOT NULL DEFAULT 'standard',
+            parsing_confidence REAL,
+            raw_source_text TEXT NOT NULL DEFAULT '',
+            parser_version TEXT NOT NULL DEFAULT 'paper-pack-v1',
+            order_index INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(paper_pack_id, question_number, subpart)
+        );
+
+        CREATE TABLE IF NOT EXISTS marking_criteria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paper_question_id INTEGER REFERENCES paper_questions(id) ON DELETE CASCADE,
+            legacy_question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+            criterion_code TEXT NOT NULL,
+            mark_type TEXT NOT NULL DEFAULT 'TOTAL',
+            marks REAL NOT NULL DEFAULT 1,
+            description TEXT NOT NULL DEFAULT '',
+            dependencies TEXT NOT NULL DEFAULT '[]',
+            follow_through_rules TEXT NOT NULL DEFAULT '',
+            acceptable_forms TEXT NOT NULL DEFAULT '[]',
+            alternative_methods TEXT NOT NULL DEFAULT '[]',
+            raw_mark_scheme_text TEXT NOT NULL DEFAULT '',
+            source_page INTEGER,
+            source_confidence REAL,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            version INTEGER NOT NULL DEFAULT 1,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            CHECK(paper_question_id IS NOT NULL OR legacy_question_id IS NOT NULL)
+        );
+
+        CREATE TABLE IF NOT EXISTS model_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER REFERENCES submissions(id) ON DELETE CASCADE,
+            run_type TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            parser_version TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            request_metadata TEXT NOT NULL DEFAULT '{}',
+            raw_response TEXT,
+            usage_metadata TEXT NOT NULL DEFAULT '{}',
+            warning_flags TEXT NOT NULL DEFAULT '[]',
+            error TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            duration_ms INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS criterion_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+            criterion_id INTEGER NOT NULL REFERENCES marking_criteria(id) ON DELETE CASCADE,
+            model_run_id INTEGER REFERENCES model_runs(id) ON DELETE SET NULL,
+            awarded_marks REAL NOT NULL DEFAULT 0,
+            available_marks REAL NOT NULL DEFAULT 0,
+            decision TEXT NOT NULL DEFAULT 'uncertain',
+            evidence_text TEXT NOT NULL DEFAULT '',
+            evidence_page INTEGER,
+            evidence_region TEXT NOT NULL DEFAULT '{}',
+            rationale TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0,
+            extraction_confidence REAL,
+            ambiguity TEXT NOT NULL DEFAULT '',
+            possible_alternative_method TEXT NOT NULL DEFAULT '',
+            deterministic_check TEXT NOT NULL DEFAULT '{}',
+            provider TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            raw_provider_response TEXT,
+            warning_flags TEXT NOT NULL DEFAULT '[]',
+            is_current INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            UNIQUE(submission_id, criterion_id, model_run_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS processing_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'processing', 'completed', 'failed')),
+            current_stage TEXT NOT NULL DEFAULT 'validation',
+            stage_index INTEGER NOT NULL DEFAULT 0,
+            warnings TEXT NOT NULL DEFAULT '[]',
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS skill_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            paper_pack_id INTEGER REFERENCES paper_packs(id) ON DELETE SET NULL,
+            submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+            criterion_decision_id INTEGER REFERENCES criterion_decisions(id) ON DELETE CASCADE,
+            observed_at TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            subtopic TEXT NOT NULL DEFAULT '',
+            skill TEXT NOT NULL,
+            marks_earned REAL NOT NULL,
+            marks_available REAL NOT NULL,
+            success_fraction REAL NOT NULL,
+            grading_confidence REAL NOT NULL DEFAULT 0.5,
+            extraction_confidence REAL NOT NULL DEFAULT 0.5,
+            question_demand TEXT NOT NULL DEFAULT 'standard',
+            calculator_policy TEXT NOT NULL DEFAULT 'unknown',
+            error_category TEXT,
+            error_mechanism TEXT,
+            evidence_weight REAL NOT NULL DEFAULT 1,
+            model_version TEXT NOT NULL DEFAULT 'legacy-adapter-v1',
+            UNIQUE(submission_id, question_id, skill)
+        );
+
+        CREATE TABLE IF NOT EXISTS student_skill_states (
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            skill TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            evidence_count INTEGER NOT NULL,
+            distinct_papers INTEGER NOT NULL,
+            total_marks_earned REAL NOT NULL,
+            total_marks_available REAL NOT NULL,
+            all_time_estimate REAL NOT NULL,
+            current_estimate REAL NOT NULL,
+            uncertainty REAL NOT NULL,
+            status TEXT NOT NULL,
+            trend TEXT NOT NULL,
+            first_observed TEXT NOT NULL,
+            last_observed TEXT NOT NULL,
+            calculation_version TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (student_id, skill)
+        );
+
+        CREATE TABLE IF NOT EXISTS human_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            criterion_decision_id INTEGER NOT NULL REFERENCES criterion_decisions(id) ON DELETE CASCADE,
+            corrected_by INTEGER NOT NULL REFERENCES users(id),
+            original_marks REAL NOT NULL,
+            corrected_marks REAL NOT NULL,
+            reason TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS research_experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            research_question TEXT NOT NULL DEFAULT '',
+            hypothesis TEXT NOT NULL DEFAULT '',
+            dataset_selection TEXT NOT NULL DEFAULT '{}',
+            independent_variable TEXT NOT NULL DEFAULT '',
+            comparison_groups TEXT NOT NULL DEFAULT '[]',
+            model_version TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            ocr_model TEXT NOT NULL DEFAULT '',
+            confidence_threshold REAL,
+            taxonomy_version TEXT NOT NULL DEFAULT '0606-v1',
+            calculation_version TEXT NOT NULL DEFAULT 'beta-recency-v1',
+            metrics TEXT NOT NULL DEFAULT '{}',
+            result TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'planned',
+            created_by INTEGER NOT NULL REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_id INTEGER REFERENCES users(id),
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id, uploaded_at);
+        CREATE INDEX IF NOT EXISTS idx_processing_submission ON processing_jobs(submission_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_observations_student_skill ON skill_observations(student_id, skill, observed_at);
+        CREATE INDEX IF NOT EXISTS idx_decisions_submission ON criterion_decisions(submission_id, is_current);
         """
     )
     columns = {
@@ -172,6 +404,71 @@ def init_db():
     for column, definition in question_column_defs.items():
         if column not in question_columns:
             conn.execute(f"ALTER TABLE questions ADD COLUMN {column} {definition}")
+
+    assignment_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(assignments)").fetchall()
+    }
+    assignment_column_defs = {
+        "paper_pack_id": "INTEGER REFERENCES paper_packs(id)",
+        "syllabus_code": "TEXT NOT NULL DEFAULT '0606'",
+        "syllabus_version": "TEXT",
+        "examination_session": "TEXT",
+        "paper_component": "TEXT",
+        "calculator_policy": "TEXT NOT NULL DEFAULT 'unknown'",
+    }
+    for column, definition in assignment_column_defs.items():
+        if column not in assignment_columns:
+            conn.execute(f"ALTER TABLE assignments ADD COLUMN {column} {definition}")
+
+    submission_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(submissions)").fetchall()
+    }
+    submission_column_defs = {
+        "file_hash": "TEXT",
+        "confirmed_min_score": "REAL",
+        "provisional_score": "REAL",
+        "possible_max_score": "REAL",
+        "processing_started_at": "TEXT",
+        "processing_finished_at": "TEXT",
+    }
+    for column, definition in submission_column_defs.items():
+        if column not in submission_columns:
+            conn.execute(f"ALTER TABLE submissions ADD COLUMN {column} {definition}")
+
+    ocr_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(ocr_pages)").fetchall()
+    }
+    ocr_column_defs = {
+        "model": "TEXT NOT NULL DEFAULT ''",
+        "prompt_version": "TEXT NOT NULL DEFAULT 'ocr-math-v1'",
+        "raw_response": "TEXT",
+        "normalized_latex": "TEXT NOT NULL DEFAULT ''",
+        "warnings": "TEXT NOT NULL DEFAULT '[]'",
+        "timing_ms": "INTEGER",
+        "model_run_id": "INTEGER REFERENCES model_runs(id)",
+    }
+    for column, definition in ocr_column_defs.items():
+        if column not in ocr_columns:
+            conn.execute(f"ALTER TABLE ocr_pages ADD COLUMN {column} {definition}")
+
+    now = datetime.now().isoformat()
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO user_roles (user_id, role, created_at)
+        SELECT id, role, ? FROM users
+        """,
+        (now,),
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO user_roles (user_id, role, created_at)
+        SELECT id, 'researcher', ? FROM users WHERE role = 'teacher'
+        """,
+        (now,),
+    )
     conn.commit()
     conn.close()
 
@@ -219,7 +516,7 @@ def seed_if_empty():
 
     conn.execute(
         "INSERT INTO classes (name, teacher_id) VALUES (?, ?)",
-        ("0580 Extended - Set A", teacher_id),
+        ("0606 Additional Mathematics - Set A", teacher_id),
     )
     class_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.execute(
@@ -234,12 +531,15 @@ def seed_if_empty():
     due = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
     conn.execute(
         """
-        INSERT INTO assignments (class_id, title, type, due_date, total_marks, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO assignments
+        (class_id, title, type, due_date, total_marks, status, created_at,
+         syllabus_code, syllabus_version, paper_component, calculator_policy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, '0606', '2025-2027', 'demo',
+                'non-calculator')
         """,
         (
             class_id,
-            "Mock Paper 2 - Algebra & Number",
+            "0606 Diagnostic - Algebra & Calculus",
             "past_paper",
             due,
             20,
@@ -250,37 +550,54 @@ def seed_if_empty():
     assignment_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     sample_questions = [
-        ("Q1a", "Number", 2, "Correct prime factorisation of 360. M1 for any two correct factors, A1 fully correct."),
-        ("Q1b", "Number", 2, "LCM = 72. M1 for attempt, A1 correct answer."),
-        ("Q2a", "Algebra", 3, "Expand (x+3)(x-2) = x^2 + x - 6. M1 expansion, A1 correct."),
-        ("Q2b", "Algebra", 3, "Solve 3x - 7 = 11, x = 6. M1 rearrange, A1 answer."),
-        ("Q3", "Statistics", 4, "Mean = 12.5, median = 12. Method marks for table and calculation."),
-        ("Q4a", "Geometry", 2, "Angle sum property. Answer 65 degrees with working."),
-        ("Q4b", "Trigonometry", 4, "sin(30)=0.5 used correctly. Final height 5.0m."),
+        ("Q1a", "Algebra and graphs", 2, "Factorise x^2 - 5x + 6. M1 for factors with product 6 and sum -5; A1 fully correct."),
+        ("Q1b", "Algebra and graphs", 2, "Solve x^2 - 5x + 6 = 0. A1 for each correct root."),
+        ("Q2a", "Functions and graphs", 3, "Find the inverse of f(x)=3x-4. M1 interchange variables; A1 rearrangement; A1 correct domain-aware result."),
+        ("Q2b", "Coordinate geometry", 3, "Find the equation of the normal. M1 gradient; M1 negative reciprocal; A1 equation."),
+        ("Q3", "Calculus", 4, "Differentiate x^3-4x^2+2x. Award method and accuracy marks criterion by criterion."),
+        ("Q4a", "Calculus", 2, "Integrate 6x-4. B1 each term, including the constant of integration where required."),
+        ("Q4b", "Trigonometry", 4, "Use the required identity and solve in the stated interval. M marks for method; A marks for valid solutions."),
     ]
     for i, (label, topic, marks, scheme) in enumerate(sample_questions):
         conn.execute(
             """
-            INSERT INTO questions (assignment_id, label, topic, max_marks, mark_scheme_text, page_number, order_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO questions
+            (assignment_id, label, topic, max_marks, mark_scheme_text,
+             page_number, order_index, syllabus_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, '0606')
             """,
             (assignment_id, label, topic, marks, scheme, 1, i),
         )
 
     practice = [
-        ("Algebra", "PP-2019-Q4", "Solve the simultaneous equations: 2x + y = 7 and x - y = 2."),
-        ("Algebra", "PP-2020-Q2", "Factorise completely: 6x^2 - 15x."),
-        ("Trigonometry", "PP-2021-Q8", "Calculate the length of side AB in triangle ABC where angle C = 90."),
-        ("Statistics", "WS-Unit5-Q3", "Draw a cumulative frequency curve for the grouped data provided."),
-        ("Number", "PP-2018-Q1", "Write 0.00045 in standard form."),
-        ("Probability", "PP-2022-Q6", "A bag has 3 red and 5 blue balls. Find P(red then blue) without replacement."),
-        ("Geometry", "WS-Unit2-Q1", "Find the interior angle of a regular octagon."),
-        ("Graphs", "PP-2020-Q5", "Sketch y = 2x - 3 and find the x-intercept."),
+        ("Algebra and graphs", "0606-PRACTICE-A1", "Solve x^2 - 7x + 10 = 0 and verify both roots."),
+        ("Functions and graphs", "0606-PRACTICE-F1", "Find the inverse of f(x)=2x+5 and state its domain."),
+        ("Trigonometry", "0606-PRACTICE-T1", "Solve 2 sin x = 1 for 0 ≤ x ≤ 360°."),
+        ("Series", "0606-PRACTICE-S1", "Find the first four terms of (1+2x)^6."),
+        ("Calculus", "0606-PRACTICE-D1", "Differentiate y=x^3-5x and find its stationary points."),
+        ("Calculus", "0606-PRACTICE-I1", "Evaluate the definite integral of 3x^2-4 from 0 to 2."),
+        ("Coordinate geometry", "0606-PRACTICE-C1", "Find the perpendicular bisector of the segment joining (2,1) and (6,5)."),
+        ("Vectors", "0606-PRACTICE-V1", "Express the point dividing AB in the ratio 2:3 as a position vector."),
     ]
     for topic, label, text in practice:
         conn.execute(
             "INSERT INTO practice_questions (topic, label, text, source) VALUES (?, ?, ?, ?)",
-            (topic, label, text, "seed"),
+            (topic, label, text, "0606-seed"),
+        )
+
+    now = datetime.now().isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO user_roles (user_id, role, created_at) VALUES (?, 'teacher', ?)",
+        (teacher_id, now),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO user_roles (user_id, role, created_at) VALUES (?, 'researcher', ?)",
+        (teacher_id, now),
+    )
+    for sid in (student_id, student2_id):
+        conn.execute(
+            "INSERT OR IGNORE INTO user_roles (user_id, role, created_at) VALUES (?, 'student', ?)",
+            (sid, now),
         )
 
     conn.commit()
@@ -299,6 +616,34 @@ def get_user_by_id(user_id: int):
     row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     return row
+
+
+def user_has_role(user_id: int, *roles: str) -> bool:
+    if not roles:
+        return False
+    placeholders = ",".join("?" for _ in roles)
+    row = query_one(
+        f"""
+        SELECT 1
+        FROM user_roles
+        WHERE user_id = ? AND role IN ({placeholders})
+        LIMIT 1
+        """,
+        (user_id, *roles),
+    )
+    return bool(row)
+
+
+def grant_role(user_id: int, role: str):
+    if role not in {"student", "teacher", "researcher", "owner"}:
+        raise ValueError("Unsupported role")
+    execute(
+        """
+        INSERT OR IGNORE INTO user_roles (user_id, role, created_at)
+        VALUES (?, ?, ?)
+        """,
+        (user_id, role, datetime.now().isoformat()),
+    )
 
 
 def query_all(sql: str, params=()):
@@ -348,7 +693,10 @@ def compute_topic_mastery(student_id: int):
         FROM grade_drafts gd
         JOIN questions q ON q.id = gd.question_id
         JOIN submissions s ON s.id = gd.submission_id
-        WHERE s.student_id = ? AND s.status = 'final' AND gd.final_mark IS NOT NULL
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE s.student_id = ? AND s.status = 'final'
+          AND gd.final_mark IS NOT NULL
+          AND a.syllabus_code = '0606'
         GROUP BY q.topic
         """,
         (student_id,),
@@ -384,16 +732,30 @@ def recommend_practice(student_id: int, limit: int = 5):
             topic = mastery[0]["topic"]
         else:
             return query_all(
-                "SELECT * FROM practice_questions ORDER BY id LIMIT ?",
+                """
+                SELECT * FROM practice_questions
+                WHERE source LIKE '0606%' OR label LIKE '0606-%'
+                ORDER BY id LIMIT ?
+                """,
                 (limit,),
             )
         return query_all(
-            "SELECT * FROM practice_questions WHERE topic = ? ORDER BY id LIMIT ?",
+            """
+            SELECT * FROM practice_questions
+            WHERE topic = ?
+              AND (source LIKE '0606%' OR label LIKE '0606-%')
+            ORDER BY id LIMIT ?
+            """,
             (topic, limit),
         )
 
     topic = weak[0]["topic"]
     return query_all(
-        "SELECT * FROM practice_questions WHERE topic = ? ORDER BY id LIMIT ?",
+        """
+        SELECT * FROM practice_questions
+        WHERE topic = ?
+          AND (source LIKE '0606%' OR label LIKE '0606-%')
+        ORDER BY id LIMIT ?
+        """,
         (topic, limit),
     )

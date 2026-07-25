@@ -1,133 +1,42 @@
-# IGCSE 0580 Math Tracker
+# Numera
 
-Python web app for Cambridge IGCSE 0580 Mathematics teachers and students.
+Numera is an evidence-based Cambridge IGCSE Additional Mathematics 0606
+assessment application. Students upload completed papers, inspect
+question/criterion evidence, compare attempts and build a longitudinal
+strengths-and-weaknesses profile. Teachers review exceptions; private
+researcher tools preserve model runs, corrections and pseudonymized exports.
 
-What it does:
-
-- teacher/student login
-- classes and assignments
-- handwritten PDF upload
-- automatic AI/OCR grading with teacher exception correction
-- student analytics and review recommendations
-- printable teacher/student PDF reports
-- English/Chinese UI toggle
-
-The current default AI path is:
-
-```text
-CXSee Qwen3-VL OCR + Qwen3-VL grading + automatic finalization
-```
-
-## Quick Start
+## Local start
 
 ```bash
-cd "/Users/oscar/Desktop/IGCSE Math AnAn"
-pip3 install -r requirements.txt
-python3 run.py
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+pnpm install --frozen-lockfile
+pnpm build
+.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open:
+Open `http://127.0.0.1:8000`.
 
-```text
-http://127.0.0.1:8000
-```
+Development accounts:
 
-Demo accounts:
+- Teacher/researcher: `teacher@school.edu` / `teacher123`
+- Student: `student@school.edu` / `student123`
 
-- teacher: `teacher@school.edu` / `teacher123`
-- student: `student@school.edu` / `student123`
-
-## Read This First
-
-Primary handoff and audit document:
-
-- [docs/master_handoff_spec.md](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/docs/master_handoff_spec.md)
-
-Reusable analytics/demo testing guide:
-
-- [docs/analytics_test_harness.md](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/docs/analytics_test_harness.md)
-
-Detailed dated project changelog:
-
-- [docs/project_changelog.md](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/docs/project_changelog.md)
-
-Prompt to give another AI for a harsh research-backed audit:
-
-- [docs/external_research_audit_prompt.md](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/docs/external_research_audit_prompt.md)
-
-If a new AI or engineer is reviewing this project, the master handoff spec is the source of truth. It contains:
-
-- current architecture
-- current route inventory
-- database schema and invariants
-- page-by-page UI behavior
-- OCR and grading logic
-- analytics logic
-- printable report behavior
-- scripts and demo data
-- current risks and audit targets
-
-## Current Stack
-
-- FastAPI
-- SQLite
-- Jinja2
-- PyMuPDF
-- ReportLab
-- Tailwind via CDN
-
-## Important Files
-
-- [main.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/main.py)
-- [db.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/db.py)
-- [grading.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/grading.py)
-- [ocr.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/ocr.py)
-- [analytics.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/analytics.py)
-- [reports.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/reports.py)
-- [config.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/config.py)
-
-## Useful Scripts
-
-Analytics demo rebuild:
+Add the deterministic longitudinal demo with:
 
 ```bash
-python3 scripts/analytics_demo.py
+.venv/bin/python scripts/seed_0606_demo.py
 ```
 
-Tiny grading smoke test:
+Run verification:
 
 ```bash
-python3 scripts/demo_flow.py
+.venv/bin/pytest -q
+.venv/bin/python scripts/regression_checks.py
+.venv/bin/python scripts/demo_flow.py
 ```
 
-Past-paper ingest:
-
-```bash
-python3 scripts/ingest.py
-```
-
-Future real-data folder validation:
-
-```bash
-python3 scripts/real_data_checklist.py
-```
-
-## Config Notes
-
-Configuration is read by [config.py](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/config.py) from environment variables or a local `.env` file.
-Start from [.env.example](/Users/oscar/Desktop/IGCSE%20Math%20AnAn/.env.example) and keep real keys out of git.
-
-Current default provider settings:
-
-```text
-AI_PROVIDER=cxsee_qwen
-OCR_PROVIDER=cxsee_vl
-CXSEE_OCR_MODEL=qwen3-vl-plus
-CXSEE_MARKING_MODEL=qwen3-vl-plus
-```
-
-Important:
-
-- real API keys and `SECRET_KEY` belong in `.env` or shell environment variables
-- the previously exposed CXSee key should be rotated before real use
-- this project is still local-first and not production hardened
+Read `STATUS.md` before treating the project as production-ready. Private
+papers, uploads, `.env` and the local database are intentionally ignored.

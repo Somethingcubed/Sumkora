@@ -1,23 +1,35 @@
 import os
 import json
+import csv
+import hashlib
+import io
 import uuid
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import config
+from assessment import (
+    compare_papers,
+    marks_lost_breakdown,
+    paper_summary,
+    rebuild_student_profile,
+    student_attempts,
+    student_skill_profile,
+    sync_submission_evidence,
+)
 from analytics import (
     analytics_practice,
     grading_audit_summary,
     student_analytics_summary,
     teacher_analytics_summary,
 )
-from auth import create_session_token, get_current_user, require_role
+from auth import create_session_token, get_current_user, require_researcher, require_role
 from db import (
     compute_topic_mastery,
     execute,
@@ -41,8 +53,10 @@ from i18n import (
     topic_label,
     type_label,
 )
-from ocr import ocr_pages_for_submission, reset_ocr_cache
-from pdf_utils import is_valid_pdf, pdf_to_page_images, save_upload
+from ocr import cxsee_health_check, ocr_pages_for_submission, reset_ocr_cache
+from paper_packs import ingest_0606_directory, paper_pack_inventory
+from pipeline import PIPELINE_STAGES, create_processing_job, run_analysis_pipeline
+from pdf_utils import get_page_image_base64, is_valid_pdf, pdf_to_page_images, save_upload
 from reports import assessment_report, profile_report, safe_filename
 from topics import TOPICS
 
@@ -51,11 +65,32 @@ seed_if_empty()
 for warning in getattr(config, "CONFIG_WARNINGS", []):
     print(f"CONFIG WARNING: {warning}")
 
-app = FastAPI(title="IGCSE 0580 Math Tracker")
+app = FastAPI(title="Numera - Cambridge IGCSE Additional Mathematics 0606")
 templates = Jinja2Templates(directory="templates")
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+        if origin:
+            parsed = urlsplit(origin)
+            if parsed.netloc != request.headers.get("host", ""):
+                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    )
+    return response
 
 
 def redirect_login():
@@ -183,15 +218,38 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
         )
     token = create_session_token(user["id"])
     response = RedirectResponse("/", status_code=303)
-    response.set_cookie("session", token, httponly=True, max_age=86400 * 7)
+    response.set_cookie(
+        "session",
+        token,
+        httponly=True,
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
+        max_age=config.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
     return response
 
 
 @app.get("/logout")
 def logout():
     response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("session")
+    response.delete_cookie("session", path="/", samesite="lax")
     return response
+
+
+@app.get("/health")
+def health():
+    db_ok = True
+    try:
+        query_one("SELECT 1 AS ok")
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": db_ok,
+        "ocr_provider": config.OCR_PROVIDER,
+        "ocr_model": config.CXSEE_OCR_MODEL,
+    }
 
 
 @app.get("/teacher", response_class=HTMLResponse)
@@ -451,8 +509,10 @@ async def create_assignment(
     assignment_id = execute(
         """
         INSERT INTO assignments
-        (class_id, title, type, due_date, status, question_paper_path, mark_scheme_path, created_at)
-        VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)
+        (class_id, title, type, due_date, status, question_paper_path,
+         mark_scheme_path, created_at, syllabus_code, syllabus_version,
+         calculator_policy)
+        VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, '0606', '2025-2027', 'unknown')
         """,
         (
             class_id,
@@ -719,6 +779,7 @@ def manual_grade(
             "UPDATE submissions SET status = 'review' WHERE id = ?",
             (submission_id,),
         )
+    sync_submission_evidence(submission_id)
     return RedirectResponse(f"/teacher/submissions/{submission_id}/review", status_code=303)
 
 
@@ -729,7 +790,8 @@ def ai_grade_submission(request: Request, submission_id: int):
         return redirect_login()
     if not submission:
         return RedirectResponse("/teacher", status_code=303)
-    run_grading_job(submission_id)
+    job_id = create_processing_job(submission_id)
+    run_analysis_pipeline(submission_id, job_id)
     return RedirectResponse(f"/teacher/submissions/{submission_id}/review", status_code=303)
 
 
@@ -889,6 +951,7 @@ def finalize(request: Request, submission_id: int):
                 (g["ai_mark"], g["id"]),
             )
     finalize_submission(submission_id)
+    sync_submission_evidence(submission_id)
     return RedirectResponse(f"/teacher/submissions/{submission_id}/review", status_code=303)
 
 
@@ -1027,6 +1090,7 @@ def student_dashboard(request: Request):
         JOIN class_enrollments ce ON ce.class_id = c.id
         LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ?
         WHERE ce.student_id = ? AND a.status = 'published'
+          AND a.syllabus_code = '0606'
         ORDER BY a.due_date DESC
         """,
         (user["id"], user["id"]),
@@ -1035,6 +1099,8 @@ def student_dashboard(request: Request):
     analytics = student_analytics_summary(user["id"])
     recommendations = analytics_practice(user["id"], limit=5)
     weak = weak_topics(user["id"])
+    attempts = student_attempts(user["id"])
+    skill_profile = student_skill_profile(user["id"])
 
     return render(
         request,
@@ -1046,6 +1112,8 @@ def student_dashboard(request: Request):
             "weak_topics": weak,
             "recommendations": recommendations,
             "analytics": analytics,
+            "attempts": attempts,
+            "skill_profile": skill_profile,
         },
     )
 
@@ -1099,7 +1167,12 @@ def student_assignment(request: Request, assignment_id: int):
 
 
 @app.post("/student/assignments/{assignment_id}/upload")
-async def student_upload(request: Request, assignment_id: int, file: UploadFile = File(...)):
+async def student_upload(
+    request: Request,
+    assignment_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
@@ -1116,9 +1189,23 @@ async def student_upload(request: Request, assignment_id: int, file: UploadFile 
         return RedirectResponse("/student", status_code=303)
 
     content = await file.read()
-    if not is_valid_pdf(content):
+    if len(content) > config.MAX_UPLOAD_BYTES or not is_valid_pdf(content):
         return RedirectResponse(f"/student/assignments/{assignment_id}", status_code=303)
-    path = save_upload(f"sub_{uuid.uuid4().hex}_{file.filename}", content)
+    digest = hashlib.sha256(content).hexdigest()
+    duplicate = query_one(
+        """
+        SELECT id, assignment_id FROM submissions
+        WHERE student_id = ? AND file_hash = ?
+        ORDER BY uploaded_at DESC LIMIT 1
+        """,
+        (user["id"], digest),
+    )
+    if duplicate and duplicate["assignment_id"] != assignment_id:
+        return RedirectResponse(
+            f"/student/results/{duplicate['id']}", status_code=303
+        )
+    safe_original = os.path.basename(file.filename or "submission.pdf")
+    path = save_upload(f"sub_{uuid.uuid4().hex}_{safe_original}", content)
 
     submission = query_one(
         "SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ?",
@@ -1128,8 +1215,14 @@ async def student_upload(request: Request, assignment_id: int, file: UploadFile 
 
     if submission:
         execute(
-            "UPDATE submissions SET file_path = ?, status = 'pending', uploaded_at = ? WHERE id = ?",
-            (path, datetime.now().isoformat(), submission["id"]),
+            """
+            UPDATE submissions
+            SET file_path = ?, file_hash = ?, status = 'pending', uploaded_at = ?,
+                confirmed_min_score = NULL, provisional_score = NULL,
+                possible_max_score = NULL
+            WHERE id = ?
+            """,
+            (path, digest, datetime.now().isoformat(), submission["id"]),
         )
         sid = submission["id"]
         reset_grade_rows(sid)
@@ -1142,8 +1235,68 @@ async def student_upload(request: Request, assignment_id: int, file: UploadFile 
             """,
             (assignment_id, student_id, path, datetime.now().isoformat()),
         )
+        execute(
+            "UPDATE submissions SET file_hash = ? WHERE id = ?",
+            (digest, sid),
+        )
     ensure_grade_rows(sid, assignment_id)
-    return RedirectResponse(f"/student/assignments/{assignment_id}", status_code=303)
+    job_id = create_processing_job(sid)
+    background_tasks.add_task(run_analysis_pipeline, sid, job_id)
+    return RedirectResponse(f"/student/processing/{sid}", status_code=303)
+
+
+@app.get("/student/processing/{submission_id}", response_class=HTMLResponse)
+def student_processing(request: Request, submission_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    submission = query_one(
+        """
+        SELECT s.*, a.title AS assignment_title
+        FROM submissions s
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE s.id = ? AND s.student_id = ?
+        """,
+        (submission_id, user["id"]),
+    )
+    if not submission:
+        return RedirectResponse("/student", status_code=303)
+    job = query_one(
+        """
+        SELECT * FROM processing_jobs
+        WHERE submission_id = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (submission_id,),
+    )
+    return render(
+        request,
+        "student/processing.html",
+        {
+            "user": user,
+            "submission": submission,
+            "job": job,
+            "pipeline_stages": PIPELINE_STAGES,
+        },
+    )
+
+
+@app.get("/student/processing/{submission_id}/status")
+def student_processing_status(request: Request, submission_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    submission = query_one(
+        "SELECT id FROM submissions WHERE id = ? AND student_id = ?",
+        (submission_id, user["id"]),
+    )
+    if not submission:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    job = query_one(
+        "SELECT * FROM processing_jobs WHERE submission_id = ? ORDER BY id DESC LIMIT 1",
+        (submission_id,),
+    )
+    return dict(job) if job else {"status": "queued", "current_stage": "validation"}
 
 
 @app.get("/student/results/{submission_id}", response_class=HTMLResponse)
@@ -1177,6 +1330,8 @@ def student_results(request: Request, submission_id: int):
     total_earned = sum(g["final_mark"] or 0 for g in grades)
     total_possible = sum(g["max_marks"] for g in grades)
     recommendations = recommend_practice(user["id"], limit=3)
+    summary = paper_summary(user["id"], submission_id)
+    lost = marks_lost_breakdown(submission_id)
 
     return render(
         request,
@@ -1188,6 +1343,8 @@ def student_results(request: Request, submission_id: int):
             "total_earned": total_earned,
             "total_possible": total_possible,
             "recommendations": recommendations,
+            "summary": summary,
+            "marks_lost": lost,
         },
     )
 
@@ -1212,4 +1369,397 @@ def student_assessment_report(request: Request, submission_id: int):
     return pdf_response(
         content,
         f"{safe_filename(user['name'])}-{safe_filename(submission['assignment_title'])}.pdf",
+    )
+
+
+@app.get("/student/history", response_class=HTMLResponse)
+def student_history(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "student/history.html",
+        {"user": user, "attempts": student_attempts(user["id"])},
+    )
+
+
+@app.get("/student/compare", response_class=HTMLResponse)
+def student_compare(request: Request, ids: str = ""):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    selected = []
+    raw_values = request.query_params.getlist("ids") or ids.split(",")
+    for value in raw_values:
+        if value.strip().isdigit():
+            selected.append(int(value.strip()))
+    attempts = student_attempts(user["id"])
+    if not selected:
+        selected = [row["id"] for row in attempts[:2]]
+    comparison = compare_papers(user["id"], selected)
+    return render(
+        request,
+        "student/compare.html",
+        {
+            "user": user,
+            "attempts": attempts,
+            "selected_ids": selected,
+            "comparison": comparison,
+        },
+    )
+
+
+@app.get("/student/skills", response_class=HTMLResponse)
+def student_skills(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    profile = student_skill_profile(user["id"])
+    return render(
+        request,
+        "student/skills.html",
+        {"user": user, "profile": profile},
+    )
+
+
+@app.get(
+    "/student/results/{submission_id}/questions/{question_id}",
+    response_class=HTMLResponse,
+)
+def student_question_detail(request: Request, submission_id: int, question_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    submission = query_one(
+        """
+        SELECT s.*, a.title AS assignment_title
+        FROM submissions s
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE s.id = ? AND s.student_id = ? AND s.status = 'final'
+        """,
+        (submission_id, user["id"]),
+    )
+    if not submission:
+        return RedirectResponse("/student", status_code=303)
+    question = query_one(
+        """
+        SELECT q.*, gd.final_mark, gd.ai_mark, gd.ai_confidence, gd.ai_notes,
+               gd.teacher_comment, gd.risk_flags, gd.needs_exception_review
+        FROM questions q
+        JOIN grade_drafts gd ON gd.question_id = q.id
+        WHERE q.id = ? AND gd.submission_id = ?
+        """,
+        (question_id, submission_id),
+    )
+    if not question:
+        return RedirectResponse(f"/student/results/{submission_id}", status_code=303)
+    decisions = query_all(
+        """
+        SELECT cd.*, mc.criterion_code, mc.mark_type, mc.description,
+               mc.dependencies, mc.follow_through_rules
+        FROM criterion_decisions cd
+        JOIN marking_criteria mc ON mc.id = cd.criterion_id
+        WHERE cd.submission_id = ? AND cd.question_id = ? AND cd.is_current = 1
+        ORDER BY mc.order_index
+        """,
+        (submission_id, question_id),
+    )
+    related = query_all(
+        """
+        SELECT so.*, a.title
+        FROM skill_observations so
+        JOIN submissions s ON s.id = so.submission_id
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE so.student_id = ?
+          AND so.skill = COALESCE(?, ?, ?)
+          AND so.submission_id != ?
+        ORDER BY so.observed_at DESC LIMIT 8
+        """,
+        (
+            user["id"],
+            question["subtopic"],
+            question["assessment_objective"],
+            question["topic"],
+            submission_id,
+        ),
+    )
+    return render(
+        request,
+        "student/question_detail.html",
+        {
+            "user": user,
+            "submission": submission,
+            "question": question,
+            "decisions": decisions,
+            "related": related,
+            "page_image": get_page_image_base64(
+                submission["file_path"], question["page_number"], dpi=140
+            ),
+        },
+    )
+
+
+@app.get("/student/submissions/{submission_id}/file")
+def student_submission_file(request: Request, submission_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    submission = query_one(
+        "SELECT * FROM submissions WHERE id = ? AND student_id = ?",
+        (submission_id, user["id"]),
+    )
+    if not submission or not os.path.isfile(submission["file_path"]):
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return FileResponse(
+        submission["file_path"],
+        media_type="application/pdf",
+        filename=f"numera-submission-{submission_id}.pdf",
+    )
+
+
+def _research_overview():
+    return {
+        "students": query_one(
+            "SELECT COUNT(*) AS count FROM users WHERE role = 'student'"
+        )["count"],
+        "attempts": query_one("SELECT COUNT(*) AS count FROM submissions")["count"],
+        "criterion_decisions": query_one(
+            "SELECT COUNT(*) AS count FROM criterion_decisions"
+        )["count"],
+        "human_corrections": query_one(
+            "SELECT COUNT(*) AS count FROM human_corrections"
+        )["count"],
+        "uncertain_decisions": query_one(
+            "SELECT COUNT(*) AS count FROM criterion_decisions WHERE decision = 'uncertain'"
+        )["count"],
+        "failed_jobs": query_one(
+            "SELECT COUNT(*) AS count FROM processing_jobs WHERE status = 'failed'"
+        )["count"],
+        "model_runs": query_one("SELECT COUNT(*) AS count FROM model_runs")["count"],
+    }
+
+
+@app.get("/research", response_class=HTMLResponse)
+def research_dashboard(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    recent_runs = query_all(
+        "SELECT * FROM model_runs ORDER BY started_at DESC LIMIT 20"
+    )
+    uncertain = query_all(
+        """
+        SELECT cd.*, q.label, q.topic, s.student_id, a.title
+        FROM criterion_decisions cd
+        LEFT JOIN questions q ON q.id = cd.question_id
+        JOIN submissions s ON s.id = cd.submission_id
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE cd.decision = 'uncertain'
+        ORDER BY cd.created_at DESC LIMIT 20
+        """
+    )
+    experiments = query_all(
+        "SELECT * FROM research_experiments ORDER BY created_at DESC LIMIT 20"
+    )
+    return render(
+        request,
+        "research/dashboard.html",
+        {
+            "user": user,
+            "overview": _research_overview(),
+            "paper_packs": paper_pack_inventory(),
+            "provider_health": cxsee_health_check(),
+            "recent_runs": recent_runs,
+            "uncertain": uncertain,
+            "experiments": experiments,
+        },
+    )
+
+
+@app.post("/research/paper-packs/ingest")
+def research_ingest_paper_packs(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    imported = ingest_0606_directory("private_test_data/official_0606")
+    execute(
+        """
+        INSERT INTO audit_logs (actor_id, action, entity_type, metadata, created_at)
+        VALUES (?, 'paper_pack_ingest', 'paper_pack', ?, ?)
+        """,
+        (user["id"], json.dumps(imported), datetime.now().isoformat()),
+    )
+    return RedirectResponse("/research", status_code=303)
+
+
+@app.post("/research/decisions/{decision_id}/correct")
+def research_correct_decision(
+    request: Request,
+    decision_id: int,
+    corrected_marks: float = Form(...),
+    reason: str = Form(...),
+    notes: str = Form(""),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    decision = query_one(
+        """
+        SELECT cd.*, mc.marks AS criterion_marks
+        FROM criterion_decisions cd
+        JOIN marking_criteria mc ON mc.id = cd.criterion_id
+        WHERE cd.id = ?
+        """,
+        (decision_id,),
+    )
+    if not decision:
+        return RedirectResponse("/research", status_code=303)
+    corrected = max(0.0, min(float(corrected_marks), float(decision["available_marks"])))
+    execute(
+        """
+        INSERT INTO human_corrections
+        (criterion_decision_id, corrected_by, original_marks, corrected_marks,
+         reason, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            decision_id,
+            user["id"],
+            decision["awarded_marks"],
+            corrected,
+            reason,
+            notes,
+            datetime.now().isoformat(),
+        ),
+    )
+    execute(
+        """
+        UPDATE criterion_decisions
+        SET awarded_marks = ?, decision = 'human_corrected',
+            rationale = ?, confidence = 1.0, ambiguity = ''
+        WHERE id = ?
+        """,
+        (corrected, notes or reason, decision_id),
+    )
+    if decision["question_id"]:
+        execute(
+            """
+            UPDATE grade_drafts
+            SET final_mark = ?, teacher_override_mark = ?,
+                teacher_override_comment = ?, teacher_override_at = ?,
+                teacher_override_by = ?, needs_exception_review = 0
+            WHERE submission_id = ? AND question_id = ?
+            """,
+            (
+                corrected,
+                corrected,
+                notes or reason,
+                datetime.now().isoformat(),
+                user["id"],
+                decision["submission_id"],
+                decision["question_id"],
+            ),
+        )
+    sync_submission_evidence(decision["submission_id"])
+    execute(
+        """
+        INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, metadata, created_at)
+        VALUES (?, 'human_correction', 'criterion_decision', ?, ?, ?)
+        """,
+        (
+            user["id"],
+            str(decision_id),
+            json.dumps({"reason": reason}),
+            datetime.now().isoformat(),
+        ),
+    )
+    return RedirectResponse("/research", status_code=303)
+
+
+@app.post("/research/experiments")
+def research_create_experiment(
+    request: Request,
+    title: str = Form(...),
+    research_question: str = Form(""),
+    hypothesis: str = Form(""),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    now = datetime.now().isoformat()
+    execute(
+        """
+        INSERT INTO research_experiments
+        (title, research_question, hypothesis, ocr_model, created_by,
+         created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            title,
+            research_question,
+            hypothesis,
+            config.CXSEE_OCR_MODEL,
+            user["id"],
+            now,
+            now,
+        ),
+    )
+    return RedirectResponse("/research", status_code=303)
+
+
+@app.get("/research/export")
+def research_export(request: Request, format: str = "jsonl", mode: str = "pseudonymized"):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    rows = query_all(
+        """
+        SELECT so.*, s.uploaded_at, a.title AS paper_title
+        FROM skill_observations so
+        JOIN submissions s ON s.id = so.submission_id
+        JOIN assignments a ON a.id = s.assignment_id
+        ORDER BY so.observed_at
+        """
+    )
+    records = []
+    for row in rows:
+        record = dict(row)
+        if mode != "identified":
+            record["student_id"] = hashlib.sha256(
+                f"{config.SECRET_KEY}:{record['student_id']}".encode()
+            ).hexdigest()[:16]
+        records.append(record)
+    if format == "csv":
+        output = io.StringIO()
+        fieldnames = list(records[0]) if records else ["student_id"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+        content = output.getvalue()
+        media_type = "text/csv"
+        suffix = "csv"
+    elif format == "json":
+        content = json.dumps(records, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        suffix = "json"
+    else:
+        content = "\n".join(json.dumps(record, ensure_ascii=False) for record in records)
+        media_type = "application/x-ndjson"
+        suffix = "jsonl"
+    execute(
+        """
+        INSERT INTO audit_logs (actor_id, action, entity_type, metadata, created_at)
+        VALUES (?, 'research_export', 'skill_observation', ?, ?)
+        """,
+        (
+            user["id"],
+            json.dumps({"mode": mode, "format": suffix, "rows": len(records)}),
+            datetime.now().isoformat(),
+        ),
+    )
+    return StreamingResponse(
+        iter([content.encode("utf-8")]),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="numera-export-{mode}.{suffix}"'},
     )

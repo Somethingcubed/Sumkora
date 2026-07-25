@@ -1,7 +1,7 @@
 STRINGS = {
     "en": {
-        "app_name": "0580 Math Tracker",
-        "app_tagline": "Teacher & student portal for assignments, grading, and practice.",
+        "app_name": "Numera",
+        "app_tagline": "Evidence-based marking and progress for Cambridge IGCSE Additional Mathematics 0606.",
         "email": "Email",
         "student": "Student",
         "assignment": "Assignment",
@@ -204,8 +204,8 @@ STRINGS = {
         "students": "students",
     },
     "zh": {
-        "app_name": "0580 数学追踪系统",
-        "app_tagline": "教师与学生作业、批改与练习推荐平台。",
+        "app_name": "Numera",
+        "app_tagline": "Cambridge IGCSE 附加数学 0606 的证据化批改与学习进展平台。",
         "email": "邮箱",
         "student": "学生",
         "assignment": "作业",

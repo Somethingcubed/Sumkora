@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Compare papers — Numera{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-1">Compare papers</h1>
+<p class="text-slate-600 mb-6">Compare scores with assessed content and evidence coverage in view.</p>
+
+<form method="get" class="card mb-6">
+  <p class="font-medium mb-3">Select completed papers</p>
+  <div class="grid md:grid-cols-2 gap-2">
+    {% for item in attempts %}
+    <label class="flex items-center gap-2 rounded border p-2 text-sm">
+      <input type="checkbox" name="ids" value="{{ item.id }}" {% if item.id in selected_ids %}checked{% endif %}>
+      <span>{{ item.title }} · {{ item.uploaded_at[:10] }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  <button class="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">Update comparison</button>
+</form>
+
+{% if comparison.warnings %}
+<section class="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-6">
+  <h2 class="font-semibold text-amber-900">Comparability notes</h2>
+  <ul class="mt-2 list-disc pl-5 text-sm text-amber-800 space-y-1">{% for warning in comparison.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<div class="grid lg:grid-cols-2 gap-6">
+  {% for paper in comparison.papers %}
+  <section class="card">
+    <p class="text-xs uppercase tracking-wider text-indigo-600">{{ paper.syllabus_code }} · {{ paper.paper_component or 'component not set' }}</p>
+    <h2 class="font-semibold text-lg mt-1">{{ paper.title }}</h2>
+    <p class="text-3xl font-bold text-indigo-700 mt-4">{{ paper.percentage }}%</p>
+    <p class="text-sm text-slate-500">{{ paper.earned }} / {{ paper.possible }} marks · confidence {{ (paper.confidence * 100)|round|int }}%</p>
+    <div class="mt-4 border-t pt-4">
+      <p class="font-medium text-sm">Marks lost by topic</p>
+      <div class="mt-2 space-y-2 text-sm">
+        {% for topic, marks in paper.marks_lost.by_topic.items() %}
+        <div class="flex justify-between"><span>{{ topic }}</span><span>{{ marks }} lost</span></div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

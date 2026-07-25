@@ -59,7 +59,11 @@ def stored_question_type(row):
 
 
 def finalized_question_rows(student_id=None, teacher_id=None):
-    filters = ["s.status = 'final'", "gd.final_mark IS NOT NULL"]
+    filters = [
+        "s.status = 'final'",
+        "gd.final_mark IS NOT NULL",
+        "a.syllabus_code = '0606'",
+    ]
     params = []
     if student_id is not None:
         filters.append("s.student_id = ?")
@@ -90,7 +94,12 @@ def finalized_question_rows(student_id=None, teacher_id=None):
 
 
 def student_score_history(student_id, teacher_id=None):
-    filters = ["s.student_id = ?", "s.status = 'final'", "gd.final_mark IS NOT NULL"]
+    filters = [
+        "s.student_id = ?",
+        "s.status = 'final'",
+        "gd.final_mark IS NOT NULL",
+        "a.syllabus_code = '0606'",
+    ]
     params = [student_id]
     if teacher_id is not None:
         filters.append("c.teacher_id = ?")
@@ -398,17 +407,34 @@ def analytics_practice(student_id, limit=5):
     review = student_review_questions(student_id, limit=1)
     if review:
         return query_all(
-            "SELECT * FROM practice_questions WHERE topic = ? ORDER BY id LIMIT ?",
+            """
+            SELECT * FROM practice_questions
+            WHERE topic = ?
+              AND (source LIKE '0606%' OR label LIKE '0606-%')
+            ORDER BY id LIMIT ?
+            """,
             (review[0]["topic"], limit),
         )
     rows = finalized_question_rows(student_id=student_id)
     topics = aggregate_breakdown(rows, lambda row: row["topic"])
     if topics:
         return query_all(
-            "SELECT * FROM practice_questions WHERE topic = ? ORDER BY id LIMIT ?",
+            """
+            SELECT * FROM practice_questions
+            WHERE topic = ?
+              AND (source LIKE '0606%' OR label LIKE '0606-%')
+            ORDER BY id LIMIT ?
+            """,
             (topics[0]["key"], limit),
         )
-    return query_all("SELECT * FROM practice_questions ORDER BY id LIMIT ?", (limit,))
+    return query_all(
+        """
+        SELECT * FROM practice_questions
+        WHERE source LIKE '0606%' OR label LIKE '0606-%'
+        ORDER BY id LIMIT ?
+        """,
+        (limit,),
+    )
 
 
 def teacher_analytics_summary(teacher_id):

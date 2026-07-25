@@ -24,7 +24,13 @@ def env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = env(name, "true" if default else "false").lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 AI_PROVIDER = env("AI_PROVIDER", "cxsee_qwen")
+APP_ENV = env("APP_ENV", "development")
 
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
@@ -33,14 +39,28 @@ DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
-OCR_ENABLED = env("OCR_ENABLED", "true").lower() not in {"0", "false", "no"}
+OCR_ENABLED = env_bool("OCR_ENABLED", True)
 OCR_PROVIDER = env("OCR_PROVIDER", "cxsee_vl")  # cxsee_vl | google_vision | mathpix
 OCR_RENDER_DPI = int(env("OCR_RENDER_DPI", "200"))
+OCR_PROMPT_VERSION = env("OCR_PROMPT_VERSION", "ocr-math-v2")
 
 CXSEE_API_KEY = env("CXSEE_API_KEY")
-CXSEE_BASE_URL = env("CXSEE_BASE_URL", "https://api.cxsee.com/v1")
-CXSEE_OCR_MODEL = env("CXSEE_OCR_MODEL", "qwen3-vl-plus")
-CXSEE_MARKING_MODEL = env("CXSEE_MARKING_MODEL", "qwen3-vl-plus")
+CXSEE_BASE_URL = env("CXSEE_BASE_URL", "https://api.cxsee.com")
+CXSEE_OCR_MODEL = env("CXSEE_OCR_MODEL", "qwen-vl-ocr-latest")
+CXSEE_OCR_FALLBACK_MODEL = env("CXSEE_OCR_FALLBACK_MODEL", "qwen-vl-ocr")
+CXSEE_OCR_FALLBACK_MODELS = [
+    model.strip()
+    for model in env(
+        "CXSEE_OCR_FALLBACK_MODELS",
+        f"{CXSEE_OCR_FALLBACK_MODEL},qwen3-vl-plus",
+    ).split(",")
+    if model.strip()
+]
+CXSEE_GRADING_MODEL = env("CXSEE_GRADING_MODEL")
+CXSEE_DIAGNOSIS_MODEL = env("CXSEE_DIAGNOSIS_MODEL")
+CXSEE_MARKING_MODEL = env("CXSEE_MARKING_MODEL", CXSEE_GRADING_MODEL or "qwen3-vl-plus")
+CXSEE_TIMEOUT_SECONDS = int(env("CXSEE_TIMEOUT_SECONDS", "90"))
+CXSEE_MAX_RETRIES = int(env("CXSEE_MAX_RETRIES", "2"))
 
 GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY")
 
@@ -49,6 +69,14 @@ MATHPIX_APP_KEY = env("MATHPIX_APP_KEY")
 
 DB_PATH = env("DB_PATH", "data/app.db")
 UPLOAD_DIR = env("UPLOAD_DIR", "data/uploads")
+MAX_UPLOAD_BYTES = int(env("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+COOKIE_SECURE = env_bool("COOKIE_SECURE", APP_ENV == "production")
+SESSION_MAX_AGE_SECONDS = int(env("SESSION_MAX_AGE_SECONDS", str(86400 * 7)))
+TRUSTED_HOSTS = [
+    host.strip()
+    for host in env("TRUSTED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
+    if host.strip()
+]
 
 SECRET_KEY = env("SECRET_KEY")
 CONFIG_WARNINGS = []

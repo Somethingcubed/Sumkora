@@ -4,6 +4,7 @@ import os
 import fitz
 
 import config
+from storage import private_storage
 
 
 def is_valid_pdf(content: bytes) -> bool:
@@ -19,12 +20,7 @@ def is_valid_pdf(content: bytes) -> bool:
 
 
 def save_upload(filename: str, content: bytes) -> str:
-    os.makedirs(config.UPLOAD_DIR, exist_ok=True)
-    safe_name = filename.replace("/", "_").replace("\\", "_")
-    path = os.path.join(config.UPLOAD_DIR, safe_name)
-    with open(path, "wb") as f:
-        f.write(content)
-    return path
+    return private_storage.save(filename, content)
 
 
 def pdf_to_page_images(pdf_path: str, dpi: int = 150) -> list[str]:

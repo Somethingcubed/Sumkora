@@ -27,6 +27,9 @@
     {% if submission %}
     <p class="text-sm mb-3">{{ t.status }}: <span class="badge badge-{{ submission.status }}">{{ status_label(submission.status) }}</span></p>
     <p class="text-sm text-slate-500 mb-3">{{ t.uploaded }} {{ submission.uploaded_at[:10] }}</p>
+    {% if submission.status != 'final' %}
+    <a href="/student/processing/{{ submission.id }}" class="inline-block text-sm text-indigo-600 mb-3">View processing stages →</a>
+    {% endif %}
     {% endif %}
     <form method="post" action="/student/assignments/{{ assignment.id }}/upload" enctype="multipart/form-data" class="space-y-3">
       <input type="file" name="file" accept=".pdf" required class="text-sm">

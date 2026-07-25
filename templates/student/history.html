@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Paper history — Numera{% endblock %}
+{% block content %}
+<div class="flex flex-wrap justify-between gap-3 mb-6">
+  <div>
+    <h1 class="text-2xl font-bold">Paper history</h1>
+    <p class="text-slate-600 mt-1">Every uploaded paper remains available as evidence.</p>
+  </div>
+  <a href="/student/compare" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">Compare papers</a>
+</div>
+<section class="card overflow-x-auto">
+  {% if attempts %}
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-slate-500 border-b"><th class="py-2 pr-4">Paper</th><th class="pr-4">Date</th><th class="pr-4">Component</th><th class="pr-4">Policy</th><th class="pr-4">Score</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for item in attempts %}
+      <tr class="border-b last:border-0">
+        <td class="py-3 pr-4 font-medium"><a class="text-indigo-700" href="{% if item.status == 'final' %}/student/results/{{ item.id }}{% else %}/student/processing/{{ item.id }}{% endif %}">{{ item.title }}</a></td>
+        <td class="pr-4">{{ item.uploaded_at[:10] }}</td>
+        <td class="pr-4">{{ item.paper_component or '—' }}</td>
+        <td class="pr-4">{{ item.calculator_policy.replace('-', ' ') }}</td>
+        <td class="pr-4">{{ item.score or 0 }} / {{ item.maximum_marks or 0 }}</td>
+        <td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-sm text-slate-500">No papers have been uploaded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

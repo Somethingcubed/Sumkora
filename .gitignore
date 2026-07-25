@@ -17,3 +17,5 @@ output/
 .pytest_cache/
 .coverage
 htmlcov/
+.venv/
+node_modules/

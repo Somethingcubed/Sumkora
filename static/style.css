@@ -11,6 +11,10 @@
 .badge-final { background: #d1fae5; color: #065f46; }
 .badge-draft { background: #e2e8f0; color: #334155; }
 .badge-published { background: #d1fae5; color: #065f46; }
+.badge-completed { background: #d1fae5; color: #065f46; }
+.badge-failed { background: #fee2e2; color: #991b1b; }
+.badge-queued { background: #e2e8f0; color: #334155; }
+.badge-processing { background: #dbeafe; color: #1e40af; }
 
 .card {
   background: white;
@@ -25,4 +29,16 @@
 
 .math-copy {
   line-height: 1.65;
+}
+
+@media (max-width: 768px) {
+  nav .max-w-6xl {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  nav .flex.items-center.gap-4 {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
 }

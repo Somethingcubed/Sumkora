@@ -1,12 +1,12 @@
 from typing import Optional
 
 from fastapi import Request
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 import config
-from db import get_user_by_id
+from db import get_user_by_id, user_has_role
 
-serializer = URLSafeSerializer(config.SECRET_KEY, salt="igcse-session")
+serializer = URLSafeTimedSerializer(config.SECRET_KEY, salt="numera-session-v2")
 
 
 def create_session_token(user_id: int) -> str:
@@ -15,9 +15,9 @@ def create_session_token(user_id: int) -> str:
 
 def read_session_token(token: str) -> Optional[int]:
     try:
-        data = serializer.loads(token)
+        data = serializer.loads(token, max_age=config.SESSION_MAX_AGE_SECONDS)
         return data.get("user_id")
-    except BadSignature:
+    except (BadSignature, SignatureExpired):
         return None
 
 
@@ -40,6 +40,15 @@ def require_login(request: Request):
 
 def require_role(request: Request, role: str):
     user = require_login(request)
-    if not user or user["role"] != role:
+    if not user:
+        return None
+    if user["role"] == role or user_has_role(user["id"], role):
+        return user
+    return None
+
+
+def require_researcher(request: Request):
+    user = require_login(request)
+    if not user or not user_has_role(user["id"], "researcher", "owner"):
         return None
     return user

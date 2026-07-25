@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Processing — {{ submission.assignment_title }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">Paper analysis</p>
+      <h1 class="text-2xl font-bold mt-1">{{ submission.assignment_title }}</h1>
+      <p class="text-slate-600 mt-1">This page reflects persisted pipeline stages and can be refreshed safely.</p>
+    </div>
+    <span id="job-status" class="badge badge-{{ job.status if job else 'pending' }}">{{ job.status if job else 'queued' }}</span>
+  </div>
+
+  <section class="card">
+    <ol class="space-y-3" id="pipeline">
+      {% for stage in pipeline_stages %}
+      <li data-stage="{{ stage }}" class="flex items-center gap-3 rounded-lg border p-3">
+        <span class="stage-dot h-3 w-3 rounded-full bg-slate-300"></span>
+        <div class="flex-1">
+          <p class="font-medium capitalize">{{ stage.replace('_', ' ') }}</p>
+          <p class="stage-note text-xs text-slate-500">Waiting</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    <div id="failure" class="hidden mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"></div>
+    <a id="result-link" href="/student/results/{{ submission.id }}" class="hidden mt-5 inline-flex bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">Open paper result</a>
+  </section>
+</div>
+<script>
+(() => {
+  const stages = {{ pipeline_stages|tojson }};
+  async function refresh() {
+    const response = await fetch("/student/processing/{{ submission.id }}/status", {credentials: "same-origin"});
+    if (!response.ok) return;
+    const job = await response.json();
+    document.getElementById("job-status").textContent = job.status;
+    const current = job.current_stage === "completed" ? stages.length : Math.max(0, Number(job.stage_index || 0));
+    document.querySelectorAll("[data-stage]").forEach((node, index) => {
+      const dot = node.querySelector(".stage-dot");
+      const note = node.querySelector(".stage-note");
+      if (index < current || job.status === "completed") {
+        dot.className = "stage-dot h-3 w-3 rounded-full bg-emerald-500";
+        note.textContent = "Completed";
+      } else if (index === current && job.status === "processing") {
+        dot.className = "stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse";
+        note.textContent = "In progress";
+      }
+    });
+    if (job.status === "completed") {
+      document.getElementById("result-link").classList.remove("hidden");
+      return;
+    }
+    if (job.status === "failed") {
+      const failure = document.getElementById("failure");
+      failure.textContent = job.failure_message || "Processing failed. The paper is available for owner review.";
+      failure.classList.remove("hidden");
+      return;
+    }
+    window.setTimeout(refresh, 1500);
+  }
+  refresh();
+})();
+</script>
+{% endblock %}

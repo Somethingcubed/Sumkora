@@ -2,15 +2,29 @@ import base64
 import hashlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Protocol, Tuple
 
 import fitz
 
 import config
 from db import execute, query_all, query_one
+
+OCR_PROMPT = (
+    "Transcribe this IGCSE mathematics student-work page. Preserve visible "
+    "question labels, line breaks, equations, fractions, superscripts, units, "
+    "crossed-out work, and uncertain symbols. Distinguish printed question text, "
+    "student handwriting, and teacher annotations when possible. Do not solve, "
+    "correct, or award marks. Return transcription only."
+)
+
+
+class OCRProvider(Protocol):
+    def transcribe(self, image_b64: str) -> Tuple[str, Optional[float]]:
+        ...
 
 
 def active_provider() -> str:
@@ -51,25 +65,50 @@ def render_page_base64(path: str, page_number: int) -> str:
     return data
 
 
-def api_post_json(url: str, payload: dict, headers: Optional[dict] = None) -> dict:
+def api_post_json(
+    url: str,
+    payload: dict,
+    headers: Optional[dict] = None,
+    timeout: Optional[int] = None,
+    retries: Optional[int] = None,
+) -> dict:
     data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json", **(headers or {})},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+    attempts = (config.CXSEE_MAX_RETRIES if retries is None else retries) + 1
+    timeout = timeout or config.CXSEE_TIMEOUT_SECONDS
+    last_error = None
+    for attempt in range(attempts):
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {408, 429, 500, 502, 503, 504} or attempt + 1 >= attempts:
+                raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                raise
+        time.sleep(min(0.5 * (2**attempt), 2.0))
+    raise RuntimeError(f"Provider request failed: {type(last_error).__name__}")
+
+
+def cxsee_api_base() -> str:
+    base_url = getattr(config, "CXSEE_BASE_URL", "https://api.cxsee.com").rstrip("/")
+    return base_url if base_url.endswith("/v1") else f"{base_url}/v1"
 
 
 def cxsee_chat_completion(model: str, content: list, temperature: float = 0.0) -> dict:
     key = getattr(config, "CXSEE_API_KEY", "")
     if not key:
         raise RuntimeError("CXSee API key is not configured.")
-    base_url = getattr(config, "CXSEE_BASE_URL", "https://api.cxsee.com/v1").rstrip("/")
     return api_post_json(
-        f"{base_url}/chat/completions",
+        f"{cxsee_api_base()}/chat/completions",
         {
             "model": model,
             "messages": [{"role": "user", "content": content}],
@@ -168,25 +207,46 @@ def mathpix_ocr(image_b64: str) -> Tuple[str, Optional[float]]:
 
 
 def cxsee_vl_ocr(image_b64: str) -> Tuple[str, Optional[float]]:
-    model = getattr(config, "CXSEE_OCR_MODEL", "qwen3-vl-plus")
-    result = cxsee_chat_completion(
-        model,
-        [
-            {
-                "type": "text",
-                "text": (
-                    "OCR this IGCSE mathematics student work image. "
-                    "Return only the visible student writing/text. Preserve question labels, "
-                    "line breaks, equations, and units. Do not solve or mark anything."
+    text, confidence, _ = cxsee_vl_ocr_detailed(image_b64)
+    return text, confidence
+
+
+def cxsee_vl_ocr_detailed(image_b64: str) -> tuple[str, Optional[float], dict]:
+    model = getattr(config, "CXSEE_OCR_MODEL", "qwen-vl-ocr-latest")
+    content = [
+        {"type": "text", "text": OCR_PROMPT},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+        },
+    ]
+    candidates = [model] + [
+        candidate
+        for candidate in getattr(config, "CXSEE_OCR_FALLBACK_MODELS", [])
+        if candidate != model
+    ]
+    last_error = None
+    result = None
+    for candidate in candidates:
+        try:
+            result = cxsee_chat_completion(candidate, content)
+            result["_numera"] = {
+                "requested_model": model,
+                "used_model": candidate,
+                **(
+                    {"warning": "configured_model_unavailable_fallback_used"}
+                    if candidate != model
+                    else {}
                 ),
-            },
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-            },
-        ],
-    )
-    return cxsee_response_text(result), None
+            }
+            break
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {400, 404, 503}:
+                raise
+    if result is None:
+        raise last_error or RuntimeError("No CXSee OCR model completed the request.")
+    return cxsee_response_text(result), None, result
 
 
 def run_page_ocr(provider: str, image_b64: str) -> Tuple[str, Optional[float]]:
@@ -208,6 +268,13 @@ def upsert_ocr_page(
     confidence: Optional[float],
     status: str,
     error: str = "",
+    model: str = "",
+    prompt_version: str = "",
+    raw_response: Optional[str] = None,
+    normalized_latex: str = "",
+    warnings: str = "[]",
+    timing_ms: Optional[int] = None,
+    model_run_id: Optional[int] = None,
 ):
     now = datetime.now().isoformat()
     existing = query_one(
@@ -222,7 +289,9 @@ def upsert_ocr_page(
             """
             UPDATE ocr_pages
             SET file_hash = ?, text = ?, confidence = ?, status = ?,
-                error = ?, updated_at = ?
+                error = ?, updated_at = ?, model = ?, prompt_version = ?,
+                raw_response = ?, normalized_latex = ?, warnings = ?,
+                timing_ms = ?, model_run_id = ?
             WHERE id = ?
             """,
             (
@@ -232,6 +301,13 @@ def upsert_ocr_page(
                 status,
                 error,
                 now,
+                model,
+                prompt_version,
+                raw_response,
+                normalized_latex,
+                warnings,
+                timing_ms,
+                model_run_id,
                 existing["id"],
             ),
         )
@@ -240,8 +316,9 @@ def upsert_ocr_page(
             """
             INSERT INTO ocr_pages
             (submission_id, page_number, provider, file_hash, text, confidence,
-             status, error, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             status, error, created_at, updated_at, model, prompt_version,
+             raw_response, normalized_latex, warnings, timing_ms, model_run_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 submission_id,
@@ -254,8 +331,63 @@ def upsert_ocr_page(
                 error,
                 now,
                 now,
+                model,
+                prompt_version,
+                raw_response,
+                normalized_latex,
+                warnings,
+                timing_ms,
+                model_run_id,
             ),
         )
+
+
+def start_model_run(submission_id: int, run_type: str, model: str) -> int:
+    return execute(
+        """
+        INSERT INTO model_runs
+        (submission_id, run_type, provider, model, prompt_version, status, started_at)
+        VALUES (?, ?, 'cxsee', ?, ?, 'processing', ?)
+        """,
+        (
+            submission_id,
+            run_type,
+            model,
+            getattr(config, "OCR_PROMPT_VERSION", "ocr-math-v2"),
+            datetime.now().isoformat(),
+        ),
+    )
+
+
+def finish_model_run(
+    run_id: int,
+    status: str,
+    started: float,
+    raw_response: Optional[dict] = None,
+    error: Optional[str] = None,
+    used_model: Optional[str] = None,
+    warnings: Optional[list[str]] = None,
+):
+    duration_ms = int((time.monotonic() - started) * 1000)
+    execute(
+        """
+        UPDATE model_runs
+        SET status = ?, raw_response = ?, error = ?, duration_ms = ?,
+            model = COALESCE(?, model), warning_flags = ?, finished_at = ?
+        WHERE id = ?
+        """,
+        (
+            status,
+            json.dumps(raw_response, ensure_ascii=False) if raw_response is not None else None,
+            error,
+            duration_ms,
+            used_model,
+            json.dumps(warnings or [], ensure_ascii=False),
+            datetime.now().isoformat(),
+            run_id,
+        ),
+    )
+    return duration_ms
 
 
 def cached_pages(submission_id: int, provider: str, current_hash: str):
@@ -302,11 +434,39 @@ def run_submission_ocr(submission_id: int, pdf_path: str, force: bool = False):
         return cached_pages(submission_id, provider, current_hash)
 
     for page_number in range(1, count + 1):
+        started = time.monotonic()
+        run_id = None
+        model = (
+            getattr(config, "CXSEE_OCR_MODEL", "qwen-vl-ocr-latest")
+            if provider == "cxsee_vl"
+            else provider
+        )
         try:
             image_b64 = render_page_base64(pdf_path, page_number)
             if not image_b64:
                 raise RuntimeError("Could not render PDF page for OCR.")
-            text, confidence = run_page_ocr(provider, image_b64)
+            raw_result = None
+            if provider == "cxsee_vl":
+                run_id = start_model_run(submission_id, "ocr", model)
+                text, confidence, raw_result = cxsee_vl_ocr_detailed(image_b64)
+                provider_meta = raw_result.get("_numera", {})
+                model = provider_meta.get("used_model", model)
+            else:
+                text, confidence = run_page_ocr(provider, image_b64)
+            duration_ms = (
+                finish_model_run(
+                    run_id,
+                    "completed",
+                    started,
+                    raw_result,
+                    used_model=model,
+                    warnings=[provider_meta["warning"]]
+                    if provider_meta.get("warning")
+                    else [],
+                )
+                if run_id
+                else int((time.monotonic() - started) * 1000)
+            )
             upsert_ocr_page(
                 submission_id,
                 page_number,
@@ -316,8 +476,24 @@ def run_submission_ocr(submission_id: int, pdf_path: str, force: bool = False):
                 confidence,
                 "done",
                 "",
+                model=model,
+                prompt_version=getattr(config, "OCR_PROMPT_VERSION", "ocr-math-v2"),
+                raw_response=json.dumps(raw_result, ensure_ascii=False) if raw_result else None,
+                warnings=json.dumps(
+                    [provider_meta["warning"]]
+                    if provider == "cxsee_vl" and provider_meta.get("warning")
+                    else [],
+                    ensure_ascii=False,
+                ),
+                timing_ms=duration_ms,
+                model_run_id=run_id,
             )
         except (RuntimeError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            duration_ms = (
+                finish_model_run(run_id, "failed", started, error=str(exc))
+                if run_id
+                else int((time.monotonic() - started) * 1000)
+            )
             upsert_ocr_page(
                 submission_id,
                 page_number,
@@ -327,6 +503,11 @@ def run_submission_ocr(submission_id: int, pdf_path: str, force: bool = False):
                 None,
                 "failed",
                 str(exc),
+                model=model,
+                prompt_version=getattr(config, "OCR_PROMPT_VERSION", "ocr-math-v2"),
+                warnings=json.dumps(["provider_error"], ensure_ascii=False),
+                timing_ms=duration_ms,
+                model_run_id=run_id,
             )
 
     return cached_pages(submission_id, provider, current_hash)
@@ -357,3 +538,38 @@ def ocr_text_for_page(submission_id: int, pdf_path: str, page_number: int) -> st
 
 def reset_ocr_cache(submission_id: int):
     execute("DELETE FROM ocr_pages WHERE submission_id = ?", (submission_id,))
+
+
+def cxsee_health_check() -> dict:
+    if not getattr(config, "CXSEE_API_KEY", ""):
+        return {"ok": False, "error": "missing_key", "configured_model_available": False}
+    request = urllib.request.Request(
+        f"{cxsee_api_base()}/models",
+        headers={
+            "Authorization": f"Bearer {config.CXSEE_API_KEY}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=min(config.CXSEE_TIMEOUT_SECONDS, 20)
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        models = [
+            item.get("id", "")
+            for item in payload.get("data", [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "ok": True,
+            "model_count": len(models),
+            "configured_model": config.CXSEE_OCR_MODEL,
+            "configured_model_available": config.CXSEE_OCR_MODEL in models,
+            "ocr_models": [model for model in models if "ocr" in model.lower()],
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "configured_model_available": False,
+        }
