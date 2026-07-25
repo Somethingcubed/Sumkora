@@ -1,265 +1,50 @@
 {% extends "base.html" %}
-{% block title %}{{ t.my_dashboard }}{% endblock %}
+{% block title %}Student dashboard — Numera{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-2">{{ t.my_dashboard }}</h1>
-<div class="flex flex-wrap justify-between gap-3 mb-6">
-  <p class="text-slate-600">{{ t.student_tagline }}</p>
-  <div class="flex flex-wrap gap-2">
-    <a href="/student/history" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">Paper history</a>
-    <a href="/student/compare" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">Compare papers</a>
-    <a href="/student/skills" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">Strengths &amp; weaknesses</a>
-    <a href="/student/report" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">{{ t.download_profile_pdf }}</a>
+<section class="rounded-2xl bg-gradient-to-br from-indigo-700 via-indigo-700 to-violet-800 text-white p-7 shadow-lg mb-6">
+  <div class="flex flex-wrap justify-between items-end gap-5">
+    <div><p class="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Your mathematics evidence</p><h1 class="text-3xl font-bold mt-2">Welcome back, {{ user.name }}</h1><p class="text-indigo-100 mt-2 max-w-2xl">Upload any mathematics paper with your completed work and a mark scheme. No class, assignment, or approval is required.</p></div>
+    <a href="/student/analyse" class="bg-white text-indigo-700 px-5 py-3 rounded-xl text-sm font-semibold shadow">Analyse a paper →</a>
   </div>
-</div>
+</section>
 
 <div class="grid md:grid-cols-4 gap-4 mb-6">
-  <section class="card">
-    <p class="text-sm text-slate-500">{{ t.latest_score }}</p>
-    {% if analytics.latest %}
-    <p class="text-3xl font-bold text-indigo-700">{{ analytics.latest.accuracy }}%</p>
-    <p class="text-xs text-slate-500">{{ analytics.latest.earned }}/{{ analytics.latest.possible }} {{ t.marks }}</p>
-    {% else %}
-    <p class="text-xl font-bold text-slate-500">{{ t.no_data_short }}</p>
-    {% endif %}
-  </section>
-  <section class="card">
-    <p class="text-sm text-slate-500">{{ t.average_score }}</p>
-    <p class="text-3xl font-bold text-indigo-700">{{ analytics.average if analytics.average is not none else '—' }}{% if analytics.average is not none %}%{% endif %}</p>
-  </section>
-  <section class="card">
-    <p class="text-sm text-slate-500">{{ t.current_trajectory }}</p>
-    {% if analytics.prediction.available %}
-    <p class="text-3xl font-bold text-indigo-700">{{ t['trajectory_band_' ~ analytics.prediction.band] }}</p>
-    <p class="text-xs text-slate-500">{{ t['trend_' ~ analytics.prediction.trend] }} · {{ t.prediction_recent }}</p>
-    {% else %}
-    <p class="text-xl font-bold text-slate-500">{{ t.not_enough_data }}</p>
-    {% endif %}
-  </section>
-  <section class="card">
-    <p class="text-sm text-slate-500">{{ t.revise_next }}</p>
-    {% if analytics.weakest_topic %}
-    <p class="text-2xl font-bold text-amber-700">{{ topic_label(analytics.weakest_topic.key) }}</p>
-    <p class="text-xs text-slate-500">{{ analytics.weakest_topic.accuracy }}%</p>
-    {% else %}
-    <p class="text-xl font-bold text-slate-500">{{ t.no_data_short }}</p>
-    {% endif %}
-  </section>
+  <section class="metric-card metric-primary"><p>Self-uploaded papers</p><strong>{{ direct.papers|length }}</strong></section>
+  <section class="metric-card"><p>Completed analyses</p><strong>{{ direct.completed_count }}</strong></section>
+  <section class="metric-card"><p>Latest score</p><strong>{% if direct.latest_percentage is not none %}{{ direct.latest_percentage }}%{% else %}—{% endif %}</strong></section>
+  <section class="metric-card"><p>Average score</p><strong>{% if direct.average_percentage is not none %}{{ direct.average_percentage }}%{% else %}—{% endif %}</strong></section>
 </div>
 
-{% if analytics.prediction.available %}
-<section class="card mb-6 bg-indigo-50 border border-indigo-100">
-  <div class="flex flex-wrap justify-between gap-2">
-    <p class="font-medium text-indigo-900">{{ t.prediction_note }}</p>
-    {% if analytics.prediction.weak_topic %}
-    <p class="text-sm text-indigo-800">{{ t.prediction_weak_area }} {{ t['difficulty_' ~ analytics.prediction.weak_difficulty] }} {{ topic_label(analytics.prediction.weak_topic) }}.</p>
-    {% else %}
-    <p class="text-sm text-indigo-800">{{ t.prediction_recent }}</p>
-    {% endif %}
-  </div>
-</section>
-{% endif %}
-
-<div class="grid lg:grid-cols-2 gap-6 mb-6">
-  <section class="card">
-    <h2 class="font-semibold mb-3">Evidence-backed strengths</h2>
-    <div class="space-y-3">
-      {% for item in skill_profile.strengths[:4] %}
-      <div class="flex justify-between gap-3 border rounded-lg p-3 text-sm">
-        <div><p class="font-medium">{{ item.skill }}</p><p class="text-slate-500">{{ item.evidence_count }} observations across {{ item.distinct_papers }} papers</p></div>
-        <span class="badge badge-final">{{ item.status }}</span>
-      </div>
-      {% else %}
-      <p class="text-sm text-slate-500">More repeated evidence is needed before Numera claims a strength.</p>
-      {% endfor %}
-    </div>
-  </section>
-  <section class="card">
-    <h2 class="font-semibold mb-3">Recurring concerns and coverage</h2>
-    <div class="space-y-3">
-      {% for item in skill_profile.concerns[:4] %}
-      <div class="flex justify-between gap-3 border rounded-lg p-3 text-sm">
-        <div><p class="font-medium">{{ item.skill }}</p><p class="text-slate-500">Current estimate {{ (item.current_estimate * 100)|round|int }}% · uncertainty ±{{ (item.uncertainty * 100)|round|int }}%</p></div>
-        <span class="badge badge-pending">{{ item.status }}</span>
-      </div>
-      {% else %}
-      <p class="text-sm text-slate-500">No recurring concern has enough evidence yet. {{ skill_profile.untested|length }} syllabus skills remain untested.</p>
-      {% endfor %}
-    </div>
-  </section>
-</div>
-
-<div class="grid lg:grid-cols-3 gap-6">
-  <div class="lg:col-span-2 space-y-6">
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.score_history }}</h2>
-      {% if analytics.score_history %}
-      <div class="space-y-2">
-        {% for item in analytics.score_history|reverse %}
-        <div class="border rounded-lg p-3">
-          <div class="flex justify-between gap-3 text-sm mb-2">
-            <div>
-              <p class="font-medium">{{ item.title }}</p>
-              <p class="text-slate-500">{{ item.date or '—' }} · {{ item.earned }}/{{ item.possible }} {{ t.marks }}</p>
-            </div>
-            <a href="/student/results/{{ item.submission_id }}" class="text-indigo-600 whitespace-nowrap">{{ item.accuracy }}%</a>
-          </div>
-          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div class="h-full bg-indigo-500 rounded-full" style="width: {{ item.accuracy }}%"></div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.complete_for_mastery }}</p>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.topic_mastery }}</h2>
-      {% if mastery %}
-      <div class="space-y-2">
-        {% for m in mastery %}
-        <div>
-          <div class="flex justify-between text-sm mb-1">
-            <span>{{ topic_label(m.topic) }}</span>
-            <span class="{% if m.accuracy < 60 %}text-red-600{% elif m.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %}">
-              {{ m.accuracy }}% ({{ m.earned }}/{{ m.possible }})
-            </span>
-          </div>
-          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div class="h-full bg-indigo-500 rounded-full" style="width: {{ m.accuracy }}%"></div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.complete_for_mastery }}</p>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.review_questions }}</h2>
-      {% if analytics.review_questions %}
-      <div class="space-y-3">
-        {% for q in analytics.review_questions %}
-        <div class="border rounded-lg p-3 text-sm">
-          <div class="flex justify-between gap-3">
-            <div>
-              <p class="font-medium">{{ q.label }} — {{ topic_label(q.topic) }} · {{ t['difficulty_' ~ q.difficulty] }}</p>
-              <p class="text-slate-500">{{ q.assignment_title }} · {{ question_type_label(q.question_type) }}</p>
-            </div>
-            <a href="/student/results/{{ q.submission_id }}" class="text-red-600 font-semibold whitespace-nowrap">{{ q.earned }}/{{ q.possible }}</a>
-          </div>
-          {% if q.question_text %}
-          <p class="math-copy text-slate-700 mt-2 whitespace-pre-line">{{ q.question_text }}</p>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.no_review_questions }}</p>
-      {% endif %}
-    </section>
-  </div>
-
+<div class="grid lg:grid-cols-[1.35fr_0.65fr] gap-6">
   <div class="space-y-6">
     <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.difficulty_performance }}</h2>
-      {% if analytics.difficulty_breakdown %}
-      <div class="space-y-3">
-        {% for item in analytics.difficulty_breakdown %}
-        <div>
-          <div class="flex justify-between text-sm mb-1">
-            <span>{{ t['difficulty_' ~ item.key] }}</span>
-            <span>{{ item.accuracy }}%</span>
-          </div>
-          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div class="h-full bg-emerald-500 rounded-full" style="width: {{ item.accuracy }}%"></div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.question_type_performance }}</h2>
-      {% if analytics.type_breakdown %}
-      <div class="space-y-2 text-sm">
-        {% for item in analytics.type_breakdown[:6] %}
-        <div class="flex justify-between gap-3 border rounded-lg p-2">
-          <span>{{ question_type_label(item.key) }}</span>
-          <span class="{% if item.accuracy < 60 %}text-red-600{% elif item.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %} font-medium">{{ item.accuracy }}%</span>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.topic_difficulty }}</h2>
-      {% if analytics.topic_difficulty %}
-      <div class="space-y-2 text-sm">
-        {% for item in analytics.topic_difficulty %}
-        <div class="flex justify-between gap-3 border rounded-lg p-2">
-          <span>{{ topic_label(item.topic) }} · {{ t['difficulty_' ~ item.difficulty] }}</span>
-          <span class="font-medium">{{ item.accuracy }}%</span>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2 class="font-semibold mb-3">{{ t.recommended_practice }}</h2>
-      {% if recommendations %}
-      <div class="space-y-3">
-        {% for r in recommendations %}
-        <div class="text-sm border rounded-lg p-3">
-          <p class="font-medium text-indigo-700">{{ r.label }} <span class="text-slate-500 font-normal">({{ topic_label(r.topic) }})</span></p>
-          <p class="text-slate-600 mt-1">{{ r.text }}</p>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-slate-500 text-sm">{{ t.practice_from_weak }}</p>
-      {% endif %}
-    </section>
-  </div>
-</div>
-
-<section class="card mt-6">
-  <h2 class="font-semibold mb-3">{{ t.assignments }}</h2>
-  {% if assignments %}
-  <div class="space-y-2">
-    {% for a in assignments %}
-    <div class="flex justify-between items-center border rounded-lg p-3">
-      <div>
-        <p class="font-medium">{{ a.title }}</p>
-        <p class="text-sm text-slate-500">{{ a.class_name }} · {{ t.due }} {{ a.due_date or '—' }}</p>
-        {% if a.submission_status %}
-        <span class="badge badge-{{ a.submission_status }} mt-1">{{ status_label(a.submission_status) }}</span>
-        {% endif %}
-      </div>
-      <div class="text-right">
-        {% if a.submission_status == 'final' %}
-        <p class="font-bold text-indigo-700">{{ a.score or 0 }} {{ t.marks }}</p>
-        <a href="/student/results/{{ a.submission_id }}" class="text-sm text-indigo-600">{{ t.view_results }}</a>
+      <div class="flex justify-between items-center gap-3"><div><h2 class="text-lg font-semibold">Recent papers</h2><p class="text-sm text-slate-500">Your latest version is emphasized; earlier versions remain available.</p></div><a href="/student/papers" class="text-sm text-indigo-600">View all</a></div>
+      <div class="mt-4 space-y-3">
+        {% for item in direct.papers[:5] %}
+        <a href="{% if item.analysis_status == 'review' %}/student/analysis/{{ item.latest_version_id }}/review{% elif item.analysis_status in ['queued','processing'] %}/student/analysis/{{ item.latest_version_id }}/processing{% else %}/student/papers/{{ item.id }}{% endif %}" class="flex justify-between items-center gap-4 rounded-xl border p-4 hover:border-indigo-300">
+          <div><p class="font-medium">{{ item.title }}</p><p class="text-xs text-slate-500 mt-1">{{ item.syllabus_code }} · v{{ item.latest_version_number }} · {{ item.updated_at[:10] }}</p></div>
+          <div class="text-right"><span class="badge badge-{{ item.analysis_status or item.status }}">{{ item.analysis_status or item.status }}</span>{% if item.provisional_score is not none %}<p class="font-semibold text-indigo-700 mt-1">{{ item.provisional_score }}/{{ item.maximum_marks }}</p>{% endif %}</div>
+        </a>
         {% else %}
-        <a href="/student/assignments/{{ a.id }}" class="text-indigo-600 text-sm">{{ t.open }} →</a>
-        {% endif %}
+        <div class="rounded-xl border border-dashed p-8 text-center"><p class="font-medium">Your paper library is empty</p><p class="text-sm text-slate-500 mt-1">Start with a question paper, your answers, and a mark scheme.</p><a href="/student/analyse" class="inline-block mt-4 text-indigo-600 font-semibold text-sm">Analyse your first paper →</a></div>
+        {% endfor %}
       </div>
-    </div>
-    {% endfor %}
+    </section>
+
+    <section class="card">
+      <div class="flex justify-between items-center gap-3"><div><h2 class="text-lg font-semibold">Evidence-backed strengths</h2><p class="text-sm text-slate-500">Claims require repeated question-level evidence.</p></div><a href="/student/skills" class="text-sm text-indigo-600">Full profile</a></div>
+      <div class="grid md:grid-cols-2 gap-3 mt-4">
+        {% for item in skill_profile.strengths[:4] %}
+        <div class="rounded-xl border p-4"><div class="flex justify-between gap-2"><p class="font-medium">{{ item.skill }}</p><span class="badge badge-final">{{ item.status }}</span></div><p class="text-xs text-slate-500 mt-2">{{ item.evidence_count }} observations · {{ item.distinct_papers }} papers</p></div>
+        {% else %}<p class="md:col-span-2 text-sm text-slate-500">More completed papers are needed before Numera claims a strength.</p>{% endfor %}
+      </div>
+    </section>
   </div>
-  {% else %}
-  <p class="text-slate-500 text-sm">{{ t.no_published }}</p>
-  {% endif %}
-</section>
+
+  <aside class="space-y-6">
+    <section class="card"><h2 class="font-semibold">Coverage</h2><p class="text-4xl font-bold text-indigo-700 mt-3">{{ skill_profile.untested|length }}</p><p class="text-sm text-slate-500">core skills remain untested—not weak.</p></section>
+    <section class="card"><h2 class="font-semibold">Revise next</h2>{% if skill_profile.concerns %}{% for item in skill_profile.concerns[:3] %}<div class="mt-3 rounded-lg border p-3"><p class="font-medium text-sm">{{ item.skill }}</p><p class="text-xs text-slate-500">{{ item.status }} · estimate {{ (item.current_estimate*100)|round|int }}%</p></div>{% endfor %}{% else %}<p class="text-sm text-slate-500 mt-3">No recurring concern has enough evidence yet.</p>{% endif %}</section>
+    <section class="card"><h2 class="font-semibold">Quick actions</h2><div class="mt-3 space-y-2 text-sm"><a class="block text-indigo-600" href="/student/compare">Compare completed papers</a><a class="block text-indigo-600" href="/student/report">Download profile PDF</a><a class="block text-indigo-600" href="/student/papers">Review analysis versions</a></div></section>
+  </aside>
+</div>
 {% endblock %}

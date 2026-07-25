@@ -42,10 +42,20 @@ def make_pdf(text):
 
 
 def seed_user(email, name, role, password="pass123"):
-    return execute(
+    user_id = execute(
         "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
         (email, hash_password(password), name, role),
     )
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, ?, ?)",
+        (user_id, role, datetime.now().isoformat()),
+    )
+    if role == "teacher":
+        execute(
+            "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'researcher', ?)",
+            (user_id, datetime.now().isoformat()),
+        )
+    return user_id
 
 
 def login(client, email, password="pass123"):
@@ -217,24 +227,22 @@ def test_auto_grading_finalizes_with_risk_flags():
     }
 
 
-def test_exception_queue_route(client, teacher_email):
+def test_teacher_routes_are_archived(client, teacher_email):
     cookies = login(client, teacher_email)
-    response = client.get("/teacher/exceptions", cookies=cookies)
-    assert_true(response.status_code == 200, "exception queue route failed")
-    assert_true(
-        "unsafe_exact_match_multi_mark" in response.text,
-        "exception queue did not show risk flag",
-    )
-    print("PASS exception queue route shows risky rows")
-
-
-def test_calibration_route_shows_overrides(client, teacher_email):
-    cookies = login(client, teacher_email)
-    response = client.get("/teacher/calibration", cookies=cookies)
-    assert_true(response.status_code == 200, "calibration route failed")
-    assert_true("AI calibration" in response.text, "calibration page title missing")
-    assert_true("Correction rate" in response.text, "calibration metrics missing")
-    print("PASS calibration route shows correction metrics")
+    for path in (
+        "/teacher",
+        "/teacher/classes",
+        "/teacher/assignments",
+        "/teacher/exceptions",
+        "/teacher/calibration",
+    ):
+        response = client.get(path, cookies=cookies, follow_redirects=False)
+        assert_true(response.status_code == 303, f"{path} was not archived")
+        assert_true(
+            response.headers.get("location") == "/research",
+            f"{path} did not redirect to research",
+        )
+    print("PASS teacher routes are archived behind the research workbench")
 
 
 def test_non_final_report_blocked(client):
@@ -269,15 +277,15 @@ def test_non_final_report_blocked(client):
         cookies=cookies,
         follow_redirects=False,
     )
-    assert_true(response.status_code == 303, "non-final report was not blocked")
+    assert_true(response.status_code == 303, "legacy teacher report was not archived")
     assert_true(
-        response.headers.get("location", "").endswith(f"/teacher/submissions/{submission}/review"),
-        "non-final report did not redirect to review",
+        response.headers.get("location") == "/research",
+        "legacy teacher report did not redirect to research",
     )
-    print("PASS non-final assessment report blocked")
+    print("PASS legacy teacher report route archived")
 
 
-def test_teacher_override_survives_ai_rerun(client, teacher_email, submission_id, question_id):
+def test_teacher_override_route_is_archived(client, teacher_email, submission_id, question_id):
     cookies = login(client, teacher_email)
     response = client.post(
         f"/teacher/submissions/{submission_id}/grade-manual",
@@ -289,8 +297,11 @@ def test_teacher_override_survives_ai_rerun(client, teacher_email, submission_id
         cookies=cookies,
         follow_redirects=False,
     )
-    assert_true(response.status_code == 303, "manual override failed")
-    run_grading_job(submission_id)
+    assert_true(response.status_code == 303, "legacy manual override was not archived")
+    assert_true(
+        response.headers.get("location") == "/research",
+        "legacy manual override did not redirect to research",
+    )
     grade = query_one(
         """
         SELECT final_mark, teacher_override_mark, needs_exception_review
@@ -298,31 +309,10 @@ def test_teacher_override_survives_ai_rerun(client, teacher_email, submission_id
         """,
         (submission_id, question_id),
     )
-    assert_true(grade["final_mark"] == 2.0, "AI rerun overwrote teacher override")
-    assert_true(grade["teacher_override_mark"] == 2.0, "override mark was not recorded")
-    assert_true(grade["needs_exception_review"] == 0, "override did not clear exception")
-    execute(
-        """
-        UPDATE grade_drafts
-        SET ai_notes = 'failed old attempt', auto_finalized_at = NULL,
-            risk_flags = '["stale"]', needs_exception_review = 1
-        WHERE submission_id = ? AND question_id = ?
-        """,
-        (submission_id, question_id),
-    )
-    run_grading_job(submission_id)
-    grade = query_one(
-        """
-        SELECT final_mark, teacher_override_mark, needs_exception_review, risk_flags
-        FROM grade_drafts WHERE submission_id = ? AND question_id = ?
-        """,
-        (submission_id, question_id),
-    )
-    assert_true(grade["final_mark"] == 2.0, "forced AI rerun overwrote teacher override")
-    assert_true(grade["teacher_override_mark"] == 2.0, "forced rerun lost override mark")
-    assert_true(grade["needs_exception_review"] == 0, "override row stayed in exception queue")
-    assert_true(not grade["risk_flags"], "override row kept stale risk flags")
-    print("PASS teacher override survives AI rerun")
+    assert_true(grade["final_mark"] == 0.0, "archived route changed the AI result")
+    assert_true(grade["teacher_override_mark"] is None, "archived route wrote an override")
+    assert_true(grade["needs_exception_review"] == 1, "archived route changed review state")
+    print("PASS archived teacher override cannot mutate grading data")
 
 
 def test_reusable_ai_suggestion_backfills_auto_finalized():
@@ -481,15 +471,14 @@ def main():
     test_exact_checker_does_not_full_credit_multi_mark()
     test_one_mark_mismatch_auto_zero_without_exception()
     auto_case = test_auto_grading_finalizes_with_risk_flags()
-    test_exception_queue_route(client, auto_case["teacher_email"])
+    test_teacher_routes_are_archived(client, auto_case["teacher_email"])
     test_non_final_report_blocked(client)
-    test_teacher_override_survives_ai_rerun(
+    test_teacher_override_route_is_archived(
         client,
         auto_case["teacher_email"],
         auto_case["submission_id"],
         auto_case["question_id"],
     )
-    test_calibration_route_shows_overrides(client, auto_case["teacher_email"])
     test_reusable_ai_suggestion_backfills_auto_finalized()
     test_prediction_requires_four_assessments()
     print("All regression checks passed.")

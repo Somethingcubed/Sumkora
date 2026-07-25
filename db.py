@@ -348,10 +348,215 @@ def init_db():
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS student_papers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            syllabus_code TEXT NOT NULL DEFAULT '0606',
+            paper_number TEXT NOT NULL DEFAULT '',
+            paper_year INTEGER,
+            examination_session TEXT NOT NULL DEFAULT '',
+            calculator_policy TEXT NOT NULL DEFAULT 'unknown',
+            maximum_marks REAL NOT NULL DEFAULT 0,
+            source_type TEXT NOT NULL DEFAULT 'custom',
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK(status IN ('draft', 'ready', 'processing', 'completed', 'failed', 'archived')),
+            latest_version_number INTEGER NOT NULL DEFAULT 1,
+            legacy_submission_id INTEGER REFERENCES submissions(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS paper_analysis_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paper_id INTEGER NOT NULL REFERENCES student_papers(id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            supersedes_version_id INTEGER REFERENCES paper_analysis_versions(id) ON DELETE SET NULL,
+            question_paper_path TEXT NOT NULL,
+            answer_script_path TEXT NOT NULL,
+            mark_scheme_path TEXT,
+            status TEXT NOT NULL DEFAULT 'review'
+                CHECK(status IN ('review', 'queued', 'processing', 'completed', 'failed', 'cancelled')),
+            current_stage TEXT NOT NULL DEFAULT 'metadata_review',
+            stage_index INTEGER NOT NULL DEFAULT 0,
+            detected_metadata TEXT NOT NULL DEFAULT '{}',
+            confirmed_metadata TEXT NOT NULL DEFAULT '{}',
+            question_plan TEXT NOT NULL DEFAULT '[]',
+            ocr_model TEXT NOT NULL DEFAULT '',
+            grading_model TEXT NOT NULL DEFAULT '',
+            diagnosis_model TEXT NOT NULL DEFAULT '',
+            ocr_prompt_version TEXT NOT NULL DEFAULT '',
+            grading_prompt_version TEXT NOT NULL DEFAULT 'grading-0606-v1',
+            parser_version TEXT NOT NULL DEFAULT 'self-service-parser-v1',
+            confidence_threshold REAL NOT NULL DEFAULT 0.70,
+            deterministic_checks INTEGER NOT NULL DEFAULT 1,
+            image_resolution INTEGER NOT NULL DEFAULT 200,
+            preprocessing_config TEXT NOT NULL DEFAULT '{}',
+            confirmed_min_score REAL,
+            provisional_score REAL,
+            possible_max_score REAL,
+            warnings TEXT NOT NULL DEFAULT '[]',
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT,
+            UNIQUE(paper_id, version_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_ocr_pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_version_id INTEGER NOT NULL REFERENCES paper_analysis_versions(id) ON DELETE CASCADE,
+            document_type TEXT NOT NULL DEFAULT 'answer_script',
+            page_number INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT '',
+            normalized_text TEXT NOT NULL DEFAULT '',
+            confidence REAL,
+            warnings TEXT NOT NULL DEFAULT '[]',
+            raw_response TEXT,
+            timing_ms INTEGER,
+            evaluation_label TEXT,
+            corrected_text TEXT,
+            corrected_by INTEGER REFERENCES users(id),
+            corrected_at TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(analysis_version_id, document_type, page_number, model, prompt_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_question_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_version_id INTEGER NOT NULL REFERENCES paper_analysis_versions(id) ON DELETE CASCADE,
+            question_label TEXT NOT NULL,
+            question_text TEXT NOT NULL DEFAULT '',
+            mark_scheme_text TEXT NOT NULL DEFAULT '',
+            structured_criteria TEXT NOT NULL DEFAULT '[]',
+            maximum_marks REAL NOT NULL DEFAULT 0,
+            topic TEXT NOT NULL DEFAULT 'Unclassified',
+            subtopic TEXT NOT NULL DEFAULT '',
+            skill TEXT NOT NULL DEFAULT '',
+            answer_page INTEGER NOT NULL DEFAULT 1,
+            response_text TEXT NOT NULL DEFAULT '',
+            mapping_confidence REAL NOT NULL DEFAULT 0.5,
+            ai_mark REAL NOT NULL DEFAULT 0,
+            ai_confidence REAL NOT NULL DEFAULT 0,
+            ai_rationale TEXT NOT NULL DEFAULT '',
+            cited_evidence TEXT NOT NULL DEFAULT '',
+            error_category TEXT,
+            error_mechanism TEXT,
+            deterministic_check TEXT NOT NULL DEFAULT '{}',
+            risk_flags TEXT NOT NULL DEFAULT '[]',
+            model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            raw_provider_response TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(analysis_version_id, question_label)
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_human_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_question_result_id INTEGER NOT NULL REFERENCES analysis_question_results(id) ON DELETE CASCADE,
+            corrected_by INTEGER NOT NULL REFERENCES users(id),
+            original_mark REAL NOT NULL,
+            corrected_mark REAL NOT NULL,
+            corrected_decision TEXT NOT NULL DEFAULT '',
+            error_category TEXT,
+            error_mechanism TEXT,
+            failure_explanation TEXT NOT NULL DEFAULT '',
+            alternative_method_should_pass INTEGER,
+            ocr_caused_error INTEGER,
+            parser_caused_error INTEGER,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_skill_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            paper_id INTEGER NOT NULL REFERENCES student_papers(id) ON DELETE CASCADE,
+            analysis_version_id INTEGER NOT NULL REFERENCES paper_analysis_versions(id) ON DELETE CASCADE,
+            question_result_id INTEGER NOT NULL REFERENCES analysis_question_results(id) ON DELETE CASCADE,
+            observed_at TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            subtopic TEXT NOT NULL DEFAULT '',
+            skill TEXT NOT NULL,
+            marks_earned REAL NOT NULL,
+            marks_available REAL NOT NULL,
+            success_fraction REAL NOT NULL,
+            grading_confidence REAL NOT NULL DEFAULT 0.5,
+            extraction_confidence REAL NOT NULL DEFAULT 0.5,
+            evidence_weight REAL NOT NULL DEFAULT 1,
+            error_category TEXT,
+            error_mechanism TEXT,
+            calculation_version TEXT NOT NULL DEFAULT 'beta-recency-v1',
+            is_current INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(analysis_version_id, question_result_id, skill)
+        );
+
+        CREATE TABLE IF NOT EXISTS research_experiment_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            experiment_id INTEGER NOT NULL REFERENCES research_experiments(id) ON DELETE CASCADE,
+            run_number INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            baseline INTEGER NOT NULL DEFAULT 0,
+            configuration_snapshot TEXT NOT NULL DEFAULT '{}',
+            sample_size INTEGER NOT NULL DEFAULT 0,
+            metrics TEXT NOT NULL DEFAULT '{}',
+            result_summary TEXT NOT NULL DEFAULT '',
+            failure_message TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            created_by INTEGER NOT NULL REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            UNIQUE(experiment_id, run_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS research_dataset_selections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            filters TEXT NOT NULL DEFAULT '{}',
+            sample_size INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER NOT NULL REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS research_failure_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_version_id INTEGER REFERENCES paper_analysis_versions(id) ON DELETE CASCADE,
+            ocr_page_id INTEGER REFERENCES analysis_ocr_pages(id) ON DELETE CASCADE,
+            question_result_id INTEGER REFERENCES analysis_question_results(id) ON DELETE CASCADE,
+            failure_type TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'medium',
+            status TEXT NOT NULL DEFAULT 'open',
+            tags TEXT NOT NULL DEFAULT '[]',
+            notes TEXT NOT NULL DEFAULT '',
+            created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS taxonomy_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'draft',
+            taxonomy TEXT NOT NULL DEFAULT '{}',
+            notes TEXT NOT NULL DEFAULT '',
+            created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id, uploaded_at);
         CREATE INDEX IF NOT EXISTS idx_processing_submission ON processing_jobs(submission_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_observations_student_skill ON skill_observations(student_id, skill, observed_at);
         CREATE INDEX IF NOT EXISTS idx_decisions_submission ON criterion_decisions(submission_id, is_current);
+        CREATE INDEX IF NOT EXISTS idx_student_papers_owner ON student_papers(student_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_versions_paper ON paper_analysis_versions(paper_id, version_number);
+        CREATE INDEX IF NOT EXISTS idx_analysis_ocr_version ON analysis_ocr_pages(analysis_version_id, page_number);
+        CREATE INDEX IF NOT EXISTS idx_analysis_results_version ON analysis_question_results(analysis_version_id, question_label);
+        CREATE INDEX IF NOT EXISTS idx_experiment_runs ON research_experiment_runs(experiment_id, run_number);
         """
     )
     columns = {
@@ -453,6 +658,31 @@ def init_db():
     for column, definition in ocr_column_defs.items():
         if column not in ocr_columns:
             conn.execute(f"ALTER TABLE ocr_pages ADD COLUMN {column} {definition}")
+
+    experiment_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(research_experiments)").fetchall()
+    }
+    experiment_column_defs = {
+        "description": "TEXT NOT NULL DEFAULT ''",
+        "grading_model": "TEXT NOT NULL DEFAULT ''",
+        "diagnosis_model": "TEXT NOT NULL DEFAULT ''",
+        "ocr_prompt_version": "TEXT NOT NULL DEFAULT ''",
+        "grading_prompt_version": "TEXT NOT NULL DEFAULT ''",
+        "deterministic_checks": "INTEGER NOT NULL DEFAULT 1",
+        "image_resolution": "INTEGER NOT NULL DEFAULT 200",
+        "preprocessing_config": "TEXT NOT NULL DEFAULT '{}'",
+        "longitudinal_config": "TEXT NOT NULL DEFAULT '{}'",
+        "evaluation_metrics": "TEXT NOT NULL DEFAULT '[]'",
+        "configuration": "TEXT NOT NULL DEFAULT '{}'",
+        "archived_at": "TEXT",
+        "last_run_at": "TEXT",
+    }
+    for column, definition in experiment_column_defs.items():
+        if column not in experiment_columns:
+            conn.execute(
+                f"ALTER TABLE research_experiments ADD COLUMN {column} {definition}"
+            )
 
     now = datetime.now().isoformat()
     conn.execute(

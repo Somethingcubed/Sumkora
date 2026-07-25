@@ -3,8 +3,8 @@
 Numera is an evidence-based Cambridge IGCSE Additional Mathematics 0606
 assessment application. Students upload completed papers, inspect
 question/criterion evidence, compare attempts and build a longitudinal
-strengths-and-weaknesses profile. Teachers review exceptions; private
-researcher tools preserve model runs, corrections and pseudonymized exports.
+strengths-and-weaknesses profile. A separate private researcher workbench
+preserves model runs, corrections, experiments and privacy-aware exports.
 
 ## Local start
 
@@ -21,8 +21,12 @@ Open `http://127.0.0.1:8000`.
 
 Development accounts:
 
-- Teacher/researcher: `teacher@school.edu` / `teacher123`
+- Researcher: `teacher@school.edu` / `teacher123`
 - Student: `student@school.edu` / `student123`
+
+The research credential keeps its inherited email and internal `teacher`
+compatibility role, but the active product has no teacher or classroom
+experience.
 
 Add the deterministic longitudinal demo with:
 

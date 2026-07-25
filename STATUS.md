@@ -1,18 +1,17 @@
-# Numera 0606 upgrade status
+# Numera V2 refinement status
 
 Updated: 25 July 2026
 
 ## Outcome
 
-The inherited FastAPI prototype has been preserved and upgraded in place. It
-now has a functioning 0606-oriented student journey, persisted processing
-jobs, criterion evidence, marks-lost diagnoses, score ranges, longitudinal
-skill states, paper comparison, owner/researcher controls, paper-pack
-registration, private exports, and deployment scaffolding.
+The inherited FastAPI prototype has been preserved and upgraded in place.
+Numera now has exactly two active experiences: a student-owned assessment
+product and a separate private researcher/owner workbench. The class,
+assignment and teacher-review product is archived from active routing.
 
 This is a tested development build, not a production deployment.
 
-## What worked before
+## What worked before this refinement
 
 - FastAPI, Jinja, SQLite and a compact Tailwind-style interface.
 - Separate teacher/student logins, classes, assignments and uploads.
@@ -22,10 +21,18 @@ This is a tested development build, not a production deployment.
 
 ## What changed and now works
 
-- Product scope, fresh seed data and new assignment defaults target Cambridge
-  IGCSE Additional Mathematics 0606.
+- Students upload a question paper, completed work and mark scheme directly;
+  no class, assignment, teacher registration or approval is required.
+- Students review detected metadata/question mappings before running analysis.
+- Official 0606, mocks and custom mathematics papers share the same path.
+- Reruns create immutable analysis versions and can replace any source file.
+- Each version retains OCR, AI decisions, evidence, models, prompts and score
+  range; the latest version drives the current longitudinal profile.
 - Backend ownership checks protect student results and PDF downloads.
-- Research access is a separate `researcher`/`owner` role.
+- Research access is a separate `researcher`/`owner` role. The inherited
+  internal `teacher` role remains a temporary compatibility alias only.
+- `/teacher` is disabled at middleware level; the researcher lands on
+  `/research` and sees no classroom functionality.
 - Same-origin POST checks, trusted hosts, security headers, timed cookies and
   production-secure-cookie configuration were added.
 - Uploads have size/page validation, hashes, rotation warnings, processing
@@ -37,8 +44,11 @@ This is a tested development build, not a production deployment.
 - A recency-weighted Beta evidence model distinguishes early signal,
   recurring concern, improving, secure/strong and untested.
 - Students have paper history, comparison, skill and question-evidence pages.
-- Researchers can inspect packs/runs/uncertainty, record corrections, register
-  experiments and export pseudonymized JSON/JSONL/CSV.
+- Researchers can create, edit, duplicate, archive and run multiple configured
+  experiments; inspect OCR and grading evidence; preserve separate human
+  labels; tag failures; rebuild profiles; version taxonomies; and export
+  identified, pseudonymized or anonymized CSV/JSON/JSONL datasets.
+- Student and technical experiment PDFs are distinct report types.
 - Local Tailwind CSS replaces the fragile development CDN without a redesign.
 
 ## Live versus deterministic behavior
@@ -72,13 +82,13 @@ pnpm build && .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 
 ## Verification
 
-- `pytest -q`: 6 passed.
-- `scripts/regression_checks.py`: 11 passed.
-- `scripts/demo_flow.py`: passed.
-- `scripts/seed_0606_demo.py`: passed and is idempotent.
+- `.venv/bin/pytest -q`: 11 passed.
+- `.venv/bin/python scripts/regression_checks.py`: 10 checks passed,
+  including archived teacher-route mutation checks.
 - Python compile check: passed.
-- Browser: student login, dashboard layout and 0606 longitudinal data verified.
-- Official packs: 3 components, 77 question/subpart rows, 260 criteria.
+- Tailwind production build: passed.
+- Tests cover direct upload without classes, ownership, researcher isolation,
+  rerun preservation, experiments, separate human labels and PDF generation.
 - No PDF or API key is tracked by Git.
 
 ## Database and deployment
@@ -93,23 +103,33 @@ No public deployment was attempted because owner permission was not given.
 ## Known limitations and security concerns
 
 - Paper-to-question parsing is heuristic and must be human-reviewed.
-- The legacy grader adapts a whole-question decision into one synthetic
-  criterion unless a reviewed paper pack is linked.
+- Direct processing is sequential and runs in the web process; a durable queue
+  with progress cancellation is still required for production.
+- The experiment runner currently evaluates saved configuration snapshots
+  against available human labels. It does not yet batch-rerun external models,
+  pause/cancel running jobs or provide a full image-level A/B execution engine.
+- The OCR lab records corrections and evaluation labels, but enhanced/cropped
+  image previews and one-click OCR reruns are not yet implemented.
+- Run comparison is presently configuration/metric/version comparison rather
+  than a complete changed/improved/worsened question diff interface.
+- Dataset selection is stored as editable structured configuration; reusable
+  named dataset-builder UI is incomplete.
+- Taxonomies are versioned, but granular topic/skill mapping editing remains
+  incomplete.
 - Processing runs in a web-process background task; restarts can interrupt it.
 - SQLite and local private storage are development-only for multiple servers.
 - No password reset, MFA, invite workflow, rate limiter or malware scanner.
 - Provider data residency/retention must be approved before real student use.
 - PyMuPDF's AGPL/commercial licensing must be reviewed for the deployment.
-- Research UI lists runs but does not yet provide a complete regrade/A-B
-  comparison workflow or failure-gallery UI.
+- The mark scheme is intentionally required; no weaker mark-scheme-free mode is
+  exposed.
 
 ## Next five priorities
 
-1. Review and approve the 0606 pack parser output and map assignments to packs.
-2. Replace legacy whole-question grading with native criterion dependency,
-   follow-through and alternative-method evaluation.
-3. Move to PostgreSQL, private S3/R2 storage and a durable worker queue.
-4. Add owner-run regrading/A-B comparisons, calibration metrics and failure
-   gallery pages.
-5. Complete a privacy/security review, rate limiting, account recovery and
-   production deployment under HTTPS.
+1. Build durable, cancellable experiment/OCR/grading workers with true model
+   A/B reruns and question-level diffs.
+2. Add enhanced/cropped image assets and side-by-side OCR comparison.
+3. Complete the reusable visual dataset builder and granular taxonomy editor.
+4. Move to PostgreSQL, private object storage and a durable worker queue.
+5. Complete privacy/security review, malware scanning, rate limiting, account
+   recovery and production deployment under HTTPS.

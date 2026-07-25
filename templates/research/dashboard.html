@@ -1,28 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Research workbench — Numera{% endblock %}
+{% block title %}Research overview — Numera{% endblock %}
 {% block content %}
-<div class="flex flex-wrap justify-between gap-3 mb-6">
-  <div><p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">Owner only</p><h1 class="text-2xl font-bold">Research workbench</h1><p class="text-slate-600 mt-1">Model runs, uncertainty, corrections, paper packs, and reproducible exports.</p></div>
-  <div class="flex gap-2"><a href="/research/export?format=csv&mode=pseudonymized" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">CSV export</a><a href="/research/export?format=jsonl&mode=pseudonymized" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">JSONL export</a></div>
+<div class="research-shell">
+  <div class="flex flex-wrap justify-between items-start gap-4">
+    <div><p class="text-xs uppercase tracking-[0.22em] text-cyan-300">Private owner workbench</p><h1 class="text-3xl font-bold mt-2 text-white">Research overview</h1><p class="text-slate-400 mt-2">OCR, marking, corrections, experiments, and longitudinal-model evidence. No classroom operations.</p></div>
+    <div class="flex gap-2"><a href="/research/experiments/new" class="bg-cyan-300 text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold">New experiment</a><a href="/research/export?dataset=skill_observations&format=jsonl&mode=pseudonymized" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">Export</a></div>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mt-7">
+    {% for label, value in [('Attempts',overview.attempts),('Responses',overview.question_responses),('Criteria',overview.criterion_decisions),('OCR runs',overview.ocr_runs),('Grading runs',overview.grading_runs),('Corrections',overview.human_corrections),('Low confidence',overview.uncertain_decisions),('Failed',overview.failed_jobs),('Active experiments',overview.active_experiments),('Completed experiments',overview.completed_experiments)] %}
+    <div class="research-card"><p class="text-xs text-slate-400">{{ label }}</p><p class="text-2xl font-semibold text-white mt-1">{{ value }}</p></div>
+    {% endfor %}
+  </div>
 </div>
 
-<div class="grid md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-  {% for label, value in [('Students', overview.students), ('Attempts', overview.attempts), ('Decisions', overview.criterion_decisions), ('Corrections', overview.human_corrections), ('Uncertain', overview.uncertain_decisions), ('Failures', overview.failed_jobs)] %}
-  <section class="card"><p class="text-xs text-slate-500">{{ label }}</p><p class="text-2xl font-bold text-indigo-700">{{ value }}</p></section>
-  {% endfor %}
+<div class="grid lg:grid-cols-3 gap-6 mt-6">
+  <section class="card lg:col-span-2">
+    <div class="flex justify-between gap-3"><div><h2 class="font-semibold text-lg">Laboratories</h2><p class="text-sm text-slate-500">Move directly from aggregate signals to inspectable evidence.</p></div></div>
+    <div class="grid md:grid-cols-2 gap-3 mt-4">
+      {% for title,copy,href in [
+        ('Experiment management','Create, configure, duplicate, run, and compare model/prompt studies.','/research/experiments'),
+        ('OCR laboratory','Inspect raw output, timing, warnings, and corrected transcriptions.','/research/ocr'),
+        ('Grading evaluation','Compare immutable AI marks with separate human labels.','/research/grading'),
+        ('Failure gallery','Tag OCR, mapping, parsing, dependency, and grading failures.','/research/failures'),
+        ('Student-model laboratory','Inspect observations, weights, states, and rebuild profiles.','/research/student-models'),
+        ('Taxonomy versions','Version topics, skills, error categories, and mappings.','/research/taxonomy')
+      ] %}
+      <a href="{{ href }}" class="rounded-xl border p-4 hover:border-indigo-400"><p class="font-semibold">{{ title }}</p><p class="text-sm text-slate-500 mt-1">{{ copy }}</p><span class="inline-block text-sm text-indigo-600 mt-3">Open →</span></a>
+      {% endfor %}
+    </div>
+  </section>
+  <aside class="space-y-6">
+    <section class="card"><h2 class="font-semibold">Configured models</h2><dl class="mt-3 text-sm space-y-3"><div><dt class="text-slate-500">Primary OCR</dt><dd class="font-medium">{{ provider_health.configured_model or 'not set' }}</dd></div><div><dt class="text-slate-500">Provider availability</dt><dd>{{ 'Listed' if provider_health.configured_model_available else 'Not listed — fallbacks audited' }}</dd></div></dl></section>
+    <section class="card"><h2 class="font-semibold">Dataset composition</h2><dl class="mt-3 text-sm space-y-2"><div class="flex justify-between"><dt>Self-service papers</dt><dd>{{ dataset.self_service_papers }}</dd></div><div class="flex justify-between"><dt>Legacy submissions</dt><dd>{{ dataset.legacy_submissions }}</dd></div><div class="flex justify-between"><dt>OCR pages</dt><dd>{{ dataset.self_service_ocr_pages }}</dd></div><div class="flex justify-between"><dt>Human labels</dt><dd>{{ dataset.labelled_decisions }}</dd></div></dl></section>
+  </aside>
 </div>
 
-<section class="card mb-6">
-  <div class="flex flex-wrap justify-between gap-3"><div><h2 class="font-semibold">0606 paper-pack laboratory</h2><p class="text-sm text-slate-500">Parser output is versioned and explicitly marked for review.</p></div><form method="post" action="/research/paper-packs/ingest"><button class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm">Ingest supplied packs</button></form></div>
-  <div class="mt-4 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-slate-500 border-b"><th class="py-2">Paper</th><th>Policy</th><th>Questions</th><th>Criteria</th><th>Status</th></tr></thead><tbody>{% for pack in paper_packs %}<tr class="border-b last:border-0"><td class="py-3">{{ pack.examination_session }} {{ pack.year }} / {{ pack.component }}</td><td>{{ pack.calculator_policy }}</td><td>{{ pack.question_count }}</td><td>{{ pack.criterion_count }}</td><td>{{ pack.ingestion_status }}</td></tr>{% else %}<tr><td class="py-4 text-slate-500" colspan="5">No 0606 packs registered.</td></tr>{% endfor %}</tbody></table></div>
-</section>
-
-<div class="grid lg:grid-cols-2 gap-6 mb-6">
-  <section class="card"><h2 class="font-semibold">CXSee provider health</h2><dl class="mt-3 text-sm space-y-2"><div class="flex justify-between"><dt>Connection</dt><dd>{{ 'available' if provider_health.ok else 'unavailable' }}</dd></div><div class="flex justify-between"><dt>Configured OCR model</dt><dd>{{ provider_health.configured_model or 'not set' }}</dd></div><div class="flex justify-between"><dt>Listed by provider</dt><dd>{{ 'yes' if provider_health.configured_model_available else 'no' }}</dd></div></dl>{% if provider_health.ocr_models %}<p class="mt-3 text-xs text-slate-500">Provider-listed OCR models: {{ provider_health.ocr_models|join(', ') }}</p>{% endif %}</section>
-  <section class="card"><h2 class="font-semibold">Register experiment</h2><form method="post" action="/research/experiments" class="mt-3 space-y-3"><input class="w-full border rounded-lg px-3 py-2 text-sm" name="title" required placeholder="Experiment title"><input class="w-full border rounded-lg px-3 py-2 text-sm" name="research_question" placeholder="Research question"><input class="w-full border rounded-lg px-3 py-2 text-sm" name="hypothesis" placeholder="Hypothesis"><button class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm">Create experiment</button></form></section>
+<div class="grid lg:grid-cols-2 gap-6 mt-6">
+  <section class="card"><div class="flex justify-between"><h2 class="font-semibold">Recent experiments</h2><a href="/research/experiments" class="text-sm text-indigo-600">All experiments</a></div><div class="mt-3 space-y-2">{% for item in experiments[:6] %}<a href="/research/experiments/{{ item.id }}" class="flex justify-between rounded-lg border p-3 text-sm"><span>{{ item.title }}</span><span class="badge badge-{{ item.status }}">{{ item.status }}</span></a>{% else %}<p class="text-sm text-slate-500">No experiments yet.</p>{% endfor %}</div></section>
+  <section class="card"><h2 class="font-semibold">Recent research activity</h2><div class="mt-3 space-y-2">{% for item in activity %}<div class="border-b pb-2 text-sm"><p class="font-medium">{{ item.action.replace('_',' ') }}</p><p class="text-xs text-slate-500">{{ item.entity_type }} · {{ item.created_at[:19] }}</p></div>{% else %}<p class="text-sm text-slate-500">No activity recorded.</p>{% endfor %}</div></section>
 </div>
 
-<section class="card mb-6"><h2 class="font-semibold">Uncertain decisions and human correction</h2><div class="mt-3 space-y-3">{% for item in uncertain %}<div class="border rounded-lg p-3"><div class="flex justify-between gap-3 text-sm"><p><strong>{{ item.title }}</strong> · {{ item.label or 'criterion' }} · {{ item.topic or 'unclassified' }}</p><p>{{ item.awarded_marks }} / {{ item.available_marks }}</p></div><form method="post" action="/research/decisions/{{ item.id }}/correct" class="mt-3 grid md:grid-cols-4 gap-2"><input type="number" step="0.5" min="0" max="{{ item.available_marks }}" name="corrected_marks" required class="border rounded px-2 py-1 text-sm" placeholder="Human mark"><input name="reason" required class="border rounded px-2 py-1 text-sm" placeholder="Reason"><input name="notes" class="border rounded px-2 py-1 text-sm" placeholder="Evidence note"><button class="bg-slate-800 text-white rounded px-2 py-1 text-sm">Record correction</button></form></div>{% else %}<p class="text-sm text-slate-500">No uncertain decisions are currently queued.</p>{% endfor %}</div></section>
-
-<section class="card"><h2 class="font-semibold">Recent model runs</h2><div class="mt-3 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-slate-500 border-b"><th class="py-2">Type</th><th>Model</th><th>Status</th><th>Duration</th><th>Started</th></tr></thead><tbody>{% for run in recent_runs %}<tr class="border-b last:border-0"><td class="py-2">{{ run.run_type }}</td><td>{{ run.model }}</td><td>{{ run.status }}</td><td>{{ run.duration_ms or '—' }} ms</td><td>{{ run.started_at[:19] }}</td></tr>{% else %}<tr><td colspan="5" class="py-4 text-slate-500">No model runs recorded.</td></tr>{% endfor %}</tbody></table></div></section>
+<details class="card mt-6"><summary class="font-semibold cursor-pointer">0606 paper-pack registry</summary><div class="mt-4 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b text-slate-500"><th class="py-2">Paper</th><th>Policy</th><th>Questions</th><th>Criteria</th><th>Status</th></tr></thead><tbody>{% for pack in paper_packs %}<tr class="border-b"><td class="py-2">{{ pack.examination_session }} {{ pack.year }}/{{ pack.component }}</td><td>{{ pack.calculator_policy }}</td><td>{{ pack.question_count }}</td><td>{{ pack.criterion_count }}</td><td>{{ pack.ingestion_status }}</td></tr>{% endfor %}</tbody></table></div><form method="post" action="/research/paper-packs/ingest" class="mt-4"><button class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">Reingest supplied packs</button></form></details>
 {% endblock %}

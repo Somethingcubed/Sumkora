@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}My papers — Numera{% endblock %}
+{% block content %}
+<div class="flex flex-wrap justify-between items-start gap-4 mb-6">
+  <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Your evidence library</p><h1 class="text-3xl font-bold mt-1">My papers</h1><p class="text-slate-600 mt-1">Self-uploaded papers and every preserved analysis version.</p></div>
+  <a href="/student/analyse" class="bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm font-semibold">+ Analyse a paper</a>
+</div>
+<div class="grid lg:grid-cols-2 gap-5">
+  {% for item in papers %}
+  <section class="card border border-slate-100">
+    <div class="flex justify-between gap-3"><div><p class="text-xs uppercase tracking-wider text-indigo-600">{{ item.syllabus_code }} · {{ item.paper_number or item.source_type }}</p><h2 class="text-lg font-semibold mt-1">{{ item.title }}</h2><p class="text-sm text-slate-500 mt-1">Updated {{ item.updated_at[:10] }} · {{ item.version_count }} analysis version{% if item.version_count != 1 %}s{% endif %}</p></div><span class="badge badge-{{ item.analysis_status or item.status }}">{{ item.analysis_status or item.status }}</span></div>
+    {% if item.analysis_status == 'completed' %}
+    <div class="grid grid-cols-3 gap-2 mt-5 text-center"><div class="rounded-xl bg-slate-50 p-3"><p class="text-xs text-slate-500">Confirmed</p><p class="font-bold">{{ item.confirmed_min_score }}</p></div><div class="rounded-xl bg-indigo-50 p-3"><p class="text-xs text-indigo-600">Provisional</p><p class="font-bold text-indigo-700">{{ item.provisional_score }}</p></div><div class="rounded-xl bg-slate-50 p-3"><p class="text-xs text-slate-500">Possible</p><p class="font-bold">{{ item.possible_max_score }}</p></div></div>
+    <div class="mt-5 flex gap-3"><a class="text-indigo-600 text-sm font-semibold" href="/student/papers/{{ item.id }}">Open latest →</a><a class="text-slate-600 text-sm" href="/student/papers/{{ item.id }}/rerun">Rerun / replace files</a></div>
+    {% elif item.analysis_status == 'review' %}
+    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/review">Continue metadata review →</a>
+    {% elif item.analysis_status in ['queued','processing'] %}
+    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/processing">View processing →</a>
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="card lg:col-span-2 text-center py-12"><p class="text-xl font-semibold">No self-uploaded papers yet</p><p class="text-slate-500 mt-2">Upload a question paper, your work, and a mark scheme to begin.</p><a href="/student/analyse" class="inline-block mt-5 bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm">Analyse your first paper</a></section>
+  {% endfor %}
+</div>
+{% if legacy_attempts %}
+<details class="mt-8 rounded-xl border bg-white p-5"><summary class="cursor-pointer font-medium">Legacy assignment results ({{ legacy_attempts|length }})</summary><p class="text-sm text-slate-500 mt-2">Preserved for historical access; no longer part of the active product model.</p><div class="mt-4 space-y-2">{% for item in legacy_attempts %}<a class="flex justify-between rounded-lg border p-3 text-sm hover:border-indigo-300" href="/student/results/{{ item.id }}"><span>{{ item.title }}</span><span>{{ item.score }}/{{ item.maximum_marks }}</span></a>{% endfor %}</div></details>
+{% endif %}
+{% endblock %}

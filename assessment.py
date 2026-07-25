@@ -385,14 +385,27 @@ def _state_for_observations(rows: Iterable) -> dict:
 def rebuild_student_profile(student_id: int) -> list[dict]:
     rows = query_all(
         """
-        SELECT so.*
+        SELECT so.id, so.student_id, so.submission_id, so.observed_at,
+               so.topic, so.subtopic, so.skill, so.marks_earned,
+               so.marks_available, so.success_fraction,
+               so.grading_confidence, so.extraction_confidence,
+               so.evidence_weight
         FROM skill_observations so
         JOIN submissions s ON s.id = so.submission_id
         JOIN assignments a ON a.id = s.assignment_id
         WHERE so.student_id = ? AND a.syllabus_code = '0606'
-        ORDER BY so.skill, so.observed_at, so.id
+        UNION ALL
+        SELECT 1000000000 + aso.id AS id, aso.student_id,
+               1000000000 + aso.paper_id AS submission_id, aso.observed_at,
+               aso.topic, aso.subtopic, aso.skill, aso.marks_earned,
+               aso.marks_available, aso.success_fraction,
+               aso.grading_confidence, aso.extraction_confidence,
+               aso.evidence_weight
+        FROM analysis_skill_observations aso
+        WHERE aso.student_id = ? AND aso.is_current = 1
+        ORDER BY skill, observed_at, id
         """,
-        (student_id,),
+        (student_id, student_id),
     )
     grouped = defaultdict(list)
     for row in rows:

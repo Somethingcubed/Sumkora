@@ -1,11 +1,16 @@
 # Migration notes
 
-## Preserved
+## Preserved foundations
 
-The FastAPI/Jinja monolith, login/session pattern, classes, assignments,
-uploads, PDF rendering, OCR adapters, grading compatibility path, teacher
-review, reports, analytics module, localization and visual design were
-preserved. The imported checkpoint is Git commit `00b0ed3`.
+The FastAPI/Jinja monolith, login/session implementation, PDF rendering, OCR
+adapters, grading compatibility path, reports, analytics module, localization
+and visual design were preserved. The imported checkpoint is Git commit
+`00b0ed3`.
+
+The existing `teacher@school.edu` account, password verification, session and
+legacy `users.role = 'teacher'` value remain for compatibility. Authorization
+maps that account to the private researcher experience. The visible product
+calls it Researcher.
 
 ## Added or substantially extended
 
@@ -17,16 +22,47 @@ preserved. The imported checkpoint is Git commit `00b0ed3`.
 - `storage.py`: traversal-safe local adapter with a production replacement
   boundary.
 - Student history/comparison/skills/question pages and research workbench.
+- `self_service.py`: student-owned question-paper, answer-script and
+  mark-scheme ingestion; metadata review; immutable analysis versions; direct
+  analysis and longitudinal profile integration.
+- Dedicated OCR, grading, failures, experiments, student-model and taxonomy
+  research surfaces.
 
 Core files `db.py`, `main.py`, `auth.py`, `ocr.py`, `pdf_utils.py`,
 `analytics.py` and templates were extended rather than rewritten.
+
+## Teacher/classroom retirement
+
+The active teacher product is disabled, not destructively deleted:
+
+- every `/teacher` route is intercepted and redirected to `/research` for a
+  researcher, or to login otherwise;
+- legacy class, enrollment, assignment, teacher-review and classroom-report
+  links are absent from active navigation;
+- legacy student assignment-upload URLs redirect to `/student/analyse`;
+- new student papers do not reference a class or assignment;
+- existing legacy results remain reachable to their owning student for
+  historical continuity.
+
+The old route handlers, templates, tables and fields remain in the repository
+and SQLite schema as archived compatibility code. In particular `classes`,
+`class_students`, `assignments`, `submissions`, `users.role`, and historic
+teacher-review fields have not been dropped. A later Alembic/PostgreSQL
+migration should first copy any retained historic submissions to explicit
+student-owned records, verify report parity, then remove the archived code and
+columns in a separately reversible release.
 
 ## Database migration
 
 `init_db()` creates new normalized tables and adds columns to legacy SQLite
 tables. It also backfills legacy user roles. Migrations are additive and keep
-the old records. There is no destructive automatic conversion and no Alembic
-history yet.
+the old records. New core tables include `student_papers`,
+`paper_analysis_versions`, immutable `analysis_ocr_pages`,
+`analysis_question_results`, separate `analysis_human_corrections`,
+`analysis_skill_observations`, `research_experiment_runs`,
+`research_dataset_selections`, `research_failure_cases`, and
+`taxonomy_versions`. There is no destructive automatic conversion and no
+Alembic history yet.
 
 Before any production migration:
 
@@ -44,13 +80,13 @@ SameSite; trusted-host/security-header and same-origin POST middleware were
 added. Multi-role authorization is stored in `user_roles`. The old `users.role`
 column remains for compatibility.
 
-## Legacy 0580 handling
+## Legacy records
 
 Legacy 0580 classes, assignments, practice records and importer code remain
-untouched. New assignment defaults and seeds are 0606. Student dashboards,
-attempt history and learner-model rebuilds explicitly select
-`a.syllabus_code = '0606'`; legacy attempts are not relabeled as 0606.
-Teacher/research audit views may still expose legacy rows for migration.
+available for audit and historic student access. They are not relabelled,
+silently copied or shown as active classes/assignments. New direct uploads may
+be official 0606 papers, mocks or custom mathematics papers; detected metadata
+is editable before analysis.
 
 ## Rollback
 

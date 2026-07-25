@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Processing {{ version.paper_title }} — Numera{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto">
+  <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Student-owned analysis v{{ version.version_number }}</p><h1 class="text-3xl font-bold mt-1">{{ version.paper_title }}</h1><p class="text-slate-600 mt-1">You may leave this page. The version and every completed stage are persisted.</p></div>
+    <span id="job-status" class="badge badge-{{ version.status }}">{{ version.status }}</span>
+  </div>
+  <section class="card">
+    <div class="h-2 rounded-full bg-slate-100 overflow-hidden mb-6"><div id="overall-progress" class="h-full bg-indigo-600 transition-all" style="width:0%"></div></div>
+    <ol class="grid md:grid-cols-2 gap-3" id="pipeline">
+      {% for stage in pipeline_stages %}
+      <li data-stage="{{ stage }}" class="flex items-center gap-3 rounded-xl border p-4">
+        <span class="stage-dot h-3 w-3 rounded-full bg-slate-300"></span>
+        <div><p class="font-medium capitalize">{{ stage.replace('_', ' ') }}</p><p class="stage-note text-xs text-slate-500">Waiting</p></div>
+      </li>
+      {% endfor %}
+    </ol>
+    <div id="failure" class="hidden mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700"></div>
+    <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 inline-flex bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm font-semibold">Open analysis result →</a>
+  </section>
+</div>
+<script>
+(() => {
+  const stages = {{ pipeline_stages|tojson }};
+  async function refresh() {
+    const response = await fetch("/student/analysis/{{ version.id }}/status", {credentials:"same-origin"});
+    if (!response.ok) return;
+    const job = await response.json();
+    document.getElementById("job-status").textContent = job.status;
+    const current = job.current_stage === "completed" ? stages.length : Math.max(0, Number(job.stage_index || 0));
+    document.getElementById("overall-progress").style.width = `${Math.round(100 * current / stages.length)}%`;
+    document.querySelectorAll("[data-stage]").forEach((node,index) => {
+      const dot=node.querySelector(".stage-dot"), note=node.querySelector(".stage-note");
+      if (index < current || job.status === "completed") { dot.className="stage-dot h-3 w-3 rounded-full bg-emerald-500"; note.textContent="Completed"; }
+      else if (index === current && job.status === "processing") { dot.className="stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse"; note.textContent="In progress"; }
+    });
+    if (job.status === "completed") { document.getElementById("overall-progress").style.width="100%"; document.getElementById("result-link").classList.remove("hidden"); return; }
+    if (job.status === "failed") { const el=document.getElementById("failure"); el.textContent=job.failure_message || "Analysis failed. Your files and previous versions are safe."; el.classList.remove("hidden"); return; }
+    window.setTimeout(refresh,1500);
+  }
+  refresh();
+})();
+</script>
+{% endblock %}

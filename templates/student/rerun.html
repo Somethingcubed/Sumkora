@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Rerun {{ paper.title }} — Numera{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Versioned reanalysis</p>
+  <h1 class="text-3xl font-bold mt-1">Rerun {{ paper.title }}</h1>
+  <p class="text-slate-600 mt-2">Upload only the documents you want to replace. Numera preserves all previous files, OCR, model output, marks, and diagnoses.</p>
+  {% if error %}<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 mt-5">{{ error }}</div>{% endif %}
+  <form method="post" enctype="multipart/form-data" class="card mt-6 space-y-5">
+    <label class="block text-sm font-medium">Clearer completed work <span class="font-normal text-slate-500">(PDF or image)</span><input class="mt-2 block" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*"></label>
+    <label class="block text-sm font-medium">Replacement question paper <span class="font-normal text-slate-500">(optional PDF)</span><input class="mt-2 block" type="file" name="question_paper" accept=".pdf,application/pdf"></label>
+    <label class="block text-sm font-medium">Replacement mark scheme <span class="font-normal text-slate-500">(optional PDF)</span><input class="mt-2 block" type="file" name="mark_scheme" accept=".pdf,application/pdf"></label>
+    <div class="border-t pt-4 flex justify-between items-center gap-3"><p class="text-xs text-slate-500">The next version will be v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm font-semibold">Create new version →</button></div>
+  </form>
+</div>
+{% endblock %}

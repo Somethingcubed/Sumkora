@@ -205,7 +205,7 @@ def exact_answer_grade(question, page_text: str) -> Optional[dict]:
         return grading_result(
             0.0,
             0.72,
-            "Auto-check found a labelled response, but it did not match the mark scheme answer. Teacher should review if working earns method marks.",
+            "Auto-check found a labelled response, but it did not match the mark scheme answer. Human review is recommended if working may earn method marks.",
             ["answer_mismatch"],
             True,
             "exception_answer_mismatch",
@@ -217,12 +217,12 @@ def needs_review_grade(page_text: str, risk_flag: str = "needs_review") -> dict:
     if page_text.strip():
         notes = (
             "Auto-check could not find a matching labelled answer in the extracted text. "
-            "No marks awarded automatically; teacher should review the student's work."
+            "No marks awarded automatically; human review of the student's work is recommended."
         )
     else:
         notes = (
             "No readable text was found on this page. No marks awarded automatically "
-            "without a vision-capable model; teacher should review the uploaded work."
+            "without a vision-capable model; human review of the uploaded work is recommended."
         )
     return grading_result(
         0.0,
@@ -256,7 +256,7 @@ def openai_grade(question, page_b64: str) -> dict:
     from openai import OpenAI
 
     client = OpenAI(api_key=config.OPENAI_API_KEY)
-    prompt = f"""You are grading IGCSE 0580 Mathematics.
+    prompt = f"""You are grading Cambridge IGCSE Additional Mathematics 0606.
 Question: {question['label']}
 Max marks: {question['max_marks']}
 Mark scheme: {question['mark_scheme_text']}
@@ -309,7 +309,7 @@ def cxsee_qwen_vision_grade(question, page_b64: str, page_text: str = "") -> dic
     if not page_b64:
         return needs_review_grade(page_text)
 
-    prompt = f"""You are assisting a teacher with Cambridge IGCSE 0580 Mathematics marking.
+    prompt = f"""You are evaluating Cambridge IGCSE Additional Mathematics 0606 student work.
 Look at the attached student work image and grade only this question.
 
 Question label: {question['label']}
@@ -418,14 +418,14 @@ def deepseek_text_grade(question, page_text: str) -> dict:
             0.35,
             (
                 "DeepSeek text check could not find a clearly labelled response for this question. "
-                "No marks awarded automatically; teacher should review the work."
+                "No marks awarded automatically; human review of the work is recommended."
             ),
             ["label_not_found"],
             True,
             "exception_label_not_found",
         )
 
-    prompt = f"""You are assisting a teacher with IGCSE 0580 Mathematics marking.
+    prompt = f"""You are evaluating Cambridge IGCSE Additional Mathematics 0606 student work.
 Grade only the extracted student text for this one question.
 
 Question label: {question['label']}

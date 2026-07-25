@@ -21,19 +21,19 @@
       <div class="flex items-center gap-4 text-sm">
         <a href="/lang/{{ other_lang }}" class="bg-white/15 hover:bg-white/25 px-2 py-1 rounded text-xs font-medium">{{ t.lang_switch }}</a>
         {% if user %}
-        <span>{{ user.name }} ({{ role_label(user.role) }})</span>
-        {% if user.role == 'teacher' %}
-        <a href="/teacher" class="hover:underline">{{ t.nav_dashboard }}</a>
-        <a href="/teacher/classes" class="hover:underline">{{ t.nav_classes }}</a>
-        <a href="/teacher/analytics" class="hover:underline">{{ t.nav_analytics }}</a>
-        <a href="/teacher/calibration" class="hover:underline">{{ t.nav_calibration }}</a>
-        <a href="/teacher/exceptions" class="hover:underline">{{ t.nav_exceptions }}</a>
-        <a href="/research" class="hover:underline">Research</a>
+        <span>{{ user.name }} ({% if is_researcher %}Researcher{% else %}Student{% endif %})</span>
+        {% if is_researcher %}
+        <a href="/research" class="hover:underline">Overview</a>
+        <a href="/research/experiments" class="hover:underline">Experiments</a>
+        <a href="/research/ocr" class="hover:underline">OCR</a>
+        <a href="/research/grading" class="hover:underline">Grading</a>
+        <a href="/research/failures" class="hover:underline">Failures</a>
         {% else %}
-        <a href="/student" class="hover:underline">{{ t.nav_my_dashboard }}</a>
-        <a href="/student/history" class="hover:underline">Papers</a>
+        <a href="/student" class="hover:underline">Dashboard</a>
+        <a href="/student/analyse" class="hover:underline">Analyse paper</a>
+        <a href="/student/papers" class="hover:underline">My papers</a>
         <a href="/student/compare" class="hover:underline">Compare</a>
-        <a href="/student/skills" class="hover:underline">Skills</a>
+        <a href="/student/skills" class="hover:underline">Strengths</a>
         {% endif %}
         <a href="/logout" class="hover:underline opacity-80">{{ t.logout }}</a>
         {% endif %}

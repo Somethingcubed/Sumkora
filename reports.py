@@ -1,3 +1,4 @@
+import json
 import re
 from html import escape
 from datetime import datetime
@@ -114,7 +115,7 @@ def draw_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#64748b"))
-    canvas.drawString(1.5 * cm, 1.0 * cm, "0580 Math Tracker")
+    canvas.drawString(1.5 * cm, 1.0 * cm, "Numera")
     canvas.drawRightString(A4[0] - 1.5 * cm, 1.0 * cm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -232,7 +233,11 @@ def profile_report(student_id, lang="en", variant="teacher", teacher_id=None):
     practice = analytics_practice(student_id, limit=6)
     title = f"{t['student_profile_report']} - {student['name']}"
     story = [p(title, styles["title"])]
-    story.append(p(f"{t['student']}: {student['name']} | {t['class']}: {student['class_name'] or '-'} | {t['generated']}: {datetime.now().strftime('%Y-%m-%d')}", styles["small"]))
+    identity_line = f"{t['student']}: {student['name']}"
+    if variant == "teacher":
+        identity_line += f" | {t['class']}: {student['class_name'] or '-'}"
+    identity_line += f" | {t['generated']}: {datetime.now().strftime('%Y-%m-%d')}"
+    story.append(p(identity_line, styles["small"]))
     story.append(Spacer(1, 8))
 
     latest = analytics["latest"]
@@ -352,4 +357,204 @@ def assessment_report(submission_id, lang="en", variant="teacher"):
             if diagnostics:
                 story.append(p(f"{row['label']}: {' | '.join(diagnostics)}", styles["small"]))
 
+    return build_pdf(story, title)
+
+
+def self_service_assessment_report(
+    student_id: int,
+    paper_id: int,
+    version_id: int | None = None,
+    lang: str = "en",
+):
+    styles = report_styles(lang)
+    paper = query_one(
+        """
+        SELECT sp.*, u.name AS student_name
+        FROM student_papers sp
+        JOIN users u ON u.id = sp.student_id
+        WHERE sp.id = ? AND sp.student_id = ?
+        """,
+        (paper_id, student_id),
+    )
+    if not paper:
+        return None
+    if version_id:
+        version = query_one(
+            """
+            SELECT * FROM paper_analysis_versions
+            WHERE id = ? AND paper_id = ?
+            """,
+            (version_id, paper_id),
+        )
+    else:
+        version = query_one(
+            """
+            SELECT * FROM paper_analysis_versions
+            WHERE paper_id = ? ORDER BY version_number DESC LIMIT 1
+            """,
+            (paper_id,),
+        )
+    if not version:
+        return None
+    rows = query_all(
+        """
+        SELECT aqr.*,
+               (SELECT corrected_mark FROM analysis_human_corrections ahc
+                WHERE ahc.analysis_question_result_id = aqr.id
+                ORDER BY ahc.id DESC LIMIT 1) AS human_mark
+        FROM analysis_question_results aqr
+        WHERE aqr.analysis_version_id = ?
+        ORDER BY aqr.id
+        """,
+        (version["id"],),
+    )
+    title = f"Paper analysis - {paper['title']}"
+    story = [p(title, styles["title"])]
+    story.append(
+        p(
+            (
+                f"Student: {paper['student_name']} | Analysis v{version['version_number']} | "
+                f"{paper['syllabus_code']} {paper['paper_number'] or 'custom paper'} | "
+                f"Generated: {datetime.now().strftime('%Y-%m-%d')}"
+            ),
+            styles["small"],
+        )
+    )
+    story.append(Spacer(1, 8))
+    summary = [
+        ["Confirmed minimum", version["confirmed_min_score"]],
+        ["Provisional score", version["provisional_score"]],
+        ["Possible maximum", version["possible_max_score"]],
+        ["Paper maximum", paper["maximum_marks"]],
+    ]
+    story.append(table(summary, widths=[7 * cm, 8 * cm], header=False, lang=lang))
+
+    strengths = []
+    needs = []
+    for row in rows:
+        mark = row["human_mark"] if row["human_mark"] is not None else row["ai_mark"]
+        accuracy = pct(float(mark or 0), float(row["maximum_marks"] or 0))
+        label = f"{row['question_label']} - {row['skill'] or row['topic']}"
+        if accuracy >= 80:
+            strengths.append(label)
+        elif accuracy < 60:
+            needs.append(label)
+    story.append(p("What went well", styles["h2"]))
+    story.append(p(", ".join(strengths[:8]) or "More evidence is needed.", styles["body"]))
+    story.append(p("What to work on", styles["h2"]))
+    story.append(p(", ".join(needs[:8]) or "No clear priority from this paper.", styles["body"]))
+
+    story.append(p("Question-by-question analysis", styles["h2"]))
+    data = [["Question", "Topic / skill", "Mark", "Confidence", "Concise explanation"]]
+    for row in rows:
+        mark = row["human_mark"] if row["human_mark"] is not None else row["ai_mark"]
+        explanation = row["ai_rationale"]
+        if row["error_mechanism"]:
+            explanation = f"{explanation} Lost marks: {row['error_mechanism']}"
+        data.append(
+            [
+                row["question_label"],
+                f"{row['topic']} / {row['skill']}",
+                f"{mark}/{row['maximum_marks']}",
+                f"{round(float(row['ai_confidence'] or 0) * 100)}%",
+                explanation[:420],
+            ]
+        )
+    story.append(
+        table(
+            data,
+            widths=[2 * cm, 4.1 * cm, 2 * cm, 2.2 * cm, 6.1 * cm],
+            lang=lang,
+        )
+    )
+    story.append(p("Interpretation", styles["h2"]))
+    story.append(
+        p(
+            "Scores with uncertainty are ranges, not hidden precision. Reanalyse with a clearer scan or corrected mapping when evidence is weak.",
+            styles["body"],
+        )
+    )
+    return build_pdf(story, title)
+
+
+def research_experiment_report(experiment_id: int):
+    styles = report_styles("en")
+    experiment = query_one(
+        "SELECT * FROM research_experiments WHERE id = ?",
+        (experiment_id,),
+    )
+    if not experiment:
+        return None
+    runs = query_all(
+        """
+        SELECT * FROM research_experiment_runs
+        WHERE experiment_id = ? ORDER BY run_number
+        """,
+        (experiment_id,),
+    )
+    title = f"Research experiment - {experiment['title']}"
+    story = [p(title, styles["title"])]
+    story.append(
+        p(
+            f"Status: {experiment['status']} | Created: {experiment['created_at'][:10]} | Updated: {experiment['updated_at'][:10]}",
+            styles["small"],
+        )
+    )
+    story.append(p("Research definition", styles["h2"]))
+    story.append(
+        table(
+            [
+                ["Research question", experiment["research_question"]],
+                ["Hypothesis", experiment["hypothesis"]],
+                ["Description", experiment["description"]],
+            ],
+            widths=[4 * cm, 11 * cm],
+            header=False,
+        )
+    )
+    story.append(p("Configuration", styles["h2"]))
+    configuration = [
+        ["OCR", experiment["ocr_model"], experiment["ocr_prompt_version"]],
+        ["Grading", experiment["grading_model"], experiment["grading_prompt_version"]],
+        ["Diagnosis", experiment["diagnosis_model"], "-"],
+        ["Threshold", experiment["confidence_threshold"], "-"],
+        ["Image resolution", f"{experiment['image_resolution']} DPI", "-"],
+        [
+            "Deterministic checks",
+            "enabled" if experiment["deterministic_checks"] else "disabled",
+            "-",
+        ],
+    ]
+    story.append(table([["Variable", "Value", "Prompt"]] + configuration, widths=[4 * cm, 6 * cm, 6 * cm]))
+    story.append(p("Dataset selection", styles["h2"]))
+    story.append(p(experiment["dataset_selection"], styles["small"]))
+    story.append(p("Experiment runs and metrics", styles["h2"]))
+    run_rows = [["Run", "Status", "Baseline", "Sample size", "Metrics"]]
+    for run in runs:
+        metrics = json.loads(run["metrics"] or "{}")
+        metric_text = "; ".join(f"{key}={value}" for key, value in metrics.items())
+        run_rows.append(
+            [
+                run["run_number"],
+                run["status"],
+                "yes" if run["baseline"] else "variant",
+                f"n={run['sample_size']}",
+                metric_text or run["result_summary"],
+            ]
+        )
+    story.append(
+        table(
+            run_rows,
+            widths=[1.4 * cm, 2.2 * cm, 2.2 * cm, 2.3 * cm, 8.3 * cm],
+        )
+    )
+    story.append(p("Limitations", styles["h2"]))
+    story.append(
+        p(
+            "Metrics are meaningful only with the displayed sample size and representative human labels. This report does not imply statistical significance where none was established.",
+            styles["body"],
+        )
+    )
+    story.append(p("Research notes", styles["h2"]))
+    story.append(p(experiment["notes"] or "No additional notes.", styles["body"]))
     return build_pdf(story, title)

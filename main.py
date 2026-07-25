@@ -39,6 +39,7 @@ from db import (
     recommend_practice,
     seed_if_empty,
     update_assignment_total_marks,
+    user_has_role,
     verify_password,
     weak_topics,
 )
@@ -57,7 +58,26 @@ from ocr import cxsee_health_check, ocr_pages_for_submission, reset_ocr_cache
 from paper_packs import ingest_0606_directory, paper_pack_inventory
 from pipeline import PIPELINE_STAGES, create_processing_job, run_analysis_pipeline
 from pdf_utils import get_page_image_base64, is_valid_pdf, pdf_to_page_images, save_upload
-from reports import assessment_report, profile_report, safe_filename
+from reports import (
+    assessment_report,
+    profile_report,
+    research_experiment_report,
+    safe_filename,
+    self_service_assessment_report,
+)
+from self_service import (
+    SELF_SERVICE_STAGES,
+    analysis_result,
+    compare_direct_papers,
+    confirm_version,
+    create_rerun_draft,
+    create_student_paper_draft,
+    direct_summary,
+    paper_with_versions,
+    parse_json,
+    run_self_service_analysis,
+    student_owned_papers,
+)
 from topics import TOPICS
 
 init_db()
@@ -74,6 +94,18 @@ os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
+    if request.url.path == "/teacher" or request.url.path.startswith("/teacher/"):
+        user = get_current_user(request)
+        if user and user_has_role(user["id"], "researcher", "owner"):
+            return RedirectResponse("/research", status_code=303)
+        return RedirectResponse("/login", status_code=303)
+    if request.url.path == "/student/assignments" or request.url.path.startswith(
+        "/student/assignments/"
+    ):
+        user = get_current_user(request)
+        if user and require_role(request, "student"):
+            return RedirectResponse("/student/analyse", status_code=303)
+        return RedirectResponse("/login", status_code=303)
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
         if origin:
@@ -109,6 +141,10 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "role_label": lambda r: role_label(lang, r),
         "topic_label": lambda top: topic_label(lang, top),
         "question_type_label": lambda key: question_type_label(lang, key),
+        "is_researcher": bool(
+            context.get("user")
+            and user_has_role(context["user"]["id"], "researcher", "owner")
+        ),
     }
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
@@ -196,8 +232,8 @@ def home(request: Request):
     user = get_current_user(request)
     if not user:
         return redirect_login()
-    if user["role"] == "teacher":
-        return RedirectResponse("/teacher", status_code=303)
+    if user_has_role(user["id"], "researcher", "owner"):
+        return RedirectResponse("/research", status_code=303)
     return RedirectResponse("/student", status_code=303)
 
 
@@ -250,6 +286,386 @@ def health():
         "ocr_provider": config.OCR_PROVIDER,
         "ocr_model": config.CXSEE_OCR_MODEL,
     }
+
+
+def _owned_analysis_version(student_id: int, version_id: int):
+    return query_one(
+        """
+        SELECT pav.*, sp.student_id, sp.title AS paper_title,
+               sp.id AS student_paper_id
+        FROM paper_analysis_versions pav
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        WHERE pav.id = ? AND sp.student_id = ?
+        """,
+        (version_id, student_id),
+    )
+
+
+@app.get("/student/analyse", response_class=HTMLResponse)
+def student_analyse_page(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "student/analyse.html",
+        {"user": user, "error": None},
+    )
+
+
+@app.post("/student/analyse")
+async def student_analyse_upload(
+    request: Request,
+    title: str = Form(""),
+    question_paper: UploadFile = File(...),
+    answer_script: UploadFile = File(...),
+    mark_scheme: UploadFile = File(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    question_content = await question_paper.read()
+    answer_content = await answer_script.read()
+    scheme_content = await mark_scheme.read()
+    if any(
+        len(content) <= 0 or len(content) > config.MAX_UPLOAD_BYTES
+        for content in (question_content, answer_content, scheme_content)
+    ):
+        return render(
+            request,
+            "student/analyse.html",
+            {
+                "user": user,
+                "error": "Each document must be present and no larger than the upload limit.",
+            },
+            status_code=400,
+        )
+    try:
+        paper_id, version_id = create_student_paper_draft(
+            user["id"],
+            title,
+            question_paper.filename or "question-paper.pdf",
+            question_content,
+            answer_script.filename or "answer-script.pdf",
+            answer_content,
+            mark_scheme.filename or "mark-scheme.pdf",
+            scheme_content,
+        )
+    except ValueError as exc:
+        return render(
+            request,
+            "student/analyse.html",
+            {"user": user, "error": str(exc)},
+            status_code=400,
+        )
+    execute(
+        """
+        INSERT INTO audit_logs
+        (actor_id, action, entity_type, entity_id, metadata, created_at)
+        VALUES (?, 'student_paper_uploaded', 'student_paper', ?, ?, ?)
+        """,
+        (
+            user["id"],
+            str(paper_id),
+            json.dumps({"analysis_version_id": version_id}),
+            datetime.now().isoformat(),
+        ),
+    )
+    return RedirectResponse(
+        f"/student/analysis/{version_id}/review",
+        status_code=303,
+    )
+
+
+@app.get("/student/analysis/{version_id}/review", response_class=HTMLResponse)
+def student_analysis_review(request: Request, version_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    version = _owned_analysis_version(user["id"], version_id)
+    if not version:
+        return RedirectResponse("/student/papers", status_code=303)
+    metadata = parse_json(
+        version["confirmed_metadata"] or version["detected_metadata"], {}
+    )
+    questions = parse_json(version["question_plan"], [])
+    return render(
+        request,
+        "student/analysis_review.html",
+        {
+            "user": user,
+            "version": version,
+            "metadata": metadata,
+            "questions": questions,
+            "question_plan_json": json.dumps(questions, indent=2, ensure_ascii=False),
+            "warnings": parse_json(version["warnings"], []),
+            "error": None,
+        },
+    )
+
+
+@app.post("/student/analysis/{version_id}/run")
+async def student_analysis_run(
+    request: Request,
+    version_id: int,
+    background_tasks: BackgroundTasks,
+    title: str = Form(...),
+    syllabus_code: str = Form("0606"),
+    paper_number: str = Form(""),
+    paper_year: str = Form(""),
+    examination_session: str = Form(""),
+    calculator_policy: str = Form("unknown"),
+    maximum_marks: float = Form(0),
+    source_type: str = Form("custom"),
+    question_plan: str = Form(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    version = _owned_analysis_version(user["id"], version_id)
+    if not version:
+        return RedirectResponse("/student/papers", status_code=303)
+    try:
+        questions = json.loads(question_plan)
+        if not isinstance(questions, list) or not questions:
+            raise ValueError("At least one question is required.")
+        for index, item in enumerate(questions):
+            if not isinstance(item, dict):
+                raise ValueError(f"Question {index + 1} must be a JSON object.")
+            item["label"] = str(item.get("label") or f"Q{index + 1}")
+            item["maximum_marks"] = float(item.get("maximum_marks") or 0)
+            if item["maximum_marks"] <= 0:
+                raise ValueError(f"{item['label']} must have a positive maximum mark.")
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        metadata = parse_json(version["detected_metadata"], {})
+        return render(
+            request,
+            "student/analysis_review.html",
+            {
+                "user": user,
+                "version": version,
+                "metadata": metadata,
+                "questions": parse_json(version["question_plan"], []),
+                "question_plan_json": question_plan,
+                "warnings": parse_json(version["warnings"], []),
+                "error": f"Review the question plan: {exc}",
+            },
+            status_code=400,
+        )
+    metadata = {
+        "title": title.strip(),
+        "syllabus_code": syllabus_code.strip() or "custom",
+        "paper_number": paper_number.strip(),
+        "paper_year": int(paper_year) if paper_year.strip().isdigit() else None,
+        "examination_session": examination_session.strip(),
+        "calculator_policy": calculator_policy,
+        "maximum_marks": maximum_marks
+        or sum(float(item["maximum_marks"]) for item in questions),
+        "source_type": source_type,
+    }
+    paper_id = confirm_version(user["id"], version_id, metadata, questions)
+    background_tasks.add_task(run_self_service_analysis, version_id)
+    return RedirectResponse(
+        f"/student/analysis/{version_id}/processing",
+        status_code=303,
+    )
+
+
+@app.get(
+    "/student/analysis/{version_id}/processing",
+    response_class=HTMLResponse,
+)
+def student_self_service_processing(request: Request, version_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    version = _owned_analysis_version(user["id"], version_id)
+    if not version:
+        return RedirectResponse("/student/papers", status_code=303)
+    return render(
+        request,
+        "student/self_processing.html",
+        {
+            "user": user,
+            "version": version,
+            "pipeline_stages": SELF_SERVICE_STAGES,
+        },
+    )
+
+
+@app.get("/student/analysis/{version_id}/status")
+def student_self_service_status(request: Request, version_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    version = _owned_analysis_version(user["id"], version_id)
+    if not version:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return {
+        "status": version["status"],
+        "current_stage": version["current_stage"],
+        "stage_index": version["stage_index"],
+        "failure_message": version["failure_message"],
+        "paper_id": version["student_paper_id"],
+        "version_number": version["version_number"],
+    }
+
+
+@app.get("/student/papers", response_class=HTMLResponse)
+def student_papers_page(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    legacy = student_attempts(user["id"])
+    return render(
+        request,
+        "student/papers.html",
+        {
+            "user": user,
+            "papers": student_owned_papers(user["id"]),
+            "legacy_attempts": legacy,
+        },
+    )
+
+
+@app.get("/student/papers/{paper_id}", response_class=HTMLResponse)
+def student_paper_result(
+    request: Request,
+    paper_id: int,
+    version: Optional[int] = None,
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    result = analysis_result(user["id"], paper_id, version)
+    if not result:
+        return RedirectResponse("/student/papers", status_code=303)
+    paper, versions = paper_with_versions(user["id"], paper_id)
+    return render(
+        request,
+        "student/self_result.html",
+        {
+            "user": user,
+            "result": result,
+            "paper": paper,
+            "versions": versions,
+        },
+    )
+
+
+@app.get("/student/papers/{paper_id}/report")
+def student_self_service_report(
+    request: Request,
+    paper_id: int,
+    version: Optional[int] = None,
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    paper = query_one(
+        "SELECT title FROM student_papers WHERE id = ? AND student_id = ?",
+        (paper_id, user["id"]),
+    )
+    if not paper:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    content = self_service_assessment_report(
+        user["id"],
+        paper_id,
+        version_id=version,
+        lang=get_lang(request),
+    )
+    if not content:
+        return JSONResponse({"detail": "Report is not available."}, status_code=404)
+    return pdf_response(
+        content,
+        f"{safe_filename(paper['title'])}-analysis.pdf",
+    )
+
+
+@app.get("/student/papers/{paper_id}/rerun", response_class=HTMLResponse)
+def student_paper_rerun_page(request: Request, paper_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    paper, versions = paper_with_versions(user["id"], paper_id)
+    if not paper:
+        return RedirectResponse("/student/papers", status_code=303)
+    return render(
+        request,
+        "student/rerun.html",
+        {"user": user, "paper": paper, "versions": versions, "error": None},
+    )
+
+
+@app.post("/student/papers/{paper_id}/rerun")
+async def student_paper_rerun(
+    request: Request,
+    paper_id: int,
+    question_paper: UploadFile = File(None),
+    answer_script: UploadFile = File(None),
+    mark_scheme: UploadFile = File(None),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+
+    async def optional_file(upload: UploadFile | None):
+        if not upload or not upload.filename:
+            return None
+        content = await upload.read()
+        if len(content) > config.MAX_UPLOAD_BYTES:
+            raise ValueError("A replacement file exceeds the upload limit.")
+        return upload.filename, content
+
+    try:
+        version_id = create_rerun_draft(
+            user["id"],
+            paper_id,
+            await optional_file(question_paper),
+            await optional_file(answer_script),
+            await optional_file(mark_scheme),
+        )
+    except ValueError as exc:
+        paper, versions = paper_with_versions(user["id"], paper_id)
+        return render(
+            request,
+            "student/rerun.html",
+            {"user": user, "paper": paper, "versions": versions, "error": str(exc)},
+            status_code=400,
+        )
+    return RedirectResponse(
+        f"/student/analysis/{version_id}/review",
+        status_code=303,
+    )
+
+
+@app.get("/student/papers/{paper_id}/documents/{document_type}")
+def student_paper_document(
+    request: Request,
+    paper_id: int,
+    document_type: str,
+    version: Optional[int] = None,
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    result = analysis_result(user["id"], paper_id, version)
+    if not result:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    fields = {
+        "question": "question_paper_path",
+        "answers": "answer_script_path",
+        "scheme": "mark_scheme_path",
+    }
+    field = fields.get(document_type)
+    path = result["version"][field] if field else None
+    if not path or not os.path.isfile(path):
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=f"numera-{document_type}-v{result['version']['version_number']}.pdf",
+    )
 
 
 @app.get("/teacher", response_class=HTMLResponse)
@@ -1080,40 +1496,26 @@ def student_dashboard(request: Request):
     if not user:
         return redirect_login()
 
-    assignments = query_all(
-        """
-        SELECT a.*, c.name AS class_name, s.id AS submission_id, s.status AS submission_status,
-               (SELECT SUM(COALESCE(gd.final_mark, 0))
-                FROM grade_drafts gd WHERE gd.submission_id = s.id) AS score
-        FROM assignments a
-        JOIN classes c ON c.id = a.class_id
-        JOIN class_enrollments ce ON ce.class_id = c.id
-        LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ?
-        WHERE ce.student_id = ? AND a.status = 'published'
-          AND a.syllabus_code = '0606'
-        ORDER BY a.due_date DESC
-        """,
-        (user["id"], user["id"]),
-    )
     mastery = compute_topic_mastery(user["id"])
     analytics = student_analytics_summary(user["id"])
     recommendations = analytics_practice(user["id"], limit=5)
     weak = weak_topics(user["id"])
     attempts = student_attempts(user["id"])
     skill_profile = student_skill_profile(user["id"])
+    direct = direct_summary(user["id"])
 
     return render(
         request,
         "student/dashboard.html",
         {
             "user": user,
-            "assignments": assignments,
             "mastery": mastery,
             "weak_topics": weak,
             "recommendations": recommendations,
             "analytics": analytics,
             "attempts": attempts,
             "skill_profile": skill_profile,
+            "direct": direct,
         },
     )
 
@@ -1377,11 +1779,7 @@ def student_history(request: Request):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    return render(
-        request,
-        "student/history.html",
-        {"user": user, "attempts": student_attempts(user["id"])},
-    )
+    return RedirectResponse("/student/papers", status_code=303)
 
 
 @app.get("/student/compare", response_class=HTMLResponse)
@@ -1394,10 +1792,14 @@ def student_compare(request: Request, ids: str = ""):
     for value in raw_values:
         if value.strip().isdigit():
             selected.append(int(value.strip()))
-    attempts = student_attempts(user["id"])
+    attempts = [
+        row
+        for row in student_owned_papers(user["id"])
+        if row["analysis_status"] == "completed"
+    ]
     if not selected:
         selected = [row["id"] for row in attempts[:2]]
-    comparison = compare_papers(user["id"], selected)
+    comparison = compare_direct_papers(user["id"], selected)
     return render(
         request,
         "student/compare.html",
@@ -1523,20 +1925,72 @@ def _research_overview():
         "students": query_one(
             "SELECT COUNT(*) AS count FROM users WHERE role = 'student'"
         )["count"],
-        "attempts": query_one("SELECT COUNT(*) AS count FROM submissions")["count"],
+        "attempts": query_one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM submissions) +
+              (SELECT COUNT(*) FROM student_papers) AS count
+            """
+        )["count"],
+        "question_responses": query_one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM grade_drafts) +
+              (SELECT COUNT(*) FROM analysis_question_results) AS count
+            """
+        )["count"],
         "criterion_decisions": query_one(
-            "SELECT COUNT(*) AS count FROM criterion_decisions"
+            """
+            SELECT
+              (SELECT COUNT(*) FROM criterion_decisions) +
+              (SELECT COUNT(*) FROM analysis_question_results) AS count
+            """
         )["count"],
         "human_corrections": query_one(
-            "SELECT COUNT(*) AS count FROM human_corrections"
+            """
+            SELECT
+              (SELECT COUNT(*) FROM human_corrections) +
+              (SELECT COUNT(*) FROM analysis_human_corrections) AS count
+            """
         )["count"],
         "uncertain_decisions": query_one(
-            "SELECT COUNT(*) AS count FROM criterion_decisions WHERE decision = 'uncertain'"
+            """
+            SELECT
+              (SELECT COUNT(*) FROM criterion_decisions WHERE decision = 'uncertain') +
+              (SELECT COUNT(*) FROM analysis_question_results
+               WHERE ai_confidence < 0.70) AS count
+            """
         )["count"],
         "failed_jobs": query_one(
-            "SELECT COUNT(*) AS count FROM processing_jobs WHERE status = 'failed'"
+            """
+            SELECT
+              (SELECT COUNT(*) FROM processing_jobs WHERE status = 'failed') +
+              (SELECT COUNT(*) FROM paper_analysis_versions WHERE status = 'failed') AS count
+            """
         )["count"],
-        "model_runs": query_one("SELECT COUNT(*) AS count FROM model_runs")["count"],
+        "ocr_runs": query_one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM model_runs WHERE run_type = 'ocr') +
+              (SELECT COUNT(*) FROM analysis_ocr_pages) AS count
+            """
+        )["count"],
+        "grading_runs": query_one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM model_runs WHERE run_type != 'ocr') +
+              (SELECT COUNT(*) FROM analysis_question_results) AS count
+            """
+        )["count"],
+        "active_experiments": query_one(
+            """
+            SELECT COUNT(*) AS count FROM research_experiments
+            WHERE status IN ('draft', 'ready', 'running')
+            """
+        )["count"],
+        "completed_experiments": query_one(
+            "SELECT COUNT(*) AS count FROM research_experiments WHERE status = 'completed'"
+        )["count"],
     }
 
 
@@ -1562,6 +2016,19 @@ def research_dashboard(request: Request):
     experiments = query_all(
         "SELECT * FROM research_experiments ORDER BY created_at DESC LIMIT 20"
     )
+    activity = query_all(
+        "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 12"
+    )
+    dataset = query_one(
+        """
+        SELECT
+          (SELECT COUNT(*) FROM student_papers) AS self_service_papers,
+          (SELECT COUNT(*) FROM submissions) AS legacy_submissions,
+          (SELECT COUNT(*) FROM analysis_ocr_pages) AS self_service_ocr_pages,
+          (SELECT COUNT(*) FROM human_corrections) +
+          (SELECT COUNT(*) FROM analysis_human_corrections) AS labelled_decisions
+        """
+    )
     return render(
         request,
         "research/dashboard.html",
@@ -1573,6 +2040,8 @@ def research_dashboard(request: Request):
             "recent_runs": recent_runs,
             "uncertain": uncertain,
             "experiments": experiments,
+            "activity": activity,
+            "dataset": dataset,
         },
     )
 
@@ -1635,35 +2104,6 @@ def research_correct_decision(
     )
     execute(
         """
-        UPDATE criterion_decisions
-        SET awarded_marks = ?, decision = 'human_corrected',
-            rationale = ?, confidence = 1.0, ambiguity = ''
-        WHERE id = ?
-        """,
-        (corrected, notes or reason, decision_id),
-    )
-    if decision["question_id"]:
-        execute(
-            """
-            UPDATE grade_drafts
-            SET final_mark = ?, teacher_override_mark = ?,
-                teacher_override_comment = ?, teacher_override_at = ?,
-                teacher_override_by = ?, needs_exception_review = 0
-            WHERE submission_id = ? AND question_id = ?
-            """,
-            (
-                corrected,
-                corrected,
-                notes or reason,
-                datetime.now().isoformat(),
-                user["id"],
-                decision["submission_id"],
-                decision["question_id"],
-            ),
-        )
-    sync_submission_evidence(decision["submission_id"])
-    execute(
-        """
         INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, metadata, created_at)
         VALUES (?, 'human_correction', 'criterion_decision', ?, ?, ?)
         """,
@@ -1683,52 +2123,826 @@ def research_create_experiment(
     title: str = Form(...),
     research_question: str = Form(""),
     hypothesis: str = Form(""),
+    description: str = Form(""),
+    dataset_selection: str = Form("{}"),
+    ocr_model: str = Form(""),
+    grading_model: str = Form(""),
+    diagnosis_model: str = Form(""),
+    ocr_prompt_version: str = Form(""),
+    grading_prompt_version: str = Form("grading-0606-v1"),
+    confidence_threshold: float = Form(0.70),
+    deterministic_checks: str = Form("1"),
+    image_resolution: int = Form(200),
+    evaluation_metrics: str = Form("[]"),
+    notes: str = Form(""),
 ):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    now = datetime.now().isoformat()
+    try:
+        dataset_json = json.loads(dataset_selection or "{}")
+        metrics_json = json.loads(evaluation_metrics or "[]")
+    except json.JSONDecodeError:
+        dataset_json, metrics_json = {}, []
+    experiment_id = execute(
+        """
+        INSERT INTO research_experiments
+        (title, research_question, hypothesis, description, dataset_selection,
+         ocr_model, grading_model, diagnosis_model, ocr_prompt_version,
+         grading_prompt_version, confidence_threshold, deterministic_checks,
+         image_resolution, evaluation_metrics, notes, status, created_by,
+         created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)
+        """,
+        (
+            title,
+            research_question,
+            hypothesis,
+            description,
+            json.dumps(dataset_json),
+            ocr_model or config.CXSEE_OCR_MODEL,
+            grading_model or config.CXSEE_MARKING_MODEL,
+            diagnosis_model or config.CXSEE_DIAGNOSIS_MODEL or config.CXSEE_MARKING_MODEL,
+            ocr_prompt_version or config.OCR_PROMPT_VERSION,
+            grading_prompt_version,
+            max(0.0, min(confidence_threshold, 1.0)),
+            0 if deterministic_checks in {"0", "false", "off"} else 1,
+            max(72, min(image_resolution, 400)),
+            json.dumps(metrics_json),
+            notes,
+            user["id"],
+            now,
+            now,
+        ),
+    )
+    return RedirectResponse(f"/research/experiments/{experiment_id}", status_code=303)
+
+
+@app.get("/research/experiments", response_class=HTMLResponse)
+def research_experiments_page(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    experiments = query_all(
+        """
+        SELECT re.*,
+               (SELECT COUNT(*) FROM research_experiment_runs rer
+                WHERE rer.experiment_id = re.id) AS run_count,
+               (SELECT MAX(sample_size) FROM research_experiment_runs rer
+                WHERE rer.experiment_id = re.id) AS latest_sample_size
+        FROM research_experiments re
+        ORDER BY CASE re.status WHEN 'running' THEN 0 WHEN 'ready' THEN 1
+                 WHEN 'draft' THEN 2 WHEN 'completed' THEN 3 ELSE 4 END,
+                 re.updated_at DESC
+        """
+    )
+    return render(
+        request,
+        "research/experiments.html",
+        {"user": user, "experiments": experiments},
+    )
+
+
+@app.get("/research/experiments/new", response_class=HTMLResponse)
+def research_experiment_new(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "research/experiment_form.html",
+        {"user": user, "experiment": None, "config": config},
+    )
+
+
+@app.get("/research/experiments/{experiment_id}", response_class=HTMLResponse)
+def research_experiment_detail(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    experiment = query_one(
+        "SELECT * FROM research_experiments WHERE id = ?",
+        (experiment_id,),
+    )
+
+
+@app.get("/research/experiments/{experiment_id}/report")
+def research_experiment_pdf(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    content = research_experiment_report(experiment_id)
+    if not content:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return pdf_response(
+        content,
+        f"numera-experiment-{experiment_id}.pdf",
+    )
+    if not experiment:
+        return RedirectResponse("/research/experiments", status_code=303)
+    runs = query_all(
+        """
+        SELECT * FROM research_experiment_runs
+        WHERE experiment_id = ? ORDER BY run_number DESC
+        """,
+        (experiment_id,),
+    )
+    return render(
+        request,
+        "research/experiment_detail.html",
+        {
+            "user": user,
+            "experiment": experiment,
+            "runs": runs,
+            "dataset": parse_json(experiment["dataset_selection"], {}),
+            "metrics": parse_json(experiment["metrics"], {}),
+        },
+    )
+
+
+@app.get("/research/experiments/{experiment_id}/edit", response_class=HTMLResponse)
+def research_experiment_edit(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    experiment = query_one(
+        "SELECT * FROM research_experiments WHERE id = ?",
+        (experiment_id,),
+    )
+    if not experiment:
+        return RedirectResponse("/research/experiments", status_code=303)
+    return render(
+        request,
+        "research/experiment_form.html",
+        {"user": user, "experiment": experiment, "config": config},
+    )
+
+
+@app.post("/research/experiments/{experiment_id}/edit")
+def research_experiment_update(
+    request: Request,
+    experiment_id: int,
+    title: str = Form(...),
+    research_question: str = Form(""),
+    hypothesis: str = Form(""),
+    description: str = Form(""),
+    status: str = Form("draft"),
+    dataset_selection: str = Form("{}"),
+    ocr_model: str = Form(""),
+    grading_model: str = Form(""),
+    diagnosis_model: str = Form(""),
+    ocr_prompt_version: str = Form(""),
+    grading_prompt_version: str = Form(""),
+    confidence_threshold: float = Form(0.70),
+    deterministic_checks: str = Form("1"),
+    image_resolution: int = Form(200),
+    preprocessing_config: str = Form("{}"),
+    longitudinal_config: str = Form("{}"),
+    evaluation_metrics: str = Form("[]"),
+    notes: str = Form(""),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    allowed_status = status if status in {
+        "draft", "ready", "running", "completed", "failed", "archived"
+    } else "draft"
+    for raw, fallback in (
+        (dataset_selection, "{}"),
+        (preprocessing_config, "{}"),
+        (longitudinal_config, "{}"),
+        (evaluation_metrics, "[]"),
+    ):
+        try:
+            json.loads(raw or fallback)
+        except json.JSONDecodeError:
+            return RedirectResponse(
+                f"/research/experiments/{experiment_id}/edit",
+                status_code=303,
+            )
+    execute(
+        """
+        UPDATE research_experiments
+        SET title = ?, research_question = ?, hypothesis = ?,
+            description = ?, status = ?, dataset_selection = ?,
+            ocr_model = ?, grading_model = ?, diagnosis_model = ?,
+            ocr_prompt_version = ?, grading_prompt_version = ?,
+            confidence_threshold = ?, deterministic_checks = ?,
+            image_resolution = ?, preprocessing_config = ?,
+            longitudinal_config = ?, evaluation_metrics = ?, notes = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            title.strip(),
+            research_question,
+            hypothesis,
+            description,
+            allowed_status,
+            dataset_selection or "{}",
+            ocr_model,
+            grading_model,
+            diagnosis_model,
+            ocr_prompt_version,
+            grading_prompt_version,
+            max(0, min(confidence_threshold, 1)),
+            0 if deterministic_checks in {"0", "false", "off"} else 1,
+            max(72, min(image_resolution, 400)),
+            preprocessing_config or "{}",
+            longitudinal_config or "{}",
+            evaluation_metrics or "[]",
+            notes,
+            datetime.now().isoformat(),
+            experiment_id,
+        ),
+    )
+    return RedirectResponse(
+        f"/research/experiments/{experiment_id}",
+        status_code=303,
+    )
+
+
+@app.post("/research/experiments/{experiment_id}/duplicate")
+def research_experiment_duplicate(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    source = query_one(
+        "SELECT * FROM research_experiments WHERE id = ?",
+        (experiment_id,),
+    )
+    if not source:
+        return RedirectResponse("/research/experiments", status_code=303)
+    now = datetime.now().isoformat()
+    new_id = execute(
+        """
+        INSERT INTO research_experiments
+        (title, research_question, hypothesis, description, dataset_selection,
+         independent_variable, comparison_groups, model_version,
+         prompt_version, ocr_model, grading_model, diagnosis_model,
+         ocr_prompt_version, grading_prompt_version, confidence_threshold,
+         taxonomy_version, calculation_version, deterministic_checks,
+         image_resolution, preprocessing_config, longitudinal_config,
+         evaluation_metrics, configuration, notes, status, created_by,
+         created_at, updated_at)
+        SELECT title || ' — copy', research_question, hypothesis, description,
+               dataset_selection, independent_variable, comparison_groups,
+               model_version, prompt_version, ocr_model, grading_model,
+               diagnosis_model, ocr_prompt_version, grading_prompt_version,
+               confidence_threshold, taxonomy_version, calculation_version,
+               deterministic_checks, image_resolution, preprocessing_config,
+               longitudinal_config, evaluation_metrics, configuration, notes,
+               'draft', ?, ?, ?
+        FROM research_experiments WHERE id = ?
+        """,
+        (user["id"], now, now, experiment_id),
+    )
+    return RedirectResponse(f"/research/experiments/{new_id}", status_code=303)
+
+
+def _experiment_metrics():
+    labelled = query_all(
+        """
+        SELECT aqr.ai_mark, ahc.corrected_mark
+        FROM analysis_human_corrections ahc
+        JOIN analysis_question_results aqr
+          ON aqr.id = ahc.analysis_question_result_id
+        UNION ALL
+        SELECT cd.awarded_marks, hc.corrected_marks
+        FROM human_corrections hc
+        JOIN criterion_decisions cd ON cd.id = hc.criterion_decision_id
+        """
+    )
+    sample_size = len(labelled)
+    if not sample_size:
+        return 0, {
+            "sample_size": 0,
+            "message": "No human-labelled decisions are available; agreement metrics are not meaningful.",
+        }
+    errors = [
+        float(row["ai_mark"]) - float(row["corrected_mark"])
+        for row in labelled
+    ]
+    metrics = {
+        "sample_size": sample_size,
+        "exact_mark_agreement": round(
+            100 * sum(abs(error) < 1e-9 for error in errors) / sample_size, 1
+        ),
+        "mean_absolute_error": round(
+            sum(abs(error) for error in errors) / sample_size, 3
+        ),
+        "within_one_mark": round(
+            100 * sum(abs(error) <= 1 for error in errors) / sample_size, 1
+        ),
+        "over_marking_rate": round(
+            100 * sum(error > 0 for error in errors) / sample_size, 1
+        ),
+        "under_marking_rate": round(
+            100 * sum(error < 0 for error in errors) / sample_size, 1
+        ),
+    }
+    return sample_size, metrics
+
+
+@app.post("/research/experiments/{experiment_id}/run")
+def research_experiment_run(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    experiment = query_one(
+        "SELECT * FROM research_experiments WHERE id = ?",
+        (experiment_id,),
+    )
+    if not experiment:
+        return RedirectResponse("/research/experiments", status_code=303)
+    row = query_one(
+        """
+        SELECT COALESCE(MAX(run_number), 0) + 1 AS number
+        FROM research_experiment_runs WHERE experiment_id = ?
+        """,
+        (experiment_id,),
+    )
+    sample_size, metrics = _experiment_metrics()
+    now = datetime.now().isoformat()
+    execute(
+        """
+        INSERT INTO research_experiment_runs
+        (experiment_id, run_number, status, baseline,
+         configuration_snapshot, sample_size, metrics, result_summary,
+         started_at, finished_at, created_by, created_at)
+        VALUES (?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            experiment_id,
+            row["number"],
+            1 if row["number"] == 1 else 0,
+            json.dumps(dict(experiment), default=str),
+            sample_size,
+            json.dumps(metrics),
+            metrics.get("message", "Evaluation completed against available human labels."),
+            now,
+            now,
+            user["id"],
+            now,
+        ),
+    )
+    execute(
+        """
+        UPDATE research_experiments
+        SET status = 'completed', metrics = ?, result = ?,
+            last_run_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            json.dumps(metrics),
+            metrics.get("message", "Run completed."),
+            now,
+            now,
+            experiment_id,
+        ),
+    )
+    return RedirectResponse(
+        f"/research/experiments/{experiment_id}",
+        status_code=303,
+    )
+
+
+@app.post("/research/experiments/{experiment_id}/archive")
+def research_experiment_archive(request: Request, experiment_id: int):
     user = require_researcher(request)
     if not user:
         return redirect_login()
     now = datetime.now().isoformat()
     execute(
         """
-        INSERT INTO research_experiments
-        (title, research_question, hypothesis, ocr_model, created_by,
-         created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        UPDATE research_experiments
+        SET status = 'archived', archived_at = ?, updated_at = ?
+        WHERE id = ?
         """,
-        (
-            title,
-            research_question,
-            hypothesis,
-            config.CXSEE_OCR_MODEL,
-            user["id"],
-            now,
-            now,
-        ),
+        (now, now, experiment_id),
     )
-    return RedirectResponse("/research", status_code=303)
+    return RedirectResponse("/research/experiments", status_code=303)
 
 
-@app.get("/research/export")
-def research_export(request: Request, format: str = "jsonl", mode: str = "pseudonymized"):
+@app.post("/research/experiments/{experiment_id}/delete")
+def research_experiment_delete(request: Request, experiment_id: int):
     user = require_researcher(request)
     if not user:
         return redirect_login()
-    rows = query_all(
+    execute(
+        "DELETE FROM research_experiments WHERE id = ? AND status = 'draft'",
+        (experiment_id,),
+    )
+    return RedirectResponse("/research/experiments", status_code=303)
+
+
+@app.get("/research/ocr", response_class=HTMLResponse)
+def research_ocr_lab(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    pages = query_all(
         """
-        SELECT so.*, s.uploaded_at, a.title AS paper_title
-        FROM skill_observations so
-        JOIN submissions s ON s.id = so.submission_id
-        JOIN assignments a ON a.id = s.assignment_id
-        ORDER BY so.observed_at
+        SELECT aop.*, sp.title AS paper_title, sp.student_id,
+               pav.version_number, pav.answer_script_path
+        FROM analysis_ocr_pages aop
+        JOIN paper_analysis_versions pav ON pav.id = aop.analysis_version_id
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        ORDER BY aop.created_at DESC LIMIT 100
         """
     )
+    return render(
+        request,
+        "research/ocr.html",
+        {"user": user, "pages": pages},
+    )
+
+
+@app.post("/research/ocr/{ocr_page_id}/correct")
+def research_correct_ocr(
+    request: Request,
+    ocr_page_id: int,
+    corrected_text: str = Form(...),
+    evaluation_label: str = Form(...),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    label = evaluation_label if evaluation_label in {
+        "correct", "partially_correct", "incorrect"
+    } else "partially_correct"
+    execute(
+        """
+        UPDATE analysis_ocr_pages
+        SET corrected_text = ?, evaluation_label = ?, corrected_by = ?,
+            corrected_at = ?
+        WHERE id = ?
+        """,
+        (
+            corrected_text,
+            label,
+            user["id"],
+            datetime.now().isoformat(),
+            ocr_page_id,
+        ),
+    )
+    execute(
+        """
+        INSERT INTO audit_logs
+        (actor_id, action, entity_type, entity_id, metadata, created_at)
+        VALUES (?, 'ocr_correction', 'analysis_ocr_page', ?, ?, ?)
+        """,
+        (
+            user["id"],
+            str(ocr_page_id),
+            json.dumps({"evaluation_label": label}),
+            datetime.now().isoformat(),
+        ),
+    )
+    return RedirectResponse("/research/ocr", status_code=303)
+
+
+@app.get("/research/grading", response_class=HTMLResponse)
+def research_grading_lab(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    results = query_all(
+        """
+        SELECT aqr.*, sp.title AS paper_title, sp.student_id,
+               pav.version_number, pav.answer_script_path,
+               (SELECT corrected_mark FROM analysis_human_corrections ahc
+                WHERE ahc.analysis_question_result_id = aqr.id
+                ORDER BY ahc.id DESC LIMIT 1) AS human_mark,
+               (SELECT failure_explanation FROM analysis_human_corrections ahc
+                WHERE ahc.analysis_question_result_id = aqr.id
+                ORDER BY ahc.id DESC LIMIT 1) AS failure_explanation
+        FROM analysis_question_results aqr
+        JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        ORDER BY aqr.created_at DESC LIMIT 150
+        """
+    )
+    return render(
+        request,
+        "research/grading.html",
+        {"user": user, "results": results},
+    )
+
+
+@app.post("/research/grading/{question_result_id}/correct")
+def research_correct_direct_grade(
+    request: Request,
+    question_result_id: int,
+    corrected_mark: float = Form(...),
+    corrected_decision: str = Form(""),
+    error_category: str = Form(""),
+    error_mechanism: str = Form(""),
+    failure_explanation: str = Form(""),
+    alternative_method_should_pass: Optional[str] = Form(None),
+    ocr_caused_error: Optional[str] = Form(None),
+    parser_caused_error: Optional[str] = Form(None),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    result = query_one(
+        "SELECT * FROM analysis_question_results WHERE id = ?",
+        (question_result_id,),
+    )
+    if not result:
+        return RedirectResponse("/research/grading", status_code=303)
+    corrected = max(0.0, min(float(corrected_mark), float(result["maximum_marks"])))
+    execute(
+        """
+        INSERT INTO analysis_human_corrections
+        (analysis_question_result_id, corrected_by, original_mark,
+         corrected_mark, corrected_decision, error_category, error_mechanism,
+         failure_explanation, alternative_method_should_pass,
+         ocr_caused_error, parser_caused_error, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            question_result_id,
+            user["id"],
+            result["ai_mark"],
+            corrected,
+            corrected_decision,
+            error_category or None,
+            error_mechanism or None,
+            failure_explanation,
+            1 if alternative_method_should_pass else 0,
+            1 if ocr_caused_error else 0,
+            1 if parser_caused_error else 0,
+            datetime.now().isoformat(),
+        ),
+    )
+    # The original AI row is immutable; the correction is a separate label.
+    return RedirectResponse("/research/grading", status_code=303)
+
+
+@app.get("/research/failures", response_class=HTMLResponse)
+def research_failure_gallery(request: Request, failure_type: str = ""):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    if failure_type:
+        cases = query_all(
+            """
+            SELECT rfc.*, sp.title AS paper_title, aqr.question_label
+            FROM research_failure_cases rfc
+            LEFT JOIN paper_analysis_versions pav ON pav.id = rfc.analysis_version_id
+            LEFT JOIN student_papers sp ON sp.id = pav.paper_id
+            LEFT JOIN analysis_question_results aqr ON aqr.id = rfc.question_result_id
+            WHERE rfc.failure_type = ?
+            ORDER BY rfc.updated_at DESC
+            """,
+            (failure_type,),
+        )
+    else:
+        cases = query_all(
+            """
+            SELECT rfc.*, sp.title AS paper_title, aqr.question_label
+            FROM research_failure_cases rfc
+            LEFT JOIN paper_analysis_versions pav ON pav.id = rfc.analysis_version_id
+            LEFT JOIN student_papers sp ON sp.id = pav.paper_id
+            LEFT JOIN analysis_question_results aqr ON aqr.id = rfc.question_result_id
+            ORDER BY rfc.updated_at DESC
+            """
+        )
+    return render(
+        request,
+        "research/failures.html",
+        {"user": user, "cases": cases, "failure_type": failure_type},
+    )
+
+
+@app.post("/research/failures/{case_id}/update")
+def research_failure_update(
+    request: Request,
+    case_id: int,
+    severity: str = Form("medium"),
+    status: str = Form("open"),
+    tags: str = Form(""),
+    notes: str = Form(""),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    tag_values = [item.strip() for item in tags.split(",") if item.strip()]
+    execute(
+        """
+        UPDATE research_failure_cases
+        SET severity = ?, status = ?, tags = ?, notes = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            severity if severity in {"low", "medium", "high", "critical"} else "medium",
+            status if status in {"open", "reviewed", "resolved"} else "open",
+            json.dumps(tag_values),
+            notes,
+            datetime.now().isoformat(),
+            case_id,
+        ),
+    )
+    return RedirectResponse("/research/failures", status_code=303)
+
+
+@app.get("/research/student-models", response_class=HTMLResponse)
+def research_student_models(request: Request, student_id: Optional[int] = None):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    students = query_all(
+        "SELECT id, name, email FROM users WHERE role = 'student' ORDER BY name"
+    )
+    selected_id = student_id or (students[0]["id"] if students else None)
+    observations = query_all(
+        """
+        SELECT aso.*, sp.title AS paper_title, pav.version_number
+        FROM analysis_skill_observations aso
+        JOIN student_papers sp ON sp.id = aso.paper_id
+        JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
+        WHERE aso.student_id = ?
+        ORDER BY aso.observed_at DESC
+        """,
+        (selected_id,),
+    ) if selected_id else []
+    states = query_all(
+        """
+        SELECT * FROM student_skill_states
+        WHERE student_id = ? ORDER BY current_estimate DESC
+        """,
+        (selected_id,),
+    ) if selected_id else []
+    return render(
+        request,
+        "research/student_models.html",
+        {
+            "user": user,
+            "students": students,
+            "selected_id": selected_id,
+            "observations": observations,
+            "states": states,
+        },
+    )
+
+
+@app.post("/research/student-models/{student_id}/rebuild")
+def research_rebuild_student_model(request: Request, student_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    states = rebuild_student_profile(student_id)
+    execute(
+        """
+        INSERT INTO audit_logs
+        (actor_id, action, entity_type, entity_id, metadata, created_at)
+        VALUES (?, 'profile_rebuild', 'student', ?, ?, ?)
+        """,
+        (
+            user["id"],
+            str(student_id),
+            json.dumps({"calculation_version": "beta-recency-v1", "states": len(states)}),
+            datetime.now().isoformat(),
+        ),
+    )
+    return RedirectResponse(
+        f"/research/student-models?student_id={student_id}",
+        status_code=303,
+    )
+
+
+@app.get("/research/taxonomy", response_class=HTMLResponse)
+def research_taxonomy(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    versions = query_all(
+        "SELECT * FROM taxonomy_versions ORDER BY created_at DESC"
+    )
+    return render(
+        request,
+        "research/taxonomy.html",
+        {"user": user, "versions": versions},
+    )
+
+
+@app.post("/research/taxonomy")
+def research_create_taxonomy(
+    request: Request,
+    version: str = Form(...),
+    taxonomy: str = Form(...),
+    notes: str = Form(""),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    try:
+        parsed = json.loads(taxonomy)
+    except json.JSONDecodeError:
+        return RedirectResponse("/research/taxonomy", status_code=303)
+    execute(
+        """
+        INSERT INTO taxonomy_versions
+        (version, taxonomy, notes, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            version,
+            json.dumps(parsed),
+            notes,
+            user["id"],
+            datetime.now().isoformat(),
+        ),
+    )
+    return RedirectResponse("/research/taxonomy", status_code=303)
+
+
+@app.get("/research/export")
+def research_export(
+    request: Request,
+    format: str = "jsonl",
+    mode: str = "pseudonymized",
+    dataset: str = "skill_observations",
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    queries = {
+        "skill_observations": """
+            SELECT aso.*, sp.title AS paper_title,
+                   pav.version_number AS analysis_version
+            FROM analysis_skill_observations aso
+            JOIN student_papers sp ON sp.id = aso.paper_id
+            JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
+            ORDER BY aso.observed_at
+        """,
+        "ocr_runs": """
+            SELECT aop.id, aop.analysis_version_id, aop.document_type,
+                   aop.page_number, aop.provider, aop.model,
+                   aop.prompt_version, aop.text, aop.normalized_text,
+                   aop.confidence, aop.warnings, aop.timing_ms,
+                   aop.evaluation_label, aop.corrected_text, aop.created_at,
+                   sp.student_id, sp.title AS paper_title
+            FROM analysis_ocr_pages aop
+            JOIN paper_analysis_versions pav ON pav.id = aop.analysis_version_id
+            JOIN student_papers sp ON sp.id = pav.paper_id
+            ORDER BY aop.created_at
+        """,
+        "grading": """
+            SELECT aqr.*, sp.student_id, sp.title AS paper_title,
+                   pav.version_number
+            FROM analysis_question_results aqr
+            JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
+            JOIN student_papers sp ON sp.id = pav.paper_id
+            ORDER BY aqr.created_at
+        """,
+        "corrections": """
+            SELECT ahc.*, sp.student_id, sp.title AS paper_title
+            FROM analysis_human_corrections ahc
+            JOIN analysis_question_results aqr
+              ON aqr.id = ahc.analysis_question_result_id
+            JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
+            JOIN student_papers sp ON sp.id = pav.paper_id
+            ORDER BY ahc.created_at
+        """,
+        "experiments": """
+            SELECT id, title, research_question, hypothesis, description,
+                   dataset_selection, ocr_model, grading_model,
+                   diagnosis_model, ocr_prompt_version,
+                   grading_prompt_version, confidence_threshold,
+                   deterministic_checks, image_resolution,
+                   preprocessing_config, longitudinal_config,
+                   evaluation_metrics, metrics, result, notes, status,
+                   created_at, updated_at
+            FROM research_experiments ORDER BY created_at
+        """,
+        "experiment_runs": """
+            SELECT * FROM research_experiment_runs ORDER BY created_at
+        """,
+        "failures": """
+            SELECT * FROM research_failure_cases ORDER BY created_at
+        """,
+    }
+    dataset = dataset if dataset in queries else "skill_observations"
+    rows = query_all(queries[dataset])
     records = []
     for row in rows:
         record = dict(row)
-        if mode != "identified":
+        for key in list(record):
+            if key.endswith("_path") or key in {"raw_response", "raw_provider_response"}:
+                record.pop(key, None)
+        if mode != "identified" and "student_id" in record:
             record["student_id"] = hashlib.sha256(
                 f"{config.SECRET_KEY}:{record['student_id']}".encode()
             ).hexdigest()[:16]
+        if mode == "anonymized":
+            record.pop("student_id", None)
+            record.pop("paper_title", None)
+            record.pop("corrected_by", None)
+            record.pop("created_by", None)
         records.append(record)
     if format == "csv":
         output = io.StringIO()
@@ -1754,12 +2968,23 @@ def research_export(request: Request, format: str = "jsonl", mode: str = "pseudo
         """,
         (
             user["id"],
-            json.dumps({"mode": mode, "format": suffix, "rows": len(records)}),
+            json.dumps(
+                {
+                    "mode": mode,
+                    "format": suffix,
+                    "rows": len(records),
+                    "dataset": dataset,
+                }
+            ),
             datetime.now().isoformat(),
         ),
     )
     return StreamingResponse(
         iter([content.encode("utf-8")]),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="numera-export-{mode}.{suffix}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="numera-{dataset}-{mode}.{suffix}"'
+            )
+        },
     )

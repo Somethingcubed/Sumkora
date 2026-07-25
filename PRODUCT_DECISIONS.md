@@ -1,11 +1,19 @@
 # Product decisions
 
-## Upgrade, not rebuild
+## Two experiences, upgraded in place
 
 The repository already had most of the classroom and assessment workflow.
-Extending it preserved working teacher behavior, visual familiarity and the
-regression harness while concentrating effort on evidence quality, privacy and
-0606 scope.
+The reliable assessment and authentication foundations were extended in place,
+while the obsolete teacher/classroom experience was removed from the active
+product. Numera now has exactly two meaningful surfaces: the student product
+and a private researcher workbench.
+
+## Student-owned attempts
+
+A paper belongs directly to the student who uploads it. A question paper,
+completed answer script and mark scheme create a private paper attempt without
+a class, assignment or pre-registered paper pack. Analysis versions preserve
+the uploaded sources, detected metadata, OCR, model configuration and results.
 
 ## Separate student accounts
 
@@ -37,7 +45,9 @@ erasing the model run.
 
 Raw student evidence, provider responses and correction history are more
 sensitive than ordinary dashboard aggregates. The research workbench requires
-a researcher/owner role; exports are pseudonymized by default.
+a researcher/owner role; exports are pseudonymized by default. The inherited
+`teacher` role is accepted as a compatibility alias for the same private owner
+account, but cannot reach teacher routes.
 
 ## Limits
 
