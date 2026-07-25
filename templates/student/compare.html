@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Compare papers — Numera{% endblock %}
+{% block title %}{{ tr('Compare papers', '对比试卷') }} — Numera{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div><p class="eyebrow">Progress over time</p><h1>Compare papers</h1><p>Choose completed papers to see how your results differ.</p></div>
+  <div><p class="eyebrow">{{ tr('Progress over time', '学习进展变化') }}</p><h1>{{ tr('Compare papers', '对比试卷') }}</h1><p>{{ tr('Choose completed papers to see how your results differ.', '选择已完成的试卷，查看成绩变化。') }}</p></div>
 </div>
 
 {% if attempts %}
 <form method="get" class="surface mb-6">
   <fieldset>
-    <legend class="font-semibold">Select papers</legend>
+    <legend class="font-semibold">{{ tr('Select papers', '选择试卷') }}</legend>
     <div class="grid md:grid-cols-2 gap-2 mt-3">
       {% for item in attempts %}
       <label class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm hover:border-indigo-300">
@@ -18,10 +18,10 @@
       {% endfor %}
     </div>
   </fieldset>
-  <button class="button button-primary mt-4">Compare selected papers</button>
+  <button class="button button-primary mt-4">{{ tr('Compare selected papers', '对比所选试卷') }}</button>
 </form>
 {% else %}
-<section class="surface text-center py-12"><h2 class="text-xl font-semibold">Nothing to compare yet</h2><p class="text-slate-500 mt-2">Complete at least two paper analyses to compare progress.</p><a href="/student/analyse" class="button button-primary mt-5">Analyse a paper</a></section>
+<section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('Nothing to compare yet', '暂时没有可对比的试卷') }}</h2><p class="text-slate-500 mt-2">{{ tr('Complete at least two paper analyses to compare progress.', '至少完成两份试卷分析后才能对比学习进展。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse a paper', '分析试卷') }}</a></section>
 {% endif %}
 
 {% if comparison.warnings %}
@@ -40,7 +40,7 @@
     <p class="text-4xl font-bold tracking-tight text-indigo-700 mt-5">{{ paper.percentage }}%</p>
     <p class="text-sm text-slate-500 mt-1">{{ paper.earned }} / {{ paper.possible }} marks</p>
     <details class="mt-5 pt-4 border-t border-slate-100">
-      <summary class="cursor-pointer text-sm font-medium">Marks lost by topic</summary>
+      <summary class="cursor-pointer text-sm font-medium">{{ tr('Marks lost by topic', '按知识点查看失分') }}</summary>
       <div class="mt-3 space-y-2 text-sm">
         {% for topic, marks in paper.marks_lost.items() %}
         <div class="flex justify-between gap-4"><span>{{ topic }}</span><span>{{ count_label(marks, 'mark') }} lost</span></div>

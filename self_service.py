@@ -23,7 +23,7 @@ SELF_SERVICE_STAGES = [
     "validation",
     "document_extraction",
     "ocr",
-    "question_mapping",
+    "question_detection",
     "criterion_grading",
     "diagnosis",
     "profile_update",
@@ -64,6 +64,90 @@ def pdf_text(path: str, max_pages: int | None = None) -> str:
     with fitz.open(path) as document:
         pages = document if max_pages is None else list(document)[:max_pages]
         return "\n".join(page.get_text("text") for page in pages)
+
+
+def _content_blocks(page) -> list[tuple[float, float, str]]:
+    blocks = []
+    for block in page.get_text("blocks"):
+        x0, y0, x1, y1, text = block[:5]
+        normalized = re.sub(r"\s+", " ", text).strip()
+        if not normalized or y0 < 50 or y1 > 775 or x0 < 25 or x1 > 570:
+            continue
+        if any(
+            phrase in normalized
+            for phrase in (
+                "DO NOT WRITE IN THIS MARGIN",
+                "© UCLES",
+                "© Cambridge University Press",
+            )
+        ):
+            continue
+        blocks.append((float(x0), float(y0), normalized))
+    return sorted(blocks, key=lambda item: (item[1], item[0]))
+
+
+def pdf_question_text(path: str) -> str:
+    grouped: dict[int, list[str]] = {}
+    current_number: int | None = None
+    with fitz.open(path) as document:
+        for page in document:
+            for x0, y0, text in _content_blocks(page):
+                combined = re.match(
+                    r"^(\d{1,2})(?:\s*\([a-z]\))?\s+([A-Za-z(].{5,})",
+                    text,
+                )
+                standalone = re.fullmatch(r"(\d{1,2})(?:\s*\([a-z]\))?", text)
+                candidate = None
+                remainder = ""
+                if x0 < 95 and combined:
+                    candidate = int(combined.group(1))
+                    remainder = text[len(combined.group(1)):].strip()
+                elif x0 < 95 and y0 < 180 and standalone:
+                    candidate = int(standalone.group(1))
+                if candidate is not None:
+                    expected = 1 if current_number is None else current_number + 1
+                    if candidate == expected:
+                        current_number = candidate
+                        grouped.setdefault(candidate, [])
+                        if remainder:
+                            grouped[candidate].append(remainder)
+                        continue
+                if current_number is not None:
+                    grouped[current_number].append(text)
+    return "\n".join(
+        f"Q{number} {' '.join(grouped[number])}"
+        for number in sorted(grouped)
+        if grouped[number]
+    )
+
+
+def pdf_mark_scheme_text(path: str) -> str:
+    grouped: dict[int, list[str]] = {}
+    current_number: int | None = None
+    with fitz.open(path) as document:
+        for page in document:
+            page_text_value = page.get_text("text")
+            if "Question" not in page_text_value or "Guidance" not in page_text_value:
+                continue
+            for x0, _y0, text in _content_blocks(page):
+                starter = re.match(
+                    r"^(\d{1,2})(?:\s*\([a-z]\)|\([a-z]\))?(?=\s|$)",
+                    text,
+                )
+                if x0 < 78 and starter:
+                    candidate = int(starter.group(1))
+                    expected = 1 if current_number is None else current_number + 1
+                    if candidate in {current_number, expected}:
+                        current_number = candidate
+                        grouped.setdefault(candidate, []).append(text)
+                        continue
+                if current_number is not None:
+                    grouped[current_number].append(text)
+    return "\n".join(
+        f"Q{number} {' '.join(grouped[number])}"
+        for number in sorted(grouped)
+        if grouped[number]
+    )
 
 
 def normalize_answer_upload(filename: str, content: bytes) -> tuple[str, bytes]:
@@ -116,42 +200,55 @@ def _topic(text: str) -> tuple[str, str]:
 def _question_chunks(text: str) -> list[dict]:
     cleaned = text.replace("\r", "\n")
     pattern = re.compile(
-        r"(?m)^\s*(\d{1,2})(?:\s*\(([a-z])\))?(?:\s*\(([ivx]+)\))?\s+"
+        r"(?mi)^\s*(?:[-#>]\s*)?\*{0,2}(?:question\s*)?q?"
+        r"(\d{1,2})(?:\s*\(([a-z])\)|\s+([a-z])(?=\s))?"
+        r"(?:\s*\(([ivx]+)\))?\*{0,2}(?:\s+|[.:\-]\s*)"
     )
     matches = list(pattern.finditer(cleaned))
-    questions = []
-    seen = set()
+    questions_by_number: dict[int, dict] = {}
     for index, match in enumerate(matches[:80]):
-        number, part, roman = match.groups()
-        label = f"Q{number}"
-        if part:
-            label += part
-        if roman:
-            label += f"({roman})"
-        if label in seen:
+        number, part, inline_part, roman = match.groups()
+        number_value = int(number)
+        if number_value < 1 or number_value > 50:
             continue
-        seen.add(label)
+        label = f"Q{number}"
         end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
         chunk = re.sub(r"\s+", " ", cleaned[match.end():end]).strip()
         if len(chunk) < 8:
             continue
-        marks = re.findall(r"\[\s*(\d{1,2})\s*\]", chunk[-240:])
-        maximum = int(marks[-1]) if marks else 1
+        marks = re.findall(r"\[\s*(\d{1,2})\s*\]", chunk)
+        maximum = sum(int(value) for value in marks) if marks else 1
         topic, skill = _topic(chunk)
-        questions.append(
-            {
-                "label": label,
-                "question_text": chunk[:2500],
-                "mark_scheme_text": "",
-                "maximum_marks": maximum,
-                "topic": topic,
-                "subtopic": skill,
-                "skill": skill,
-                "answer_page": min(index + 1, 80),
-                "criteria": [],
-            }
-        )
-    return questions
+        part_label = part or inline_part
+        prefix = f"({part_label}) " if part_label else ""
+        if roman:
+            prefix += f"({roman}) "
+        existing = questions_by_number.get(number_value)
+        if existing:
+            combined = f"{existing['question_text']} {prefix}{chunk}".strip()
+            existing["question_text"] = combined[:5000]
+            existing["maximum_marks"] = (
+                float(existing["maximum_marks"]) + float(maximum)
+                if part_label or roman
+                else max(float(existing["maximum_marks"]), float(maximum))
+            )
+            if existing["topic"] == "Algebra and graphs" and topic != existing["topic"]:
+                existing["topic"] = topic
+                existing["subtopic"] = skill
+                existing["skill"] = skill
+            continue
+        questions_by_number[number_value] = {
+            "label": label,
+            "question_text": f"{prefix}{chunk}"[:5000],
+            "mark_scheme_text": "",
+            "maximum_marks": maximum,
+            "topic": topic,
+            "subtopic": skill,
+            "skill": skill,
+            "answer_page": 1,
+            "criteria": [],
+        }
+    return [questions_by_number[key] for key in sorted(questions_by_number)]
 
 
 def _mark_scheme_chunks(text: str) -> dict[str, dict]:
@@ -179,12 +276,15 @@ def _mark_scheme_chunks(text: str) -> dict[str, dict]:
     return result
 
 
-def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str = "") -> dict:
-    question_text = pdf_text(question_path, max_pages=8)
-    mark_text = pdf_text(mark_scheme_path, max_pages=12) if mark_scheme_path else ""
+def detect_document_texts(
+    question_text: str,
+    mark_text: str,
+    title_hint: str = "",
+) -> dict:
     combined = f"{question_text}\n{mark_text}"
     question_plan = _question_chunks(question_text)
     schemes = _mark_scheme_chunks(mark_text)
+    planned_labels = {question["label"] for question in question_plan}
     for question in question_plan:
         scheme = schemes.get(question["label"])
         if scheme:
@@ -192,6 +292,12 @@ def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str 
             question["criteria"] = scheme["criteria"]
             if scheme["maximum_marks"] > question["maximum_marks"]:
                 question["maximum_marks"] = scheme["maximum_marks"]
+    for label, scheme in schemes.items():
+        if label not in planned_labels:
+            question_plan.append(scheme)
+    question_plan.sort(
+        key=lambda item: int(re.sub(r"\D", "", item.get("label", "")) or 999)
+    )
     if not question_plan:
         question_plan = list(schemes.values())
     if not question_plan:
@@ -254,6 +360,17 @@ def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str 
             if condition
         ],
     }
+
+
+def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str = "") -> dict:
+    question_text = pdf_question_text(question_path) or pdf_text(question_path, max_pages=50)
+    mark_text = (
+        pdf_mark_scheme_text(mark_scheme_path)
+        or pdf_text(mark_scheme_path, max_pages=60)
+        if mark_scheme_path
+        else ""
+    )
+    return detect_document_texts(question_text, mark_text, title_hint)
 
 
 def create_student_paper_draft(
@@ -477,10 +594,142 @@ def _diagnosis(mark: float, maximum: float, confidence: float, flags: list[str])
     return "procedural execution", "method was only partially completed"
 
 
+def _extract_analysis_document(
+    version,
+    document_type: str,
+    path: str,
+    *,
+    force_vision: bool = False,
+) -> tuple[dict[int, str], dict[int, float]]:
+    page_texts: dict[int, str] = {}
+    page_confidences: dict[int, float] = {}
+    execute(
+        """
+        DELETE FROM analysis_ocr_pages
+        WHERE analysis_version_id = ? AND document_type = ?
+        """,
+        (version["id"], document_type),
+    )
+    with fitz.open(path) as document:
+        page_count = len(document)
+        if page_count > 80:
+            raise RuntimeError(f"{document_type.replace('_', ' ').title()} exceeds the 80-page limit.")
+        for page_number in range(1, page_count + 1):
+            started = time.monotonic()
+            native = document[page_number - 1].get_text("text").strip()
+            raw = None
+            warnings = []
+            model = "native-pdf-text"
+            provider = "native"
+            confidence = 0.98 if native else 0.0
+            text = native
+            should_use_vision = bool(
+                config.OCR_ENABLED and (force_vision or len(native) < 80)
+            )
+            if should_use_vision:
+                image_b64 = get_page_image_base64(
+                    path,
+                    page_number,
+                    dpi=version["image_resolution"],
+                )
+                vision_text, vision_confidence, raw = cxsee_vl_ocr_detailed(image_b64)
+                if vision_text and vision_text.strip():
+                    text = vision_text
+                    confidence = vision_confidence or 0.0
+                    provider = "cxsee"
+                    meta = raw.get("_numera", {}) if isinstance(raw, dict) else {}
+                    model = meta.get("used_model", version["ocr_model"])
+                    if meta.get("warning"):
+                        warnings.append(meta["warning"])
+                elif native:
+                    warnings.append("Vision OCR was empty; native PDF text was used.")
+            elif not native:
+                warnings.append("OCR disabled; no native text was available.")
+            duration = int((time.monotonic() - started) * 1000)
+            page_texts[page_number] = text
+            page_confidences[page_number] = confidence or 0.0
+            execute(
+                """
+                INSERT INTO analysis_ocr_pages
+                (analysis_version_id, document_type, page_number, provider,
+                 model, prompt_version, text, normalized_text, confidence,
+                 warnings, raw_response, timing_ms, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    version["id"],
+                    document_type,
+                    page_number,
+                    provider,
+                    model,
+                    version["ocr_prompt_version"],
+                    text,
+                    re.sub(r"\s+", " ", text).strip(),
+                    confidence,
+                    json_text(warnings),
+                    json_text(raw) if raw else None,
+                    duration,
+                    now_iso(),
+                ),
+            )
+    return page_texts, page_confidences
+
+
+def _automatic_question_plan(
+    version,
+    question_pages: dict[int, str],
+    scheme_pages: dict[int, str],
+    answer_pages: dict[int, str],
+) -> tuple[dict, list[dict], list[str]]:
+    layout_detected = detect_documents(
+        version["question_paper_path"],
+        version["mark_scheme_path"],
+        version["paper_title"],
+    )
+    ocr_detected = detect_document_texts(
+        "\n".join(question_pages.values()),
+        "\n".join(scheme_pages.values()),
+        version["paper_title"],
+    )
+    def quality(candidate: dict) -> int:
+        numbers = [
+            int(re.sub(r"\D", "", item.get("label", "")) or 999)
+            for item in candidate["questions"]
+        ]
+        if not numbers:
+            return -1000
+        missing = sum(
+            1
+            for number in range(min(numbers), max(numbers) + 1)
+            if number not in numbers
+        )
+        starts_at_one = 5 if min(numbers) == 1 else 0
+        return len(numbers) * 10 + starts_at_one - missing * 8
+
+    detected = (
+        layout_detected
+        if quality(layout_detected) >= quality(ocr_detected)
+        else ocr_detected
+    )
+    questions = detected["questions"]
+    answer_page_by_label: dict[str, int] = {}
+    for page_number, text in answer_pages.items():
+        for item in _question_chunks(text):
+            answer_page_by_label.setdefault(item["label"], page_number)
+    page_count = max(len(answer_pages), 1)
+    for index, item in enumerate(questions):
+        item["answer_page"] = answer_page_by_label.get(
+            item["label"],
+            min(index + 1, page_count),
+        )
+    return detected["metadata"], questions, detected["warnings"]
+
+
 def run_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
-        SELECT pav.*, sp.student_id, sp.id AS student_paper_id
+        SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
+               sp.title AS paper_title
         FROM paper_analysis_versions pav
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE pav.id = ?
@@ -497,70 +746,72 @@ def run_self_service_analysis(version_id: int) -> dict:
         ):
             if not path or not os.path.isfile(path):
                 raise RuntimeError("One of the required analysis documents is missing.")
-        questions = parse_json(version["question_plan"], [])
-        if not questions:
-            raise RuntimeError("No questions were confirmed for analysis.")
-
         _update_version(version_id, "validation", 0)
         _update_version(version_id, "document_extraction", 1)
-        with fitz.open(version["answer_script_path"]) as answer_doc:
-            page_count = len(answer_doc)
-        if page_count > 80:
-            raise RuntimeError("Answer script exceeds the 80-page limit.")
-
         _update_version(version_id, "ocr", 2)
-        page_texts = {}
-        page_confidences = {}
-        for page_number in range(1, page_count + 1):
-            started = time.monotonic()
-            with fitz.open(version["answer_script_path"]) as answer_doc:
-                native = answer_doc[page_number - 1].get_text("text").strip()
-            raw = None
-            warnings = []
-            model = "native-pdf-text"
-            provider = "native"
-            confidence = 0.98 if native else 0.0
-            text = native
-            if not native and config.OCR_ENABLED:
-                image_b64 = get_page_image_base64(
-                    version["answer_script_path"], page_number, dpi=version["image_resolution"]
-                )
-                text, confidence, raw = cxsee_vl_ocr_detailed(image_b64)
-                provider = "cxsee"
-                meta = raw.get("_numera", {})
-                model = meta.get("used_model", version["ocr_model"])
-                if meta.get("warning"):
-                    warnings.append(meta["warning"])
-            elif not native:
-                warnings.append("OCR disabled; no native text was available.")
-            duration = int((time.monotonic() - started) * 1000)
-            page_texts[page_number] = text
-            page_confidences[page_number] = confidence or 0.0
-            execute(
-                """
-                INSERT INTO analysis_ocr_pages
-                (analysis_version_id, document_type, page_number, provider,
-                 model, prompt_version, text, normalized_text, confidence,
-                 warnings, raw_response, timing_ms, created_at)
-                VALUES (?, 'answer_script', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    version_id,
-                    page_number,
-                    provider,
-                    model,
-                    version["ocr_prompt_version"],
-                    text,
-                    re.sub(r"\s+", " ", text).strip(),
-                    confidence,
-                    json_text(warnings),
-                    json_text(raw) if raw else None,
-                    duration,
-                    now_iso(),
-                ),
-            )
-
-        _update_version(version_id, "question_mapping", 3)
+        question_pages, _ = _extract_analysis_document(
+            version,
+            "question_paper",
+            version["question_paper_path"],
+        )
+        scheme_pages, _ = _extract_analysis_document(
+            version,
+            "mark_scheme",
+            version["mark_scheme_path"],
+        )
+        page_texts, page_confidences = _extract_analysis_document(
+            version,
+            "answer_script",
+            version["answer_script_path"],
+            force_vision=True,
+        )
+        page_count = len(page_texts)
+        _update_version(version_id, "question_detection", 3)
+        metadata, questions, detection_warnings = _automatic_question_plan(
+            version,
+            question_pages,
+            scheme_pages,
+            page_texts,
+        )
+        if not questions:
+            raise RuntimeError("No questions could be detected from the uploaded documents.")
+        execute(
+            """
+            UPDATE paper_analysis_versions
+            SET detected_metadata = ?, confirmed_metadata = ?,
+                question_plan = ?, warnings = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                json_text(metadata),
+                json_text(metadata),
+                json_text(questions),
+                json_text(detection_warnings),
+                now_iso(),
+                version_id,
+            ),
+        )
+        execute(
+            """
+            UPDATE student_papers
+            SET title = ?, syllabus_code = ?, paper_number = ?, paper_year = ?,
+                examination_session = ?, calculator_policy = ?,
+                maximum_marks = ?, source_type = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                metadata.get("title") or version["paper_title"],
+                metadata.get("syllabus_code") or "custom",
+                metadata.get("paper_number") or "",
+                metadata.get("paper_year"),
+                metadata.get("examination_session") or "",
+                metadata.get("calculator_policy") or "unknown",
+                float(metadata.get("maximum_marks") or 0),
+                metadata.get("source_type") or "custom",
+                now_iso(),
+                version["student_paper_id"],
+            ),
+        )
         _update_version(version_id, "criterion_grading", 4)
         execute(
             "DELETE FROM analysis_question_results WHERE analysis_version_id = ?",

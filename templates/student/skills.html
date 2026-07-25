@@ -1,32 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Strengths and weaknesses — Numera{% endblock %}
+{% block title %}{{ tr('Strengths and weaknesses', '强项与待提升项') }} — Numera{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div><p class="eyebrow">Your learning profile</p><h1>Strengths and weaknesses</h1><p>Patterns become clearer as you complete more papers.</p></div>
+  <div><p class="eyebrow">{{ tr('Your learning profile', '你的学习画像') }}</p><h1>{{ tr('Strengths and weaknesses', '强项与待提升项') }}</h1><p>{{ tr('Patterns become clearer as you complete more papers.', '完成的试卷越多，学习规律就越清晰。') }}</p></div>
 </div>
 
 <div class="grid lg:grid-cols-2 gap-5 mb-5">
   <section class="surface">
-    <h2 class="text-lg font-semibold">Strengths and improvement</h2>
+    <h2 class="text-lg font-semibold">{{ tr('Strengths and improvement', '强项与进步') }}</h2>
     <div class="mt-4 space-y-3">
       {% for item in profile.strengths %}
       <div class="rounded-xl border border-slate-200 p-4"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-completed">{{ item.status.replace('_', ' ')|capitalize }}</span></div><p class="text-xs text-slate-500 mt-2">{{ count_label(item.evidence_count, 'observation') }} across {{ count_label(item.distinct_papers, 'paper') }}</p></div>
-      {% else %}<p class="text-sm text-slate-500">Complete more papers to build a reliable picture of your strengths.</p>{% endfor %}
+      {% else %}<p class="text-sm text-slate-500">{{ tr('Complete more papers to build a reliable picture of your strengths.', '完成更多试卷后，系统才能更可靠地判断你的强项。') }}</p>{% endfor %}
     </div>
   </section>
   <section class="surface">
-    <h2 class="text-lg font-semibold">Areas to revisit</h2>
+    <h2 class="text-lg font-semibold">{{ tr('Areas to revisit', '需要复习的方面') }}</h2>
     <div class="mt-4 space-y-3">
       {% for item in profile.concerns %}
       <div class="rounded-xl border border-slate-200 p-4"><div class="flex justify-between gap-3"><span class="font-medium">{{ item.skill }}</span><span class="badge badge-pending">{{ item.status.replace('_', ' ')|capitalize }}</span></div><p class="text-xs text-slate-500 mt-2">{{ count_label(item.evidence_count, 'observation') }} across {{ count_label(item.distinct_papers, 'paper') }}</p></div>
-      {% else %}<p class="text-sm text-slate-500">No recurring concern is clear yet.</p>{% endfor %}
+      {% else %}<p class="text-sm text-slate-500">{{ tr('No recurring concern is clear yet.', '目前还没有明确的重复性问题。') }}</p>{% endfor %}
     </div>
   </section>
 </div>
 
 <details class="surface">
-  <summary class="cursor-pointer font-semibold">Not yet covered ({{ profile.untested|length }})</summary>
-  <p class="text-sm text-slate-500 mt-2">These areas have not appeared in enough of your work. They are not weaknesses.</p>
+  <summary class="cursor-pointer font-semibold">{{ tr('Not yet covered', '尚未覆盖') }} ({{ profile.untested|length }})</summary>
+  <p class="text-sm text-slate-500 mt-2">{{ tr('These areas have not appeared in enough of your work. They are not weaknesses.', '这些内容尚未在你的答卷中充分出现，并不代表它们是弱项。') }}</p>
   <div class="mt-4 grid md:grid-cols-2 gap-2">
     {% for item in profile.untested %}
     <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm"><p class="font-medium">{{ item.skill }}</p><p class="text-slate-500 mt-1">{{ item.topic }}</p></div>

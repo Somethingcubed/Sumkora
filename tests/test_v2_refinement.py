@@ -93,19 +93,14 @@ def upload_direct_paper(email: str, title: str = "Independent Paper"):
 
 
 def confirm_and_run(version_id: int, questions: list[dict], title: str):
+    current = query_one(
+        "SELECT status FROM paper_analysis_versions WHERE id = ?",
+        (version_id,),
+    )
+    if current["status"] == "completed":
+        return
     response = client.post(
         f"/student/analysis/{version_id}/run",
-        data={
-            "title": title,
-            "syllabus_code": "0606",
-            "paper_number": "11",
-            "paper_year": "2026",
-            "examination_session": "May/June",
-            "calculator_policy": "non-calculator",
-            "maximum_marks": "4",
-            "source_type": "custom",
-            "question_plan": json.dumps(questions),
-        },
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -128,7 +123,7 @@ def test_student_self_service_without_class_and_three_document_upload():
     assert version["question_paper_path"]
     assert version["answer_script_path"]
     assert version["mark_scheme_path"]
-    assert version["status"] == "review"
+    assert version["status"] == "completed"
     confirm_and_run(version["id"], questions, paper["title"])
     assert query_one(
         "SELECT COUNT(*) AS n FROM analysis_question_results WHERE analysis_version_id = ?",
@@ -244,6 +239,10 @@ def test_multiple_experiments_edit_run_and_separate_human_label():
         assert response.status_code == 303
         experiment_ids.append(int(response.headers["location"].split("/")[-1]))
     assert len(set(experiment_ids)) == 2
+    detail = client.get(f"/research/experiments/{experiment_ids[0]}")
+    assert detail.status_code == 200
+    assert "Prompt experiment A" in detail.text
+    assert "<main" in detail.text
     response = client.post(
         f"/research/experiments/{experiment_ids[0]}/edit",
         data={

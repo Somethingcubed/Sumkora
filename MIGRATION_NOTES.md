@@ -23,8 +23,9 @@ calls it Researcher.
   boundary.
 - Student history/comparison/skills/question pages and research workbench.
 - `self_service.py`: student-owned question-paper, answer-script and
-  mark-scheme ingestion; metadata review; immutable analysis versions; direct
-  analysis and longitudinal profile integration.
+  mark-scheme ingestion; automatic OCR-based metadata/question detection;
+  immutable analysis versions; direct analysis and longitudinal profile
+  integration.
 - Dedicated OCR, grading, failures, experiments, student-model and taxonomy
   research surfaces.
 
@@ -99,8 +100,9 @@ by the application secret; a successful reset clears the digest.
 Legacy 0580 classes, assignments, practice records and importer code remain
 available for audit and historic student access. They are not relabelled,
 silently copied or shown as active classes/assignments. New direct uploads may
-be official 0606 papers, mocks or custom mathematics papers; detected metadata
-is editable before analysis.
+be official 0606 papers, mocks or custom mathematics papers. Metadata and
+top-level questions are detected automatically during processing and retained
+for research inspection rather than exposed as required student form fields.
 
 ## Rollback
 

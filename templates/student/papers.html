@@ -1,31 +1,31 @@
 {% extends "base.html" %}
-{% block title %}My papers — Numera{% endblock %}
+{% block title %}{{ tr('My papers', '我的试卷') }} — Numera{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div><p class="eyebrow">Paper history</p><h1>My papers</h1><p>{{ count_label(papers|length, 'paper') }} in your library.</p></div>
-  <a href="/student/analyse" class="button button-primary">Analyse a paper</a>
+  <div><p class="eyebrow">{{ tr('Paper history', '试卷记录') }}</p><h1>{{ tr('My papers', '我的试卷') }}</h1><p>{{ tr(count_label(papers|length, 'paper') ~ ' in your library.', '共 ' ~ papers|length ~ ' 份试卷。') }}</p></div>
+  <a href="/student/analyse" class="button button-primary">{{ tr('Analyse a paper', '分析试卷') }}</a>
 </div>
 
 <div class="grid lg:grid-cols-2 gap-5">
   {% for item in papers %}
   <section class="surface">
     <div class="flex justify-between gap-4">
-      <div><p class="eyebrow">{{ item.syllabus_code }} · {{ item.paper_number or item.source_type }}</p><h2 class="text-lg font-semibold mt-2">{{ item.title }}</h2><p class="text-sm text-slate-500 mt-1">{{ item.updated_at[:10] }} · {{ count_label(item.version_count, 'analysis version') }}</p></div>
+      <div><p class="eyebrow">{{ item.syllabus_code }} · {{ item.paper_number or item.source_type }}</p><h2 class="text-lg font-semibold mt-2">{{ item.title }}</h2><p class="text-sm text-slate-500 mt-1">{{ item.updated_at[:10] }} · {{ tr(count_label(item.version_count, 'analysis version'), item.version_count ~ ' 个分析版本') }}</p></div>
       <span class="badge badge-{{ item.analysis_status or item.status }}">{{ (item.analysis_status or item.status).replace('_', ' ')|capitalize }}</span>
     </div>
     {% if item.analysis_status == 'completed' %}
     <div class="flex items-end justify-between gap-4 mt-6 pt-5 border-t border-slate-100">
-      <div><p class="text-xs text-slate-500">Score</p><p class="text-3xl font-bold tracking-tight text-indigo-700 mt-1">{{ item.provisional_score }}<span class="text-base text-slate-400">/{{ item.maximum_marks }}</span></p></div>
-      <div class="flex flex-wrap justify-end gap-3"><a class="text-indigo-600 text-sm font-semibold" href="/student/papers/{{ item.id }}">View analysis</a><a class="text-slate-600 text-sm" href="/student/papers/{{ item.id }}/rerun">Run a new version</a></div>
+      <div><p class="text-xs text-slate-500">{{ tr('Score', '得分') }}</p><p class="text-3xl font-bold tracking-tight text-indigo-700 mt-1">{{ item.provisional_score }}<span class="text-base text-slate-400">/{{ item.maximum_marks }}</span></p></div>
+      <div class="flex flex-wrap justify-end gap-3"><a class="text-indigo-600 text-sm font-semibold" href="/student/papers/{{ item.id }}">{{ tr('View analysis', '查看分析') }}</a><a class="text-slate-600 text-sm" href="/student/papers/{{ item.id }}/rerun">{{ tr('Run a new version', '运行新版本') }}</a></div>
     </div>
     {% elif item.analysis_status == 'review' %}
-    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/review">Continue review</a>
+    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/review">{{ tr('Start analysis', '开始分析') }}</a>
     {% elif item.analysis_status in ['queued','processing'] %}
-    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/processing">View progress</a>
+    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/processing">{{ tr('View progress', '查看进度') }}</a>
     {% endif %}
   </section>
   {% else %}
-  <section class="surface lg:col-span-2 text-center py-12"><p class="text-xl font-semibold">No papers yet</p><p class="text-slate-500 mt-2">Add the question paper, your completed work, and the mark scheme.</p><a href="/student/analyse" class="button button-primary mt-5">Analyse your first paper</a></section>
+  <section class="surface lg:col-span-2 text-center py-12"><p class="text-xl font-semibold">{{ tr('No papers yet', '还没有试卷') }}</p><p class="text-slate-500 mt-2">{{ tr('Add the question paper, your completed work, and the mark scheme.', '请上传试题卷、已完成的答卷和评分标准。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a></section>
   {% endfor %}
 </div>
 

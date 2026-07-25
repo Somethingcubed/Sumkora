@@ -17,16 +17,18 @@ Open `http://127.0.0.1:8000`.
    a student account without an email address.
 2. Choose **Analyse paper**.
 3. Upload a question-paper PDF, completed answer-script PDF or image, and
-   mark-scheme PDF. No class or assignment is needed.
-4. Review the detected title, syllabus, paper metadata, questions and
-   criterion mappings. Correct the editable JSON if needed, then run analysis.
+   mark-scheme PDF. No title, paper metadata, class or assignment is needed.
+4. Analysis starts immediately. Numera reads the documents, detects naturally
+   ordered top-level questions and matches answer pages during OCR.
 5. Follow the processing stages to the paper result. Inspect the score range,
    marks lost, question evidence and concise recommendations.
-6. Choose **Run a new version** to reuse or replace any document. Confirm the
-   metadata again and rerun; version 1 remains available from the result page.
+6. Choose **Run a new version** to reuse or replace any document. The new
+   version starts automatically; version 1 remains available from the result
+   page.
 7. Open **My papers**, **Compare**, and **Strengths** to see the attempt in its
    paper and longitudinal contexts.
 8. Download the student PDF report from the result page.
+9. Use the persistent **EN / 中文** control to switch the student interface.
 
 ## 3. Researcher journey
 

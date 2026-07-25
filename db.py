@@ -745,6 +745,12 @@ def init_db():
         """,
         (now,),
     )
+    conn.execute(
+        """
+        UPDATE users SET name = 'Oscar'
+        WHERE lower(email) = 'teacher@school.edu' AND name = 'Ms. Chen'
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -778,7 +784,7 @@ def seed_if_empty():
 
     conn.execute(
         "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-        ("teacher@school.edu", teacher_hash, "Ms. Chen", "teacher"),
+        ("teacher@school.edu", teacher_hash, "Oscar", "teacher"),
     )
     conn.execute(
         """

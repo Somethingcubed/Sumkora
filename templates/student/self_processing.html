@@ -1,10 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Processing {{ version.paper_title }} — Numera{% endblock %}
+{% block title %}{{ tr('Analysing', '正在分析') }} {{ version.paper_title }} — Numera{% endblock %}
 {% block content %}
+{% set stage_labels = {
+  'validation': tr('Checking files', '检查文件'),
+  'document_extraction': tr('Reading documents', '读取文档'),
+  'ocr': tr('Reading completed work', '识别答卷内容'),
+  'question_detection': tr('Detecting questions', '识别题目'),
+  'criterion_grading': tr('Applying the mark scheme', '依据评分标准批改'),
+  'diagnosis': tr('Explaining lost marks', '分析失分原因'),
+  'profile_update': tr('Updating your progress', '更新学习进展'),
+  'report_generation': tr('Preparing your report', '生成分析报告')
+} %}
 <div class="max-w-4xl mx-auto">
   <div class="page-header">
-    <div><p class="eyebrow">Paper analysis · v{{ version.version_number }}</p><h1>{{ version.paper_title }}</h1><p>You can leave this page and return later.</p></div>
-    <span id="job-status" class="badge badge-{{ version.status }}" role="status" aria-live="polite">{{ version.status.replace('_', ' ')|capitalize }}</span>
+    <div><p class="eyebrow">{{ tr('Paper analysis', '试卷分析') }} · v{{ version.version_number }}</p><h1>{{ version.paper_title }}</h1><p>{{ tr('You can leave this page and return later.', '你可以离开此页面，稍后再回来查看。') }}</p></div>
+    <span id="job-status" class="badge badge-{{ version.status }}" role="status" aria-live="polite">{{ tr(version.status.replace('_', ' ')|capitalize, '处理中' if version.status in ['queued','processing'] else '已完成' if version.status == 'completed' else '失败') }}</span>
   </div>
   <section class="card">
     <div class="h-2 rounded-full bg-slate-100 overflow-hidden mb-6"><div id="overall-progress" class="h-full bg-indigo-600 transition-all" style="width:0%"></div></div>
@@ -12,12 +22,12 @@
       {% for stage in pipeline_stages %}
       <li data-stage="{{ stage }}" class="flex items-center gap-3 rounded-xl border p-4">
         <span class="stage-dot h-3 w-3 rounded-full bg-slate-300"></span>
-        <div><p class="font-medium capitalize">{{ stage.replace('_', ' ') }}</p><p class="stage-note text-xs text-slate-500">Waiting</p></div>
+        <div><p class="font-medium">{{ stage_labels.get(stage, stage.replace('_', ' ')|capitalize) }}</p><p class="stage-note text-xs text-slate-500">{{ tr('Waiting', '等待中') }}</p></div>
       </li>
       {% endfor %}
     </ol>
     <div id="failure" class="hidden mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700"></div>
-    <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 button button-primary">View paper analysis</a>
+    <a id="result-link" href="/student/papers/{{ version.student_paper_id }}?version={{ version.id }}" class="hidden mt-5 button button-primary">{{ tr('View paper analysis', '查看试卷分析') }}</a>
   </section>
 </div>
 <script>
@@ -27,17 +37,22 @@
     const response = await fetch("/student/analysis/{{ version.id }}/status", {credentials:"same-origin"});
     if (!response.ok) return;
     const job = await response.json();
-    const visibleStatus = String(job.status || "").replaceAll("_", " ");
-    document.getElementById("job-status").textContent = visibleStatus.charAt(0).toUpperCase() + visibleStatus.slice(1);
+    const statusLabels = {{ {
+      'queued': tr('Queued', '等待中'),
+      'processing': tr('Processing', '分析中'),
+      'completed': tr('Completed', '已完成'),
+      'failed': tr('Failed', '失败')
+    }|tojson }};
+    document.getElementById("job-status").textContent = statusLabels[job.status] || job.status;
     const current = job.current_stage === "completed" ? stages.length : Math.max(0, Number(job.stage_index || 0));
     document.getElementById("overall-progress").style.width = `${Math.round(100 * current / stages.length)}%`;
     document.querySelectorAll("[data-stage]").forEach((node,index) => {
       const dot=node.querySelector(".stage-dot"), note=node.querySelector(".stage-note");
-      if (index < current || job.status === "completed") { dot.className="stage-dot h-3 w-3 rounded-full bg-emerald-500"; note.textContent="Completed"; }
-      else if (index === current && job.status === "processing") { dot.className="stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse"; note.textContent="In progress"; }
+      if (index < current || job.status === "completed") { dot.className="stage-dot h-3 w-3 rounded-full bg-emerald-500"; note.textContent={{ tr('Completed', '已完成')|tojson }}; }
+      else if (index === current && job.status === "processing") { dot.className="stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse"; note.textContent={{ tr('In progress', '进行中')|tojson }}; }
     });
     if (job.status === "completed") { document.getElementById("overall-progress").style.width="100%"; document.getElementById("result-link").classList.remove("hidden"); return; }
-    if (job.status === "failed") { const el=document.getElementById("failure"); el.textContent=job.failure_message || "Analysis failed. Your files and previous versions are safe."; el.classList.remove("hidden"); return; }
+    if (job.status === "failed") { const el=document.getElementById("failure"); el.textContent=job.failure_message || {{ tr('Analysis failed. Your files and previous versions are safe.', '分析失败。你的文件和之前的版本仍然安全。')|tojson }}; el.classList.remove("hidden"); return; }
     window.setTimeout(refresh,1500);
   }
   refresh();

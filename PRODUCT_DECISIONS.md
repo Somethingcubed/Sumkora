@@ -27,6 +27,20 @@ one-time recovery code is shown once at signup because the product does not
 collect contact details; its digest is stored separately from the password and
 the code is consumed when used.
 
+## Automatic paper detection
+
+Students provide only the question paper, completed work and mark scheme.
+Numera detects paper metadata and top-level questions during processing,
+reconciles the question paper with the mark scheme, and uses OCR labels to
+match answer pages. The internal mapping remains available to researchers but
+is not presented as a student form or editable JSON.
+
+## Bilingual student experience
+
+English and Simplified Chinese are first-class interface choices for
+authentication, navigation and the principal student journey. The persistent
+`EN / 中文` control keeps the current page when switching languages.
+
 ## Longitudinal and paper-centered
 
 A single paper is noisy evidence, so profile claims require repeated attempts

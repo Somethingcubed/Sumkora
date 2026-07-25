@@ -10,20 +10,24 @@
 </head>
 <body class="auth-page">
   <main class="auth-layout">
-    <section class="auth-brand" aria-label="About Numera">
-      <a class="brand-mark" href="/" aria-label="Numera home">
+    <section class="auth-brand" aria-label="{{ tr('About Numera', '关于 Numera') }}">
+      <a class="brand-mark" href="/" aria-label="{{ tr('Numera home', 'Numera 首页') }}">
         <span class="brand-symbol" aria-hidden="true">N</span>
         <span>Numera</span>
       </a>
       <div class="auth-brand-copy">
-        <p class="eyebrow eyebrow-light">Mathematics, made clearer</p>
-        <h1>Understand every paper. Build on every result.</h1>
-        <p>Upload your work, see where marks were lost, and follow your progress over time.</p>
+        <p class="eyebrow eyebrow-light">{{ tr('Mathematics, made clearer', '让数学学习更清晰') }}</p>
+        <h1>{{ tr('Understand every paper. Build on every result.', '读懂每一份试卷，在每次结果上进步。') }}</h1>
+        <p>{{ tr('Upload your work, see where marks were lost, and follow your progress over time.', '上传答卷，了解失分原因，并持续追踪学习进步。') }}</p>
       </div>
       <p class="auth-footnote">Cambridge IGCSE Additional Mathematics · 0606</p>
     </section>
     <section class="auth-panel">
-      <a href="/lang/{{ other_lang }}" class="auth-language">{{ t.lang_switch }}</a>
+      <nav class="auth-language language-switcher" aria-label="{{ tr('Language', '语言') }}">
+        <a href="/lang/en" lang="en" {% if lang == 'en' %}aria-current="true"{% endif %}>EN</a>
+        <span aria-hidden="true">/</span>
+        <a href="/lang/zh" lang="zh" {% if lang == 'zh' %}aria-current="true"{% endif %}>中文</a>
+      </nav>
       <div class="auth-card">
         {% block auth_content %}{% endblock %}
       </div>
@@ -35,7 +39,7 @@
         const input = document.getElementById(button.dataset.passwordToggle);
         const reveal = input.type === "password";
         input.type = reveal ? "text" : "password";
-        button.textContent = reveal ? "Hide" : "Show";
+        button.textContent = reveal ? {{ tr('Hide', '隐藏')|tojson }} : {{ tr('Show', '显示')|tojson }};
         button.setAttribute("aria-pressed", String(reveal));
       });
     });

@@ -1,29 +1,29 @@
 {% extends "auth_base.html" %}
-{% block title %}Reset password — Numera{% endblock %}
+{% block title %}{{ tr('Reset password', '重置密码') }} — Numera{% endblock %}
 {% block auth_content %}
-<p class="eyebrow">Account recovery</p>
-<h2 class="auth-title">Reset your password</h2>
-<p class="auth-subtitle">Use the one-time recovery code you saved when you created your account.</p>
+<p class="eyebrow">{{ tr('Account recovery', '账号恢复') }}</p>
+<h2 class="auth-title">{{ tr('Reset your password', '重置密码') }}</h2>
+<p class="auth-subtitle">{{ tr('Use the one-time recovery code you saved when you created your account.', '使用创建账号时保存的一次性恢复码。') }}</p>
 
 {% if error %}
 <div class="form-message form-message-error" id="recovery-error" role="alert">{{ error }}</div>
 {% endif %}
 
-<form method="post" action="/recover" class="form-stack" data-submit-label="Resetting password…">
-  <label class="form-label" for="recovery-username">Username</label>
+<form method="post" action="/recover" class="form-stack" data-submit-label="{{ tr('Resetting password…', '正在重置密码…') }}">
+  <label class="form-label" for="recovery-username">{{ tr('Username', '用户名') }}</label>
   <input class="field" id="recovery-username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" required>
 
-  <label class="form-label" for="recovery-code">Recovery code</label>
+  <label class="form-label" for="recovery-code">{{ tr('Recovery code', '恢复码') }}</label>
   <input class="field recovery-input" id="recovery-code" name="recovery_code" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
 
-  <label class="form-label" for="recovery-password">New password</label>
+  <label class="form-label" for="recovery-password">{{ tr('New password', '新密码') }}</label>
   <input class="field" id="recovery-password" type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" required>
 
-  <label class="form-label" for="recovery-confirmation">Confirm new password</label>
+  <label class="form-label" for="recovery-confirmation">{{ tr('Confirm new password', '确认新密码') }}</label>
   <input class="field" id="recovery-confirmation" type="password" name="password_confirmation" minlength="8" maxlength="128" autocomplete="new-password" required>
 
-  <button type="submit" class="button button-primary button-block">Reset password</button>
+  <button type="submit" class="button button-primary button-block">{{ tr('Reset password', '重置密码') }}</button>
 </form>
 
-<p class="auth-switch"><a href="/login">Back to login</a></p>
+<p class="auth-switch"><a href="/login">{{ tr('Back to login', '返回登录') }}</a></p>
 {% endblock %}

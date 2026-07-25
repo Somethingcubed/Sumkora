@@ -1,14 +1,14 @@
 {% extends "auth_base.html" %}
-{% block title %}Account created — Numera{% endblock %}
+{% block title %}{{ tr('Account created', '账号已创建') }} — Numera{% endblock %}
 {% block auth_content %}
 <div class="success-mark" aria-hidden="true">✓</div>
-<p class="eyebrow">Account created</p>
-<h2 class="auth-title">Welcome to Numera, {{ user.name }}</h2>
-<p class="auth-subtitle">Save this recovery code somewhere private. It is shown only once.</p>
+<p class="eyebrow">{{ tr('Account created', '账号已创建') }}</p>
+<h2 class="auth-title">{{ tr('Welcome to Numera', '欢迎使用 Numera') }}，{{ user.name }}</h2>
+<p class="auth-subtitle">{{ tr('Save this recovery code somewhere private. It is shown only once.', '请将此恢复码保存在安全的地方。它只显示一次。') }}</p>
 
 <div class="recovery-code" aria-label="Recovery code">{{ recovery_code }}</div>
-<p class="field-help">You can use it once to reset your password if you forget it.</p>
+<p class="field-help">{{ tr('You can use it once to reset your password if you forget it.', '忘记密码时，可使用一次此恢复码进行重置。') }}</p>
 
-<a href="/student/analyse" class="button button-primary button-block">Analyse your first paper</a>
-<a href="/student" class="button button-secondary button-block">Go to dashboard</a>
+<a href="/student/analyse" class="button button-primary button-block">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
+<a href="/student" class="button button-secondary button-block">{{ tr('Go to dashboard', '前往主页') }}</a>
 {% endblock %}

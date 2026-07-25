@@ -176,11 +176,27 @@ input[type="file"] {
   gap: 0.85rem;
 }
 
-.language-link {
-  color: var(--muted);
-  font-size: 0.75rem;
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  color: #98a2b3;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 0.7rem;
   font-weight: 650;
+}
+
+.language-switcher a {
+  color: var(--muted);
   text-decoration: none;
+}
+
+.language-switcher a[aria-current="true"] {
+  color: var(--brand-dark);
+  font-weight: 800;
 }
 
 .account-menu {
@@ -288,6 +304,17 @@ input[type="file"] {
 
 .mobile-menu a:hover {
   background: #f2f4f7;
+}
+
+.mobile-language-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.35rem;
+}
+
+.mobile-language-switcher a {
+  text-align: center;
 }
 
 .page-shell {
@@ -802,10 +829,6 @@ details[open] > summary {
   position: absolute;
   top: 1.5rem;
   right: 1.75rem;
-  color: var(--muted);
-  font-size: 0.77rem;
-  font-weight: 650;
-  text-decoration: none;
 }
 
 .auth-card {

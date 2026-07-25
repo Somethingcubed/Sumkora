@@ -1,16 +1,16 @@
 {% extends "auth_base.html" %}
-{% block title %}Create an account — Numera{% endblock %}
+{% block title %}{{ tr('Create an account', '创建账号') }} — Numera{% endblock %}
 {% block auth_content %}
-<p class="eyebrow">Start your progress record</p>
-<h2 class="auth-title">Create your Numera account</h2>
-<p class="auth-subtitle">Track your papers, understand where marks were lost, and follow your progress over time.</p>
+<p class="eyebrow">{{ tr('Start your progress record', '开始记录学习进展') }}</p>
+<h2 class="auth-title">{{ tr('Create your Numera account', '创建 Numera 账号') }}</h2>
+<p class="auth-subtitle">{{ tr('Track your papers, understand where marks were lost, and follow your progress over time.', '记录试卷、了解失分原因，并持续追踪学习进展。') }}</p>
 
 {% if error %}
 <div class="form-message form-message-error" id="signup-error" role="alert">{{ error }}</div>
 {% endif %}
 
-<form method="post" action="/signup" class="form-stack" data-submit-label="Creating account…">
-  <label class="form-label" for="username">Username</label>
+<form method="post" action="/signup" class="form-stack" data-submit-label="{{ tr('Creating account…', '正在创建账号…') }}">
+  <label class="form-label" for="username">{{ tr('Username', '用户名') }}</label>
   <input
     class="field"
     id="username"
@@ -25,9 +25,9 @@
     required
     aria-describedby="username-help{% if error_field == 'username' %} signup-error{% endif %}"
   >
-  <p class="field-help" id="username-help">3–24 letters, numbers, underscores, or hyphens.</p>
+  <p class="field-help" id="username-help">{{ tr('3–24 letters, numbers, underscores, or hyphens.', '3–24 个英文字母、数字、下划线或连字符。') }}</p>
 
-  <label class="form-label" for="display-name">Display name <span>Optional</span></label>
+  <label class="form-label" for="display-name">{{ tr('Display name', '显示名称') }} <span>{{ tr('Optional', '选填') }}</span></label>
   <input
     class="field"
     id="display-name"
@@ -37,7 +37,7 @@
     autocomplete="name"
   >
 
-  <label class="form-label" for="signup-password">Password</label>
+  <label class="form-label" for="signup-password">{{ tr('Password', '密码') }}</label>
   <div class="password-field">
     <input
       class="field"
@@ -50,11 +50,11 @@
       required
       aria-describedby="password-help{% if error_field == 'password' %} signup-error{% endif %}"
     >
-    <button type="button" data-password-toggle="signup-password" aria-pressed="false">Show</button>
+    <button type="button" data-password-toggle="signup-password" aria-pressed="false">{{ tr('Show', '显示') }}</button>
   </div>
-  <p class="field-help" id="password-help">At least 8 characters.</p>
+  <p class="field-help" id="password-help">{{ tr('At least 8 characters.', '至少 8 个字符。') }}</p>
 
-  <label class="form-label" for="password-confirmation">Confirm password</label>
+  <label class="form-label" for="password-confirmation">{{ tr('Confirm password', '确认密码') }}</label>
   <div class="password-field">
     <input
       class="field"
@@ -67,11 +67,11 @@
       required
       {% if error_field == 'password_confirmation' %}aria-describedby="signup-error"{% endif %}
     >
-    <button type="button" data-password-toggle="password-confirmation" aria-pressed="false">Show</button>
+    <button type="button" data-password-toggle="password-confirmation" aria-pressed="false">{{ tr('Show', '显示') }}</button>
   </div>
 
-  <button type="submit" class="button button-primary button-block">Create account</button>
+  <button type="submit" class="button button-primary button-block">{{ tr('Create account', '创建账号') }}</button>
 </form>
 
-<p class="auth-switch">Already have an account? <a href="/login">Log in</a></p>
+<p class="auth-switch">{{ tr('Already have an account?', '已有账号？') }} <a href="/login">{{ tr('Log in', '登录') }}</a></p>
 {% endblock %}

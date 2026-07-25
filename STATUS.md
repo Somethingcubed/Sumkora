@@ -36,8 +36,12 @@ This is a tested development build, not a production deployment.
 - Login, signup and recovery endpoints have practical per-IP throttling for
   this single-process development build.
 - Students upload a question paper, completed work and mark scheme directly;
-  no class, assignment, teacher registration or approval is required.
-- Students review detected metadata/question mappings before running analysis.
+  no title, syllabus, component, year, session, class, assignment, teacher
+  registration or approval is required.
+- Analysis starts immediately after upload. Paper metadata and top-level
+  questions are inferred automatically from OCR/native text, reconciled across
+  the question paper and mark scheme, naturally sorted and matched to answer
+  pages without exposing editable mapping JSON to students.
 - Official 0606, mocks and custom mathematics papers share the same path.
 - Reruns create immutable analysis versions and can replace any source file.
 - Each version retains OCR, AI decisions, evidence, models, prompts and score
@@ -66,6 +70,9 @@ This is a tested development build, not a production deployment.
 - The auth, student and research surfaces now share a restrained design system,
   consistent navigation, sentence-case copy, labelled fields, visible focus
   states, progressive disclosure and responsive layouts.
+- A persistent `EN / 中文` control restores bilingual authentication,
+  navigation and principal student workflows for students in China.
+- The inherited demo researcher is displayed as Oscar.
 - Local Tailwind CSS replaces the fragile development CDN.
 
 ## Live versus deterministic behavior
@@ -99,7 +106,7 @@ pnpm build && .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 
 ## Verification
 
-- `.venv/bin/pytest -q`: 19 passed.
+- `.venv/bin/pytest -q`: 22 passed.
 - `.venv/bin/python scripts/regression_checks.py`: 10 checks passed,
   including archived teacher-route mutation checks.
 - Python compile check: passed.
@@ -126,7 +133,9 @@ No public deployment was attempted because owner permission was not given.
 
 ## Known limitations and security concerns
 
-- Paper-to-question parsing is heuristic and must be human-reviewed.
+- Paper-to-question detection is heuristic. It now combines OCR/native text
+  from both source documents and answer-page labels, but unusual layouts still
+  need inspection in the private research workbench.
 - Direct processing is sequential and runs in the web process; a durable queue
   with progress cancellation is still required for production.
 - The experiment runner currently evaluates saved configuration snapshots

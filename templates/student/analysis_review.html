@@ -1,63 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Review paper details — Numera{% endblock %}
+{% block title %}{{ tr('Start analysis', '开始分析') }} — Numera{% endblock %}
 {% block content %}
-<div class="max-w-5xl mx-auto">
+<div class="max-w-2xl mx-auto">
   <div class="page-header">
     <div>
-      <p class="eyebrow">Analysis v{{ version.version_number }}</p>
-      <h1>Review paper details</h1>
-      <p>Check the information below before analysis begins.</p>
+      <p class="eyebrow">{{ tr('Analysis', '分析') }} v{{ version.version_number }}</p>
+      <h1>{{ tr('Ready to analyse', '可以开始分析') }}</h1>
+      <p>{{ tr('Numera will detect the paper details and match questions automatically during OCR.', 'Numera 会在 OCR 过程中自动识别试卷信息并匹配题目。') }}</p>
     </div>
-    <span class="badge badge-review">Ready to review</span>
   </div>
 
   {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
-  {% if warnings %}
-  <details class="surface mb-6">
-    <summary class="cursor-pointer font-semibold">Items to check ({{ warnings|length }})</summary>
-    <ul class="list-disc pl-5 mt-3 text-sm text-slate-600 space-y-1">{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-
-  <form method="post" action="/student/analysis/{{ version.id }}/run" class="space-y-5" data-run-form>
-    <section class="surface">
-      <h2 class="text-lg font-semibold">Paper details</h2>
-      <div class="grid md:grid-cols-3 gap-4 mt-4">
-        <label class="md:col-span-2 form-label">Title<input class="field" name="title" required value="{{ metadata.title or '' }}"></label>
-        <label class="form-label">Syllabus<input class="field" name="syllabus_code" value="{{ metadata.syllabus_code or '0606' }}"></label>
-        <label class="form-label">Paper or component<input class="field" name="paper_number" value="{{ metadata.paper_number or '' }}"></label>
-        <label class="form-label">Year<input class="field" name="paper_year" inputmode="numeric" value="{{ metadata.paper_year or '' }}"></label>
-        <label class="form-label">Session<input class="field" name="examination_session" value="{{ metadata.examination_session or '' }}"></label>
-        <label class="form-label">Calculator use<select class="field" name="calculator_policy"><option value="unknown" {% if metadata.calculator_policy == 'unknown' %}selected{% endif %}>Not specified</option><option value="non-calculator" {% if metadata.calculator_policy == 'non-calculator' %}selected{% endif %}>Not allowed</option><option value="calculator" {% if metadata.calculator_policy == 'calculator' %}selected{% endif %}>Allowed</option></select></label>
-        <label class="form-label">Maximum mark<input class="field" name="maximum_marks" type="number" min="1" step="1" value="{{ metadata.maximum_marks or 0 }}"></label>
-        <label class="form-label">Paper type<select class="field" name="source_type"><option value="custom">Custom or school paper</option><option value="official" {% if metadata.source_type == 'official' %}selected{% endif %}>Official Cambridge paper</option><option value="mock" {% if metadata.source_type == 'mock' %}selected{% endif %}>Mock examination</option><option value="revision" {% if metadata.source_type == 'revision' %}selected{% endif %}>Revision paper</option></select></label>
-      </div>
-    </section>
-
-    <section class="surface">
-      <div class="flex flex-wrap justify-between gap-3">
-        <div><h2 class="text-lg font-semibold">Questions found</h2><p class="text-sm text-slate-500 mt-1">{{ count_label(questions|length, 'question') }} detected</p></div>
-      </div>
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
-        {% for question in questions %}
-        <div class="rounded-xl border border-slate-200 p-3">
-          <div class="flex justify-between gap-3"><p class="font-medium">{{ question.label }}</p><p class="text-sm">{{ question.maximum_marks }} marks</p></div>
-          <p class="text-xs text-slate-500 mt-1">{{ question.topic or 'Topic not identified' }}</p>
-        </div>
-        {% endfor %}
-      </div>
-      <details class="mt-5 rounded-xl border border-slate-200 p-4">
-        <summary class="cursor-pointer font-medium text-sm">Edit question mapping</summary>
-        <p class="text-xs text-slate-500 mt-2">Use this only if a question, page, mark, or topic was detected incorrectly.</p>
-        <label class="sr-only" for="question-plan">Question mapping JSON</label>
-        <textarea id="question-plan" name="question_plan" rows="18" spellcheck="false" class="mt-4 w-full rounded-xl border border-slate-300 bg-slate-950 text-slate-100 p-4 font-mono text-xs leading-5">{{ question_plan_json }}</textarea>
-      </details>
-    </section>
-
-    <div class="sticky bottom-3 surface flex flex-wrap justify-between items-center gap-3 shadow-lg">
-      <p class="text-sm text-slate-500">You can return to this paper and run a new version later.</p>
-      <button class="button button-primary" type="submit" data-run-button>Run analysis</button>
-    </div>
+  <form method="post" action="/student/analysis/{{ version.id }}/run" class="surface" data-run-form>
+    <p class="text-sm text-slate-600">{{ tr('There is nothing to fill in. Question detection, page matching, marks and paper information are handled automatically.', '无需填写任何信息。题目识别、页面匹配、分值和试卷信息都会自动处理。') }}</p>
+    <button class="button button-primary mt-5" type="submit" data-run-button>{{ tr('Start analysis', '开始分析') }}</button>
   </form>
 </div>
 <script>
@@ -65,7 +21,7 @@
     if (!event.currentTarget.checkValidity()) return;
     const button = event.currentTarget.querySelector("[data-run-button]");
     button.disabled = true;
-    button.textContent = "Starting analysis…";
+    button.textContent = {{ tr('Starting analysis…', '正在开始分析…')|tojson }};
     event.currentTarget.setAttribute("aria-busy", "true");
   });
 </script>

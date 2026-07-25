@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Run a new version — Numera{% endblock %}
+{% block title %}{{ tr('Run a new version', '运行新版本') }} — Numera{% endblock %}
 {% block content %}
 <div class="max-w-3xl mx-auto">
   <div class="page-header">
-    <div><p class="eyebrow">{{ paper.title }}</p><h1>Run a new version</h1><p>Replace only the files that have changed. Leave the others blank.</p></div>
+    <div><p class="eyebrow">{{ paper.title }}</p><h1>{{ tr('Run a new version', '运行新版本') }}</h1><p>{{ tr('Replace only the files that have changed. Leave the others blank.', '只替换发生变化的文件，其他文件留空即可。') }}</p></div>
   </div>
   {% if error %}<div class="form-message form-message-error mb-5" role="alert">{{ error }}</div>{% endif %}
   <form method="post" enctype="multipart/form-data" class="surface space-y-5" data-rerun-form>
-    <label class="form-label">Completed work <span>PDF or image</span><input class="mt-2 block text-sm" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*"></label>
-    <label class="form-label">Question paper <span>Optional PDF</span><input class="mt-2 block text-sm" type="file" name="question_paper" accept=".pdf,application/pdf"></label>
-    <label class="form-label">Mark scheme <span>Optional PDF</span><input class="mt-2 block text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf"></label>
-    <div class="pt-5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3"><p class="text-xs text-slate-500">This will create analysis v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="button button-primary" type="submit">Review new version</button></div>
+    <label class="form-label">{{ tr('Completed work', '已完成的答卷') }} <span>{{ tr('PDF or image', 'PDF 或图片') }}</span><input class="mt-2 block text-sm" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*"></label>
+    <label class="form-label">{{ tr('Question paper', '试题卷') }} <span>{{ tr('Optional PDF', '选填 PDF') }}</span><input class="mt-2 block text-sm" type="file" name="question_paper" accept=".pdf,application/pdf"></label>
+    <label class="form-label">{{ tr('Mark scheme', '评分标准') }} <span>{{ tr('Optional PDF', '选填 PDF') }}</span><input class="mt-2 block text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf"></label>
+    <div class="pt-5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3"><p class="text-xs text-slate-500">{{ tr('This will create analysis', '将创建分析') }} v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="button button-primary" type="submit">{{ tr('Start new analysis', '开始新分析') }}</button></div>
   </form>
 </div>
 {% endblock %}

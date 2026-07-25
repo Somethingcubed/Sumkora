@@ -16,10 +16,10 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="app-page {% if is_researcher %}research-mode{% endif %}">
-  <a href="#main-content" class="skip-link">Skip to content</a>
+  <a href="#main-content" class="skip-link">{{ tr('Skip to content', '跳至主要内容') }}</a>
   <header class="app-header">
     <div class="nav-shell">
-      <a href="/" class="brand-mark" aria-label="Numera home">
+      <a href="/" class="brand-mark" aria-label="{{ tr('Numera home', 'Numera 首页') }}">
         <span class="brand-symbol" aria-hidden="true">N</span>
         <span>Numera</span>
       </a>
@@ -27,45 +27,49 @@
       {% if user %}
       <nav class="desktop-nav" aria-label="Primary navigation">
         {% if is_researcher %}
-        <a href="/research" {% if current_path == '/research' %}aria-current="page"{% endif %}>Overview</a>
-        <a href="/research/experiments" {% if current_path.startswith('/research/experiments') %}aria-current="page"{% endif %}>Experiments</a>
+        <a href="/research" {% if current_path == '/research' %}aria-current="page"{% endif %}>{{ tr('Overview', '概览') }}</a>
+        <a href="/research/experiments" {% if current_path.startswith('/research/experiments') %}aria-current="page"{% endif %}>{{ tr('Experiments', '实验') }}</a>
         <a href="/research/ocr" {% if current_path == '/research/ocr' %}aria-current="page"{% endif %}>OCR</a>
-        <a href="/research/grading" {% if current_path == '/research/grading' %}aria-current="page"{% endif %}>Grading</a>
-        <a href="/research/failures" {% if current_path == '/research/failures' %}aria-current="page"{% endif %}>Failures</a>
+        <a href="/research/grading" {% if current_path == '/research/grading' %}aria-current="page"{% endif %}>{{ tr('Grading', '批改') }}</a>
+        <a href="/research/failures" {% if current_path == '/research/failures' %}aria-current="page"{% endif %}>{{ tr('Failures', '失败案例') }}</a>
         {% else %}
-        <a href="/student" {% if current_path == '/student' %}aria-current="page"{% endif %}>Dashboard</a>
-        <a href="/student/analyse" {% if current_path == '/student/analyse' %}aria-current="page"{% endif %}>Analyse a paper</a>
-        <a href="/student/papers" {% if current_path.startswith('/student/papers') %}aria-current="page"{% endif %}>My papers</a>
-        <a href="/student/compare" {% if current_path == '/student/compare' %}aria-current="page"{% endif %}>Compare</a>
-        <a href="/student/skills" {% if current_path == '/student/skills' %}aria-current="page"{% endif %}>Strengths</a>
+        <a href="/student" {% if current_path == '/student' %}aria-current="page"{% endif %}>{{ tr('Dashboard', '主页') }}</a>
+        <a href="/student/analyse" {% if current_path == '/student/analyse' %}aria-current="page"{% endif %}>{{ tr('Analyse a paper', '分析试卷') }}</a>
+        <a href="/student/papers" {% if current_path.startswith('/student/papers') %}aria-current="page"{% endif %}>{{ tr('My papers', '我的试卷') }}</a>
+        <a href="/student/compare" {% if current_path == '/student/compare' %}aria-current="page"{% endif %}>{{ tr('Compare', '对比') }}</a>
+        <a href="/student/skills" {% if current_path == '/student/skills' %}aria-current="page"{% endif %}>{{ tr('Strengths', '强弱项') }}</a>
         {% endif %}
       </nav>
 
       <div class="nav-account">
-        <a href="/lang/{{ other_lang }}" class="language-link">{{ t.lang_switch }}</a>
+        <nav class="language-switcher" aria-label="{{ tr('Language', '语言') }}">
+          <a href="/lang/en" lang="en" {% if lang == 'en' %}aria-current="true"{% endif %}>EN</a>
+          <span aria-hidden="true">/</span>
+          <a href="/lang/zh" lang="zh" {% if lang == 'zh' %}aria-current="true"{% endif %}>中文</a>
+        </nav>
         <details class="account-menu">
           <summary>
             <span class="avatar" aria-hidden="true">{{ user.name[:1]|upper }}</span>
             <span class="account-name">{{ user.name }}</span>
           </summary>
           <div class="account-popover">
-            <p>{{ 'Researcher' if is_researcher else 'Student' }}</p>
-            {% if not is_researcher %}<a href="/student/settings">Settings</a>{% endif %}
-            <a href="/logout">Log out</a>
+            <p>{{ tr('Researcher', '研究员') if is_researcher else tr('Student', '学生') }}</p>
+            {% if not is_researcher %}<a href="/student/settings">{{ tr('Settings', '设置') }}</a>{% endif %}
+            <a href="/logout">{{ tr('Log out', '退出登录') }}</a>
           </div>
         </details>
       </div>
 
       <details class="mobile-menu">
-        <summary aria-label="Open navigation">Menu</summary>
+        <summary aria-label="{{ tr('Open navigation', '打开导航') }}">{{ tr('Menu', '菜单') }}</summary>
         <nav aria-label="Mobile navigation">
           {% if is_researcher %}
-          <a href="/research">Overview</a><a href="/research/experiments">Experiments</a><a href="/research/ocr">OCR laboratory</a><a href="/research/grading">Grading evaluation</a><a href="/research/failures">Failure gallery</a><a href="/research/student-models">Student models</a><a href="/research/taxonomy">Taxonomy</a>
+          <a href="/research">{{ tr('Overview', '概览') }}</a><a href="/research/experiments">{{ tr('Experiments', '实验') }}</a><a href="/research/ocr">{{ tr('OCR laboratory', 'OCR 实验室') }}</a><a href="/research/grading">{{ tr('Grading evaluation', '批改评估') }}</a><a href="/research/failures">{{ tr('Failure gallery', '失败案例') }}</a><a href="/research/student-models">{{ tr('Student models', '学生模型') }}</a><a href="/research/taxonomy">{{ tr('Taxonomy', '分类体系') }}</a>
           {% else %}
-          <a href="/student">Dashboard</a><a href="/student/analyse">Analyse a paper</a><a href="/student/papers">My papers</a><a href="/student/compare">Compare</a><a href="/student/skills">Strengths and weaknesses</a><a href="/student/settings">Settings</a>
+          <a href="/student">{{ tr('Dashboard', '主页') }}</a><a href="/student/analyse">{{ tr('Analyse a paper', '分析试卷') }}</a><a href="/student/papers">{{ tr('My papers', '我的试卷') }}</a><a href="/student/compare">{{ tr('Compare', '对比') }}</a><a href="/student/skills">{{ tr('Strengths and weaknesses', '强项与待提升项') }}</a><a href="/student/settings">{{ tr('Settings', '设置') }}</a>
           {% endif %}
-          <a href="/lang/{{ other_lang }}">{{ t.lang_switch }}</a>
-          <a href="/logout">Log out</a>
+          <div class="mobile-language-switcher"><a href="/lang/en">English</a><a href="/lang/zh">中文</a></div>
+          <a href="/logout">{{ tr('Log out', '退出登录') }}</a>
         </nav>
       </details>
       {% endif %}

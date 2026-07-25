@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Settings — Numera{% endblock %}
+{% block title %}{{ tr('Settings', '设置') }} — Numera{% endblock %}
 {% block content %}
 <div class="page-header compact-header">
   <div>
-    <p class="eyebrow">Your account</p>
-    <h1>Settings</h1>
-    <p>Manage how your name appears and update your password.</p>
+    <p class="eyebrow">{{ tr('Your account', '你的账号') }}</p>
+    <h1>{{ tr('Settings', '设置') }}</h1>
+    <p>{{ tr('Manage how your name appears and update your password.', '管理显示名称并更新密码。') }}</p>
   </div>
 </div>
 
@@ -15,28 +15,28 @@
 
 <div class="settings-grid">
   <section class="surface">
-    <h2>Profile</h2>
+    <h2>{{ tr('Profile', '个人资料') }}</h2>
     <dl class="account-summary">
-      <div><dt>Username</dt><dd>{{ user.username or 'Legacy account' }}</dd></div>
-      <div><dt>Account type</dt><dd>Student</dd></div>
+      <div><dt>{{ tr('Username', '用户名') }}</dt><dd>{{ user.username or tr('Legacy account', '旧版账号') }}</dd></div>
+      <div><dt>{{ tr('Account type', '账号类型') }}</dt><dd>{{ tr('Student', '学生') }}</dd></div>
     </dl>
     <form method="post" action="/student/settings/profile" class="form-stack mt-6">
-      <label class="form-label" for="display-name">Display name</label>
+      <label class="form-label" for="display-name">{{ tr('Display name', '显示名称') }}</label>
       <input class="field" id="display-name" name="display_name" value="{{ user.name }}" maxlength="60" required autocomplete="name">
-      <button class="button button-primary" type="submit">Save profile</button>
+      <button class="button button-primary" type="submit">{{ tr('Save profile', '保存个人资料') }}</button>
     </form>
   </section>
 
   <section class="surface">
-    <h2>Password</h2>
+    <h2>{{ tr('Password', '密码') }}</h2>
     <form method="post" action="/student/settings/password" class="form-stack mt-5">
-      <label class="form-label" for="current-password">Current password</label>
+      <label class="form-label" for="current-password">{{ tr('Current password', '当前密码') }}</label>
       <input class="field" id="current-password" type="password" name="current_password" autocomplete="current-password" required>
-      <label class="form-label" for="new-password">New password</label>
+      <label class="form-label" for="new-password">{{ tr('New password', '新密码') }}</label>
       <input class="field" id="new-password" type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" required>
-      <label class="form-label" for="new-password-confirmation">Confirm new password</label>
+      <label class="form-label" for="new-password-confirmation">{{ tr('Confirm new password', '确认新密码') }}</label>
       <input class="field" id="new-password-confirmation" type="password" name="password_confirmation" minlength="8" maxlength="128" autocomplete="new-password" required>
-      <button class="button button-secondary" type="submit">Update password</button>
+      <button class="button button-secondary" type="submit">{{ tr('Update password', '更新密码') }}</button>
     </form>
   </section>
 </div>

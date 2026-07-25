@@ -191,6 +191,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         **context,
         "lang": lang,
         "t": strings(lang),
+        "tr": lambda english, chinese: chinese if lang == "zh" else english,
         "other_lang": other_lang(lang),
         "status_label": lambda s: status_label(lang, s),
         "type_label": lambda ty: type_label(lang, ty),
@@ -633,7 +634,7 @@ def student_analyse_page(request: Request):
 @app.post("/student/analyse")
 async def student_analyse_upload(
     request: Request,
-    title: str = Form(""),
+    background_tasks: BackgroundTasks,
     question_paper: UploadFile = File(...),
     answer_script: UploadFile = File(...),
     mark_scheme: UploadFile = File(...),
@@ -660,7 +661,7 @@ async def student_analyse_upload(
     try:
         paper_id, version_id = create_student_paper_draft(
             user["id"],
-            title,
+            "",
             question_paper.filename or "question-paper.pdf",
             question_content,
             answer_script.filename or "answer-script.pdf",
@@ -675,6 +676,11 @@ async def student_analyse_upload(
             {"user": user, "error": str(exc)},
             status_code=400,
         )
+    version = _owned_analysis_version(user["id"], version_id)
+    metadata = parse_json(version["detected_metadata"], {})
+    questions = parse_json(version["question_plan"], [])
+    confirm_version(user["id"], version_id, metadata, questions)
+    background_tasks.add_task(run_self_service_analysis, version_id)
     execute(
         """
         INSERT INTO audit_logs
@@ -689,7 +695,7 @@ async def student_analyse_upload(
         ),
     )
     return RedirectResponse(
-        f"/student/analysis/{version_id}/review",
+        f"/student/analysis/{version_id}/processing",
         status_code=303,
     )
 
@@ -702,20 +708,22 @@ def student_analysis_review(request: Request, version_id: int):
     version = _owned_analysis_version(user["id"], version_id)
     if not version:
         return RedirectResponse("/student/papers", status_code=303)
-    metadata = parse_json(
-        version["confirmed_metadata"] or version["detected_metadata"], {}
-    )
-    questions = parse_json(version["question_plan"], [])
+    if version["status"] in {"queued", "processing"}:
+        return RedirectResponse(
+            f"/student/analysis/{version_id}/processing",
+            status_code=303,
+        )
+    if version["status"] == "completed":
+        return RedirectResponse(
+            f"/student/papers/{version['student_paper_id']}?version={version_id}",
+            status_code=303,
+        )
     return render(
         request,
         "student/analysis_review.html",
         {
             "user": user,
             "version": version,
-            "metadata": metadata,
-            "questions": questions,
-            "question_plan_json": json.dumps(questions, indent=2, ensure_ascii=False),
-            "warnings": parse_json(version["warnings"], []),
             "error": None,
         },
     )
@@ -726,15 +734,6 @@ async def student_analysis_run(
     request: Request,
     version_id: int,
     background_tasks: BackgroundTasks,
-    title: str = Form(...),
-    syllabus_code: str = Form("0606"),
-    paper_number: str = Form(""),
-    paper_year: str = Form(""),
-    examination_session: str = Form(""),
-    calculator_policy: str = Form("unknown"),
-    maximum_marks: float = Form(0),
-    source_type: str = Form("custom"),
-    question_plan: str = Form(...),
 ):
     user = require_role(request, "student")
     if not user:
@@ -742,45 +741,9 @@ async def student_analysis_run(
     version = _owned_analysis_version(user["id"], version_id)
     if not version:
         return RedirectResponse("/student/papers", status_code=303)
-    try:
-        questions = json.loads(question_plan)
-        if not isinstance(questions, list) or not questions:
-            raise ValueError("At least one question is required.")
-        for index, item in enumerate(questions):
-            if not isinstance(item, dict):
-                raise ValueError(f"Question {index + 1} must be a JSON object.")
-            item["label"] = str(item.get("label") or f"Q{index + 1}")
-            item["maximum_marks"] = float(item.get("maximum_marks") or 0)
-            if item["maximum_marks"] <= 0:
-                raise ValueError(f"{item['label']} must have a positive maximum mark.")
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        metadata = parse_json(version["detected_metadata"], {})
-        return render(
-            request,
-            "student/analysis_review.html",
-            {
-                "user": user,
-                "version": version,
-                "metadata": metadata,
-                "questions": parse_json(version["question_plan"], []),
-                "question_plan_json": question_plan,
-                "warnings": parse_json(version["warnings"], []),
-                "error": f"Review the question plan: {exc}",
-            },
-            status_code=400,
-        )
-    metadata = {
-        "title": title.strip(),
-        "syllabus_code": syllabus_code.strip() or "custom",
-        "paper_number": paper_number.strip(),
-        "paper_year": int(paper_year) if paper_year.strip().isdigit() else None,
-        "examination_session": examination_session.strip(),
-        "calculator_policy": calculator_policy,
-        "maximum_marks": maximum_marks
-        or sum(float(item["maximum_marks"]) for item in questions),
-        "source_type": source_type,
-    }
-    paper_id = confirm_version(user["id"], version_id, metadata, questions)
+    metadata = parse_json(version["detected_metadata"], {})
+    questions = parse_json(version["question_plan"], [])
+    confirm_version(user["id"], version_id, metadata, questions)
     background_tasks.add_task(run_self_service_analysis, version_id)
     return RedirectResponse(
         f"/student/analysis/{version_id}/processing",
@@ -918,6 +881,7 @@ def student_paper_rerun_page(request: Request, paper_id: int):
 async def student_paper_rerun(
     request: Request,
     paper_id: int,
+    background_tasks: BackgroundTasks,
     question_paper: UploadFile = File(None),
     answer_script: UploadFile = File(None),
     mark_scheme: UploadFile = File(None),
@@ -950,8 +914,16 @@ async def student_paper_rerun(
             {"user": user, "paper": paper, "versions": versions, "error": str(exc)},
             status_code=400,
         )
+    version = _owned_analysis_version(user["id"], version_id)
+    confirm_version(
+        user["id"],
+        version_id,
+        parse_json(version["detected_metadata"], {}),
+        parse_json(version["question_plan"], []),
+    )
+    background_tasks.add_task(run_self_service_analysis, version_id)
     return RedirectResponse(
-        f"/student/analysis/{version_id}/review",
+        f"/student/analysis/{version_id}/processing",
         status_code=303,
     )
 
@@ -2624,20 +2596,6 @@ def research_experiment_detail(request: Request, experiment_id: int):
         "SELECT * FROM research_experiments WHERE id = ?",
         (experiment_id,),
     )
-
-
-@app.get("/research/experiments/{experiment_id}/report")
-def research_experiment_pdf(request: Request, experiment_id: int):
-    user = require_researcher(request)
-    if not user:
-        return redirect_login()
-    content = research_experiment_report(experiment_id)
-    if not content:
-        return JSONResponse({"detail": "Not found."}, status_code=404)
-    return pdf_response(
-        content,
-        f"numera-experiment-{experiment_id}.pdf",
-    )
     if not experiment:
         return RedirectResponse("/research/experiments", status_code=303)
     runs = query_all(
@@ -2657,6 +2615,20 @@ def research_experiment_pdf(request: Request, experiment_id: int):
             "dataset": parse_json(experiment["dataset_selection"], {}),
             "metrics": parse_json(experiment["metrics"], {}),
         },
+    )
+
+
+@app.get("/research/experiments/{experiment_id}/report")
+def research_experiment_pdf(request: Request, experiment_id: int):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    content = research_experiment_report(experiment_id)
+    if not content:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return pdf_response(
+        content,
+        f"numera-experiment-{experiment_id}.pdf",
     )
 
 

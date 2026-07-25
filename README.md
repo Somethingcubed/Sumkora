@@ -28,7 +28,9 @@ The research credential keeps its inherited email and internal `teacher`
 compatibility role, but the active product has no teacher or classroom
 experience. New students choose **Create account** and register with only a
 username, an optional display name and a password; Numera does not ask them
-for an email address.
+for an email address. The active authentication and student experience can be
+switched between English and Simplified Chinese from the persistent `EN / 中文`
+control.
 
 Add the deterministic longitudinal demo with:
 

@@ -411,7 +411,7 @@ def main():
         teacher_hash = hash_password("teacher123")
         conn.execute(
             "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, 'teacher')",
-            (TEACHER_EMAIL, teacher_hash, "Ms. Chen"),
+            (TEACHER_EMAIL, teacher_hash, "Oscar"),
         )
         teacher = conn.execute(
             "SELECT id FROM users WHERE email = ?",
