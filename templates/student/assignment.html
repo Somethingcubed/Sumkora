@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ assignment.title }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">{{ assignment.title }}</h1>
+<p class="text-slate-600 mb-6">{{ assignment.class_name }} · {{ assignment.total_marks }} {{ t.marks }} · {{ t.due }} {{ assignment.due_date or '—' }}</p>
+
+<div class="grid lg:grid-cols-2 gap-6">
+  <section class="card">
+    <h2 class="font-semibold mb-3">{{ t.questions }}</h2>
+    <div class="space-y-2 text-sm">
+      {% for q in questions %}
+      <div class="border rounded p-2">
+        <div class="flex justify-between gap-3">
+          <span class="font-medium">{{ q.label }} — {{ topic_label(q.topic) }}</span>
+          <span>{{ q.max_marks }} {{ t.marks }}</span>
+        </div>
+        {% if q.question_text %}
+        <p class="math-copy text-slate-600 mt-1 whitespace-pre-line">{{ q.question_text }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="font-semibold mb-3">{{ t.submit_work }}</h2>
+    {% if submission %}
+    <p class="text-sm mb-3">{{ t.status }}: <span class="badge badge-{{ submission.status }}">{{ status_label(submission.status) }}</span></p>
+    <p class="text-sm text-slate-500 mb-3">{{ t.uploaded }} {{ submission.uploaded_at[:10] }}</p>
+    {% endif %}
+    <form method="post" action="/student/assignments/{{ assignment.id }}/upload" enctype="multipart/form-data" class="space-y-3">
+      <input type="file" name="file" accept=".pdf" required class="text-sm">
+      <p class="text-xs text-slate-500">{{ t.upload_clear_pdf }}</p>
+      <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">
+        {% if submission %}{{ t.replace_submission }}{% else %}{{ t.upload_submission }}{% endif %}
+      </button>
+    </form>
+  </section>
+</div>
+<a href="/student" class="inline-block mt-6 text-slate-600 hover:underline">{{ t.back_dashboard }}</a>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ t.new_assignment }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">{{ t.create_assignment }}</h1>
+<form method="post" action="/teacher/assignments" enctype="multipart/form-data" class="card space-y-4 max-w-xl">
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.title }}</label>
+    <input type="text" name="title" required class="w-full border rounded-lg px-3 py-2" placeholder="Mock Paper 2 - March 2026">
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.class }}</label>
+    <select name="class_id" required class="w-full border rounded-lg px-3 py-2">
+      {% for c in classes %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.type }}</label>
+    <select name="type" class="w-full border rounded-lg px-3 py-2">
+      <option value="past_paper">{{ t.type_past_paper }}</option>
+      <option value="worksheet">{{ t.type_worksheet }}</option>
+      <option value="practice">{{ t.type_practice }}</option>
+    </select>
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.due_date }}</label>
+    <input type="date" name="due_date" class="w-full border rounded-lg px-3 py-2">
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.question_paper_pdf }}</label>
+    <input type="file" name="question_paper" accept=".pdf" class="w-full text-sm">
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">{{ t.mark_scheme_pdf }}</label>
+    <input type="file" name="mark_scheme" accept=".pdf" class="w-full text-sm">
+  </div>
+  <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg">{{ t.create_and_add }}</button>
+</form>
+{% endblock %}

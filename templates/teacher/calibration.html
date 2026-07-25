@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ t.ai_calibration }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">{{ t.ai_calibration }}</h1>
+<p class="text-slate-600 mb-6">{{ t.ai_calibration_note }}</p>
+
+<div class="grid md:grid-cols-4 gap-4 mb-8">
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.auto_finalized }}</p>
+    <p class="text-3xl font-bold text-indigo-700">{{ audit.auto_finalized }}</p>
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.overridden }}</p>
+    <p class="text-3xl font-bold text-amber-700">{{ audit.overrides }}</p>
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.override_rate }}</p>
+    <p class="text-3xl font-bold text-emerald-700">{{ audit.override_rate }}%</p>
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.mean_abs_error }}</p>
+    <p class="text-3xl font-bold text-pink-700">{{ audit.mean_abs_error if audit.mean_abs_error is not none else '—' }}</p>
+  </section>
+</div>
+
+{% set sections = [
+  (t.by_topic, audit.by_topic),
+  (t.by_question_type, audit.by_type),
+  (t.by_max_marks, audit.by_marks),
+  (t.by_risk_flag, audit.by_flag)
+] %}
+{% for heading, rows in sections %}
+<section class="card p-0 mb-6 overflow-x-auto">
+  <h2 class="font-semibold p-4">{{ heading }}</h2>
+  {% if rows %}
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-left">
+      <tr>
+        <th class="p-3">{{ t.label }}</th>
+        <th class="p-3">{{ t.questions }}</th>
+        <th class="p-3">{{ t.overridden }}</th>
+        <th class="p-3">{{ t.override_rate }}</th>
+        <th class="p-3">{{ t.mean_abs_error }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="border-t">
+        <td class="p-3 font-medium">{{ question_type_label(row.key) if heading == t.by_question_type else row.key }}</td>
+        <td class="p-3">{{ row.rows }}</td>
+        <td class="p-3">{{ row.overrides }}</td>
+        <td class="p-3">{{ row.override_rate }}%</td>
+        <td class="p-3">{{ row.mean_abs_error if row.mean_abs_error is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="p-4 text-sm text-slate-500">{{ t.no_data_short }}</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

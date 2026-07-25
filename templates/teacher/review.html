@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}{{ t.review }} — {{ submission.student_name }}{% endblock %}
+{% block content %}
+<div class="flex justify-between items-start mb-6">
+  <div>
+    <h1 class="text-2xl font-bold">{{ t.grading_review }}</h1>
+    <p class="text-slate-600">{{ submission.student_name }} — {{ submission.assignment_title }}</p>
+    <p class="mt-1">{{ t.score }} <strong>{{ total_earned }}</strong> / {{ total_possible }}
+      <span class="badge badge-{{ submission.status }} ml-2">{{ status_label(submission.status) }}</span>
+      {% if exception_count %}
+      <span class="badge badge-review ml-2">{{ exception_count }} {{ t.exception_count }}</span>
+      {% endif %}
+    </p>
+  </div>
+  {% if submission.status != 'final' %}
+  <form method="post" action="/teacher/submissions/{{ submission.id }}/finalize">
+    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg">{{ t.finalize_grades }}</button>
+  </form>
+  {% else %}
+  <div class="flex flex-wrap gap-2">
+    <a href="/teacher/submissions/{{ submission.id }}/report?variant=teacher" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">{{ t.teacher_pdf }}</a>
+    <a href="/teacher/submissions/{{ submission.id }}/report?variant=student" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">{{ t.student_pdf }}</a>
+  </div>
+  {% endif %}
+</div>
+
+<section class="card mb-6">
+  <div class="flex justify-between items-center mb-3">
+    <h2 class="font-semibold">{{ t.submitted_work }}</h2>
+    <a href="/teacher/submissions/{{ submission.id }}/file" target="_blank" class="text-sm text-indigo-600 hover:underline">{{ t.open_full_pdf }}</a>
+  </div>
+  <object data="/teacher/submissions/{{ submission.id }}/file" type="application/pdf" class="w-full h-[420px] border rounded-lg bg-slate-50">
+    <div class="flex items-center justify-center h-full text-sm text-slate-500 px-6 text-center">
+      <div>
+        <p class="mb-2">{{ t.open_full_pdf }}</p>
+        <p>{{ t.pdf_embed_fallback }}</p>
+      </div>
+    </div>
+  </object>
+  {% if page_images %}
+  <div class="mt-4 grid gap-4 md:grid-cols-2">
+    {% for image in page_images %}
+    <div class="border rounded-lg bg-slate-50 overflow-hidden">
+      <div class="px-3 py-2 text-xs text-slate-500 border-b bg-white">{{ t.page }} {{ loop.index }}</div>
+      <img src="data:image/png;base64,{{ image }}" alt="Submission page {{ loop.index }}" class="w-full h-auto block">
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="mt-4 border rounded-lg overflow-hidden">
+    <div class="bg-slate-50 px-3 py-2 flex justify-between items-center">
+      <h3 class="font-semibold text-sm">{{ t.ocr_diagnostics }}</h3>
+      <span class="text-xs text-slate-500">{{ t.ocr_provider }}: {{ ocr_pages[0].provider if ocr_pages else 'google_vision' }}</span>
+    </div>
+    {% if ocr_pages %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-white">
+          <tr class="text-left text-slate-500">
+            <th class="p-3">{{ t.page }}</th>
+            <th class="p-3">{{ t.ocr_status }}</th>
+            <th class="p-3">{{ t.ocr_confidence }}</th>
+            <th class="p-3">{{ t.ocr_error }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for page in ocr_pages %}
+          <tr class="border-t">
+            <td class="p-3">{{ page.page_number }}</td>
+            <td class="p-3">
+              <span class="badge {% if page.status == 'done' %}badge-final{% elif page.status == 'failed' %}badge-pending{% else %}badge-review{% endif %}">
+                {{ t['ocr_' ~ page.status] }}
+              </span>
+            </td>
+            <td class="p-3">
+              {% if page.confidence is not none %}
+                {{ (page.confidence * 100)|round|int }}%
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="p-3 text-slate-500">{{ page.error or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="border-t bg-white">
+      {% for page in ocr_pages %}
+      <div class="p-3 border-t first:border-t-0">
+        <div class="flex justify-between gap-3 mb-2">
+          <p class="font-medium text-sm">{{ t.ocr_extracted_text }}</p>
+          <p class="text-xs text-slate-500">{{ t.ocr_page }} {{ page.page_number }}</p>
+        </div>
+        {% if page.text %}
+        <pre class="whitespace-pre-wrap text-xs text-slate-700 font-sans max-h-48 overflow-auto bg-slate-50 rounded-lg p-3">{{ page.text }}</pre>
+        {% elif page.error %}
+        <p class="text-sm text-red-700">{{ page.error }}</p>
+        {% else %}
+        <p class="text-sm text-slate-500">{{ t.ocr_no_text }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="p-3 text-sm text-slate-500">{{ t.ocr_no_text }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="space-y-4">
+  {% for g in grades %}
+  <div class="card">
+    <div class="flex justify-between items-start mb-2">
+      <div>
+        <h3 class="font-semibold">{{ g.label }} — {{ topic_label(g.topic) }} ({{ g.max_marks }} {{ t.marks }})</h3>
+        {% if g.question_text %}
+        <p class="math-copy text-sm text-slate-700 mt-1 whitespace-pre-line">{{ g.question_text }}</p>
+        {% endif %}
+        {% if g.mark_scheme_text %}
+        <p class="math-copy text-sm text-slate-500 mt-2 whitespace-pre-line">{{ g.mark_scheme_text }}</p>
+        {% endif %}
+      </div>
+      {% if g.ai_confidence %}
+      <span class="text-sm {% if g.ai_confidence >= 0.8 %}confidence-high{% elif g.ai_confidence >= 0.65 %}confidence-mid{% else %}confidence-low{% endif %}">
+        {{ t.ai_confidence }} {{ (g.ai_confidence * 100)|round|int }}%
+      </span>
+      {% endif %}
+    </div>
+
+    {% if g.ai_mark is not none %}
+    <div class="bg-blue-50 rounded-lg p-3 text-sm mb-3">
+      <p><strong>{{ t.ai_suggests }}</strong> {{ g.ai_mark }} {{ t.marks }}</p>
+      <p class="text-slate-600">{{ g.ai_notes }}</p>
+      {% if g.auto_finalize_reason %}
+      <p class="text-xs text-slate-500 mt-2">{{ t.auto_finalize_reason }}: {{ g.auto_finalize_reason }}</p>
+      {% endif %}
+      {% if g.needs_exception_review %}
+      <div class="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
+        <strong>{{ t.exception_review }}</strong>
+        {% if g.risk_flags %}
+        <span class="ml-1">{{ t.risk_flags }}: {{ g.risk_flags_text }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% set ocr = ocr_by_page.get(g.page_number) %}
+    <div class="bg-slate-50 rounded-lg p-3 text-sm mb-3">
+      <div class="flex justify-between gap-3 mb-2">
+        <p class="font-medium">{{ t.ocr_extracted_text }}</p>
+        <p class="text-xs text-slate-500">{{ t.ocr_page }} {{ g.page_number }}</p>
+      </div>
+      {% if ocr and ocr.text %}
+      <pre class="whitespace-pre-wrap text-xs text-slate-700 font-sans max-h-32 overflow-auto">{{ ocr.text }}</pre>
+      {% elif ocr and ocr.error %}
+      <p class="text-red-700">{{ ocr.error }}</p>
+      {% else %}
+      <p class="text-slate-500">{{ t.ocr_no_text }}</p>
+      {% endif %}
+    </div>
+
+    <form method="post" action="/teacher/submissions/{{ submission.id }}/grade-manual" class="flex flex-wrap gap-2 items-end">
+      <input type="hidden" name="question_id" value="{{ g.question_id }}">
+      <div>
+        <label class="text-xs text-slate-500">{{ t.final_mark }}</label>
+        <input type="number" name="final_mark" step="0.5" min="0" max="{{ g.max_marks }}"
+               value="{{ g.final_mark if g.final_mark is not none else (g.ai_mark if g.ai_mark is not none else '') }}"
+               class="border rounded px-2 py-1 w-20 text-sm">
+      </div>
+      <div class="flex-1 min-w-[200px]">
+        <label class="text-xs text-slate-500">{{ t.teacher_comment }}</label>
+        <input type="text" name="teacher_comment" value="{{ g.teacher_comment or '' }}"
+               class="w-full border rounded px-2 py-1 text-sm" placeholder="{{ t.optional_feedback }}">
+      </div>
+      <button type="submit" class="bg-indigo-600 text-white px-3 py-1 rounded text-sm">{{ t.save }}</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="mt-6 flex gap-3">
+  <form method="post" action="/teacher/submissions/{{ submission.id }}/ai-grade">
+    <button type="submit" class="border border-indigo-600 text-indigo-700 px-4 py-2 rounded-lg">{{ t.rerun_ai }}</button>
+  </form>
+  <a href="/teacher/assignments/{{ submission.assignment_id }}" class="text-slate-600 hover:underline py-2">{{ t.back_assignment }}</a>
+</div>
+{% endblock %}

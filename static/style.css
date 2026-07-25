@@ -1,0 +1,28 @@
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.badge-pending { background: #fef3c7; color: #92400e; }
+.badge-grading { background: #dbeafe; color: #1e40af; }
+.badge-review { background: #fce7f3; color: #9d174d; }
+.badge-final { background: #d1fae5; color: #065f46; }
+.badge-draft { background: #e2e8f0; color: #334155; }
+.badge-published { background: #d1fae5; color: #065f46; }
+
+.card {
+  background: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  padding: 1.25rem;
+}
+
+.confidence-low { color: #b45309; }
+.confidence-mid { color: #1d4ed8; }
+.confidence-high { color: #047857; }
+
+.math-copy {
+  line-height: 1.65;
+}

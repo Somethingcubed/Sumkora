@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ t.classes }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">{{ t.classes }}</h1>
+
+<div class="grid md:grid-cols-2 gap-6">
+  <div class="card">
+    <h2 class="font-semibold mb-3">{{ t.create_class }}</h2>
+    <form method="post" action="/teacher/classes" class="flex gap-2">
+      <input type="text" name="name" required placeholder="0580 Extended - Set B" class="flex-1 border rounded-lg px-3 py-2">
+      <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg">{{ t.add }}</button>
+    </form>
+  </div>
+</div>
+
+<div class="mt-8 space-y-4">
+  {% for c in classes %}
+  <div class="card">
+    <div class="flex justify-between items-start mb-3">
+      <div>
+        <h3 class="font-semibold text-lg">{{ c.name }}</h3>
+        <p class="text-sm text-slate-500">{{ c.student_count }} {{ t.students_enrolled }}</p>
+        <a href="/teacher/classes/{{ c.id }}" class="inline-block mt-2 text-sm text-indigo-600 hover:underline">{{ t.printable_reports }}</a>
+      </div>
+    </div>
+    <form method="post" action="/teacher/classes/{{ c.id }}/enroll" class="flex gap-2 items-center">
+      <select name="student_id" class="border rounded-lg px-3 py-2 text-sm">
+        {% for s in students %}
+        <option value="{{ s.id }}">{{ s.name }} ({{ s.email }})</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="text-sm bg-slate-100 px-3 py-2 rounded-lg hover:bg-slate-200">{{ t.enroll_student }}</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

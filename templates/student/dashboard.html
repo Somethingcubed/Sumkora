@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}{{ t.my_dashboard }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">{{ t.my_dashboard }}</h1>
+<div class="flex flex-wrap justify-between gap-3 mb-6">
+  <p class="text-slate-600">{{ t.student_tagline }}</p>
+  <a href="/student/report" class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm hover:bg-indigo-50">{{ t.download_profile_pdf }}</a>
+</div>
+
+<div class="grid md:grid-cols-4 gap-4 mb-6">
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.latest_score }}</p>
+    {% if analytics.latest %}
+    <p class="text-3xl font-bold text-indigo-700">{{ analytics.latest.accuracy }}%</p>
+    <p class="text-xs text-slate-500">{{ analytics.latest.earned }}/{{ analytics.latest.possible }} {{ t.marks }}</p>
+    {% else %}
+    <p class="text-xl font-bold text-slate-500">{{ t.no_data_short }}</p>
+    {% endif %}
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.average_score }}</p>
+    <p class="text-3xl font-bold text-indigo-700">{{ analytics.average if analytics.average is not none else '—' }}{% if analytics.average is not none %}%{% endif %}</p>
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.current_trajectory }}</p>
+    {% if analytics.prediction.available %}
+    <p class="text-3xl font-bold text-indigo-700">{{ t['trajectory_band_' ~ analytics.prediction.band] }}</p>
+    <p class="text-xs text-slate-500">{{ t['trend_' ~ analytics.prediction.trend] }} · {{ t.prediction_recent }}</p>
+    {% else %}
+    <p class="text-xl font-bold text-slate-500">{{ t.not_enough_data }}</p>
+    {% endif %}
+  </section>
+  <section class="card">
+    <p class="text-sm text-slate-500">{{ t.revise_next }}</p>
+    {% if analytics.weakest_topic %}
+    <p class="text-2xl font-bold text-amber-700">{{ topic_label(analytics.weakest_topic.key) }}</p>
+    <p class="text-xs text-slate-500">{{ analytics.weakest_topic.accuracy }}%</p>
+    {% else %}
+    <p class="text-xl font-bold text-slate-500">{{ t.no_data_short }}</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if analytics.prediction.available %}
+<section class="card mb-6 bg-indigo-50 border border-indigo-100">
+  <div class="flex flex-wrap justify-between gap-2">
+    <p class="font-medium text-indigo-900">{{ t.prediction_note }}</p>
+    {% if analytics.prediction.weak_topic %}
+    <p class="text-sm text-indigo-800">{{ t.prediction_weak_area }} {{ t['difficulty_' ~ analytics.prediction.weak_difficulty] }} {{ topic_label(analytics.prediction.weak_topic) }}.</p>
+    {% else %}
+    <p class="text-sm text-indigo-800">{{ t.prediction_recent }}</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<div class="grid lg:grid-cols-3 gap-6">
+  <div class="lg:col-span-2 space-y-6">
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.score_history }}</h2>
+      {% if analytics.score_history %}
+      <div class="space-y-2">
+        {% for item in analytics.score_history|reverse %}
+        <div class="border rounded-lg p-3">
+          <div class="flex justify-between gap-3 text-sm mb-2">
+            <div>
+              <p class="font-medium">{{ item.title }}</p>
+              <p class="text-slate-500">{{ item.date or '—' }} · {{ item.earned }}/{{ item.possible }} {{ t.marks }}</p>
+            </div>
+            <a href="/student/results/{{ item.submission_id }}" class="text-indigo-600 whitespace-nowrap">{{ item.accuracy }}%</a>
+          </div>
+          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div class="h-full bg-indigo-500 rounded-full" style="width: {{ item.accuracy }}%"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.complete_for_mastery }}</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.topic_mastery }}</h2>
+      {% if mastery %}
+      <div class="space-y-2">
+        {% for m in mastery %}
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span>{{ topic_label(m.topic) }}</span>
+            <span class="{% if m.accuracy < 60 %}text-red-600{% elif m.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %}">
+              {{ m.accuracy }}% ({{ m.earned }}/{{ m.possible }})
+            </span>
+          </div>
+          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div class="h-full bg-indigo-500 rounded-full" style="width: {{ m.accuracy }}%"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.complete_for_mastery }}</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.review_questions }}</h2>
+      {% if analytics.review_questions %}
+      <div class="space-y-3">
+        {% for q in analytics.review_questions %}
+        <div class="border rounded-lg p-3 text-sm">
+          <div class="flex justify-between gap-3">
+            <div>
+              <p class="font-medium">{{ q.label }} — {{ topic_label(q.topic) }} · {{ t['difficulty_' ~ q.difficulty] }}</p>
+              <p class="text-slate-500">{{ q.assignment_title }} · {{ question_type_label(q.question_type) }}</p>
+            </div>
+            <a href="/student/results/{{ q.submission_id }}" class="text-red-600 font-semibold whitespace-nowrap">{{ q.earned }}/{{ q.possible }}</a>
+          </div>
+          {% if q.question_text %}
+          <p class="math-copy text-slate-700 mt-2 whitespace-pre-line">{{ q.question_text }}</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.no_review_questions }}</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="space-y-6">
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.difficulty_performance }}</h2>
+      {% if analytics.difficulty_breakdown %}
+      <div class="space-y-3">
+        {% for item in analytics.difficulty_breakdown %}
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span>{{ t['difficulty_' ~ item.key] }}</span>
+            <span>{{ item.accuracy }}%</span>
+          </div>
+          <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full" style="width: {{ item.accuracy }}%"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.question_type_performance }}</h2>
+      {% if analytics.type_breakdown %}
+      <div class="space-y-2 text-sm">
+        {% for item in analytics.type_breakdown[:6] %}
+        <div class="flex justify-between gap-3 border rounded-lg p-2">
+          <span>{{ question_type_label(item.key) }}</span>
+          <span class="{% if item.accuracy < 60 %}text-red-600{% elif item.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %} font-medium">{{ item.accuracy }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.topic_difficulty }}</h2>
+      {% if analytics.topic_difficulty %}
+      <div class="space-y-2 text-sm">
+        {% for item in analytics.topic_difficulty %}
+        <div class="flex justify-between gap-3 border rounded-lg p-2">
+          <span>{{ topic_label(item.topic) }} · {{ t['difficulty_' ~ item.difficulty] }}</span>
+          <span class="font-medium">{{ item.accuracy }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2 class="font-semibold mb-3">{{ t.recommended_practice }}</h2>
+      {% if recommendations %}
+      <div class="space-y-3">
+        {% for r in recommendations %}
+        <div class="text-sm border rounded-lg p-3">
+          <p class="font-medium text-indigo-700">{{ r.label }} <span class="text-slate-500 font-normal">({{ topic_label(r.topic) }})</span></p>
+          <p class="text-slate-600 mt-1">{{ r.text }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm">{{ t.practice_from_weak }}</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<section class="card mt-6">
+  <h2 class="font-semibold mb-3">{{ t.assignments }}</h2>
+  {% if assignments %}
+  <div class="space-y-2">
+    {% for a in assignments %}
+    <div class="flex justify-between items-center border rounded-lg p-3">
+      <div>
+        <p class="font-medium">{{ a.title }}</p>
+        <p class="text-sm text-slate-500">{{ a.class_name }} · {{ t.due }} {{ a.due_date or '—' }}</p>
+        {% if a.submission_status %}
+        <span class="badge badge-{{ a.submission_status }} mt-1">{{ status_label(a.submission_status) }}</span>
+        {% endif %}
+      </div>
+      <div class="text-right">
+        {% if a.submission_status == 'final' %}
+        <p class="font-bold text-indigo-700">{{ a.score or 0 }} {{ t.marks }}</p>
+        <a href="/student/results/{{ a.submission_id }}" class="text-sm text-indigo-600">{{ t.view_results }}</a>
+        {% else %}
+        <a href="/student/assignments/{{ a.id }}" class="text-indigo-600 text-sm">{{ t.open }} →</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">{{ t.no_published }}</p>
+  {% endif %}
+</section>
+{% endblock %}

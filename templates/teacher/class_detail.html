@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ class_row.name }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">{{ class_row.name }}</h1>
+<p class="text-slate-600 mb-6">{{ t.printable_reports }}</p>
+
+<section class="card mb-6">
+  <h2 class="font-semibold mb-3">{{ t.student_profile_reports }}</h2>
+  {% if students %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-100 text-left">
+        <tr>
+          <th class="p-3">{{ t.students }}</th>
+          <th class="p-3">{{ t.email }}</th>
+          <th class="p-3">{{ t.finalized_submissions }}</th>
+          <th class="p-3">{{ t.download }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in students %}
+        <tr class="border-t">
+          <td class="p-3 font-medium">{{ s.name }}</td>
+          <td class="p-3 text-slate-600">{{ s.email }}</td>
+          <td class="p-3">{{ s.finalized_count }}</td>
+          <td class="p-3">
+            <div class="flex flex-wrap gap-2">
+              <a href="/teacher/students/{{ s.id }}/report?variant=teacher" class="text-indigo-600 hover:underline">{{ t.teacher_pdf }}</a>
+              <a href="/teacher/students/{{ s.id }}/report?variant=student" class="text-indigo-600 hover:underline">{{ t.student_pdf }}</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2 class="font-semibold mb-3">{{ t.assessment_reports }}</h2>
+  {% if submissions %}
+  <div class="space-y-2">
+    {% for s in submissions %}
+    <div class="flex flex-wrap justify-between gap-3 border rounded-lg p-3 text-sm">
+      <div>
+        <p class="font-medium">{{ s.student_name }}</p>
+        <p class="text-slate-500">{{ s.assignment_title }}</p>
+      </div>
+      <div class="flex flex-wrap gap-2 items-center">
+        <a href="/teacher/submissions/{{ s.id }}/report?variant=teacher" class="text-indigo-600 hover:underline">{{ t.teacher_pdf }}</a>
+        <a href="/teacher/submissions/{{ s.id }}/report?variant=student" class="text-indigo-600 hover:underline">{{ t.student_pdf }}</a>
+        <a href="/teacher/submissions/{{ s.id }}/review" class="text-slate-600 hover:underline">{{ t.review }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+  {% endif %}
+</section>
+
+<a href="/teacher/classes" class="inline-block mt-6 text-slate-600 hover:underline">{{ t.back_classes }}</a>
+{% endblock %}

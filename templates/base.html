@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ t.app_name }}{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+  <nav class="bg-indigo-700 text-white shadow">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="font-semibold text-lg">{{ t.app_name }}</a>
+      <div class="flex items-center gap-4 text-sm">
+        <a href="/lang/{{ other_lang }}" class="bg-white/15 hover:bg-white/25 px-2 py-1 rounded text-xs font-medium">{{ t.lang_switch }}</a>
+        {% if user %}
+        <span>{{ user.name }} ({{ role_label(user.role) }})</span>
+        {% if user.role == 'teacher' %}
+        <a href="/teacher" class="hover:underline">{{ t.nav_dashboard }}</a>
+        <a href="/teacher/classes" class="hover:underline">{{ t.nav_classes }}</a>
+        <a href="/teacher/analytics" class="hover:underline">{{ t.nav_analytics }}</a>
+        <a href="/teacher/calibration" class="hover:underline">{{ t.nav_calibration }}</a>
+        <a href="/teacher/exceptions" class="hover:underline">{{ t.nav_exceptions }}</a>
+        {% else %}
+        <a href="/student" class="hover:underline">{{ t.nav_my_dashboard }}</a>
+        {% endif %}
+        <a href="/logout" class="hover:underline opacity-80">{{ t.logout }}</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+  <main class="max-w-6xl mx-auto px-4 py-8">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

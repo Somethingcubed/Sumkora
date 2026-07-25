@@ -1,0 +1,64 @@
+import os
+import secrets
+from pathlib import Path
+
+
+def load_local_env(path: str = ".env"):
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_local_env()
+
+
+def env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+AI_PROVIDER = env("AI_PROVIDER", "cxsee_qwen")
+
+OPENAI_API_KEY = env("OPENAI_API_KEY")
+OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
+
+DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")
+DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", "deepseek-v4-pro")
+
+OCR_ENABLED = env("OCR_ENABLED", "true").lower() not in {"0", "false", "no"}
+OCR_PROVIDER = env("OCR_PROVIDER", "cxsee_vl")  # cxsee_vl | google_vision | mathpix
+OCR_RENDER_DPI = int(env("OCR_RENDER_DPI", "200"))
+
+CXSEE_API_KEY = env("CXSEE_API_KEY")
+CXSEE_BASE_URL = env("CXSEE_BASE_URL", "https://api.cxsee.com/v1")
+CXSEE_OCR_MODEL = env("CXSEE_OCR_MODEL", "qwen3-vl-plus")
+CXSEE_MARKING_MODEL = env("CXSEE_MARKING_MODEL", "qwen3-vl-plus")
+
+GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY")
+
+MATHPIX_APP_ID = env("MATHPIX_APP_ID")
+MATHPIX_APP_KEY = env("MATHPIX_APP_KEY")
+
+DB_PATH = env("DB_PATH", "data/app.db")
+UPLOAD_DIR = env("UPLOAD_DIR", "data/uploads")
+
+SECRET_KEY = env("SECRET_KEY")
+CONFIG_WARNINGS = []
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(32)
+    CONFIG_WARNINGS.append(
+        "SECRET_KEY is not set. A temporary dev session secret was generated; logins will reset after restart."
+    )
+
+if AI_PROVIDER == "cxsee_qwen" and not CXSEE_API_KEY:
+    CONFIG_WARNINGS.append(
+        "AI_PROVIDER=cxsee_qwen but CXSEE_API_KEY is not set. Vision grading will fail closed and flag submissions."
+    )

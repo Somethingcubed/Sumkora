@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}{{ t.class_analytics }}{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">{{ t.class_analytics }}</h1>
+
+<section class="mb-8">
+  <h2 class="font-semibold mb-3">{{ t.classes_overview }}</h2>
+  <div class="grid md:grid-cols-2 gap-4">
+    {% for c in class_stats %}
+    <div class="card">
+      <h3 class="font-medium">{{ c.name }}</h3>
+      <p class="text-sm text-slate-600">{{ c.students }} {{ t.students }} · {{ c.submissions }} {{ t.finalized_submissions }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="grid lg:grid-cols-3 gap-6 mb-8">
+  <section class="card lg:col-span-2">
+    <h2 class="font-semibold mb-3">{{ t.students_needing_support }}</h2>
+    {% if analytics.support_students %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-left">
+          <tr>
+            <th class="p-3">{{ t.students }}</th>
+            <th class="p-3">{{ t.class }}</th>
+            <th class="p-3">{{ t.accuracy }}</th>
+            <th class="p-3">{{ t.trend }}</th>
+            <th class="p-3">{{ t.questions }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in analytics.support_students %}
+          <tr class="border-t">
+            <td class="p-3 font-medium">{{ row.student_name }}</td>
+            <td class="p-3 text-slate-600">{{ row.class_name }}</td>
+            <td class="p-3 text-red-600 font-medium">{{ row.accuracy }}%</td>
+            <td class="p-3">{{ t['trend_' ~ row.trend] }}</td>
+            <td class="p-3">{{ row.question_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2 class="font-semibold mb-3">{{ t.topics_to_reteach }}</h2>
+    {% if analytics.topics %}
+    <div class="space-y-2 text-sm">
+      {% for row in analytics.topics[:5] %}
+      <div class="flex justify-between border rounded-lg p-2">
+        <span>{{ topic_label(row.key) }}</span>
+        <span class="font-medium {% if row.accuracy < 60 %}text-red-600{% elif row.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %}">{{ row.accuracy }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card mb-8">
+  <h2 class="font-semibold mb-3">{{ t.all_student_performance }}</h2>
+  {% if analytics.students %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-100 text-left">
+        <tr>
+          <th class="p-3">{{ t.students }}</th>
+          <th class="p-3">{{ t.class }}</th>
+          <th class="p-3">{{ t.accuracy }}</th>
+          <th class="p-3">{{ t.trend }}</th>
+          <th class="p-3">{{ t.questions }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in analytics.students %}
+        <tr class="border-t">
+          <td class="p-3 font-medium">{{ row.student_name }}</td>
+          <td class="p-3 text-slate-600">{{ row.class_name }}</td>
+          <td class="p-3 font-medium {% if row.accuracy < 60 %}text-red-600{% elif row.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %}">{{ row.accuracy }}%</td>
+          <td class="p-3">{{ t['trend_' ~ row.trend] }}</td>
+          <td class="p-3">{{ row.question_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">{{ t.no_analytics }}</p>
+  {% endif %}
+</section>
+
+<div class="grid lg:grid-cols-2 gap-6">
+  <section class="card">
+    <h2 class="font-semibold mb-3">{{ t.difficulty_performance }}</h2>
+    {% if analytics.difficulty %}
+    <div class="space-y-3">
+      {% for row in analytics.difficulty %}
+      <div>
+        <div class="flex justify-between text-sm mb-1">
+          <span>{{ t['difficulty_' ~ row.key] }}</span>
+          <span>{{ row.accuracy }}%</span>
+        </div>
+        <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+          <div class="h-full bg-emerald-500 rounded-full" style="width: {{ row.accuracy }}%"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-slate-500">{{ t.no_analytics }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2 class="font-semibold mb-3">{{ t.question_type_performance }}</h2>
+    {% if analytics.types %}
+    <div class="space-y-2 text-sm">
+      {% for row in analytics.types[:8] %}
+      <div class="flex justify-between border rounded-lg p-2">
+        <span>{{ question_type_label(row.key) }}</span>
+        <span class="font-medium {% if row.accuracy < 60 %}text-red-600{% elif row.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %}">{{ row.accuracy }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-slate-500">{{ t.no_analytics }}</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="mt-8">
+  <h2 class="font-semibold mb-3">{{ t.topic_performance }}</h2>
+  {% if topic_breakdown %}
+  <div class="card p-0 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-100 text-left">
+        <tr>
+          <th class="p-3">{{ t.topic }}</th>
+          <th class="p-3">{{ t.earned }}</th>
+          <th class="p-3">{{ t.possible }}</th>
+          <th class="p-3">{{ t.accuracy }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in topic_breakdown %}
+        <tr class="border-t">
+          <td class="p-3 font-medium">{{ topic_label(row.topic) }}</td>
+          <td class="p-3">{{ row.earned }}</td>
+          <td class="p-3">{{ row.possible }}</td>
+          <td class="p-3">
+            <span class="{% if row.accuracy < 60 %}text-red-600{% elif row.accuracy < 80 %}text-amber-600{% else %}text-green-600{% endif %} font-medium">
+              {{ row.accuracy }}%
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-slate-500">{{ t.no_analytics }}</p>
+  {% endif %}
+</section>
+{% endblock %}

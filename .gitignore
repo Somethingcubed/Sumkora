@@ -1,0 +1,19 @@
+data/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+Past Papers/
+Test Papers/
+private_test_data/
+private_data/
+Offical Past Papers/
+Official Past Papers/
+API Keys.docx
+*.db
+*.db-*
+tmp/
+output/
+.pytest_cache/
+.coverage
+htmlcov/
