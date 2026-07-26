@@ -150,7 +150,7 @@ def test_recovery_code_is_one_time_and_resets_password():
     assert reused.status_code == 400
 
 
-def test_new_student_can_upload_three_files_without_a_class():
+def test_new_student_can_upload_completed_work_and_optional_scheme_without_a_class():
     assert sign_up("UploadReady").status_code == 200
     user = query_one(
         "SELECT id FROM users WHERE username_normalized = 'uploadready'"
@@ -163,11 +163,6 @@ def test_new_student_can_upload_three_files_without_a_class():
         "/student/analyse",
         data={"title": "My first paper"},
         files={
-            "question_paper": (
-                "questions.pdf",
-                make_pdf("Q1 Differentiate x squared [2]"),
-                "application/pdf",
-            ),
             "answer_script": (
                 "work.pdf",
                 make_pdf("Q1 2x"),

@@ -10,10 +10,10 @@ and a private researcher workbench.
 
 ## Student-owned attempts
 
-A paper belongs directly to the student who uploads it. A question paper,
-completed answer script and mark scheme create a private paper attempt without
-a class, assignment or pre-registered paper pack. Analysis versions preserve
-the uploaded sources, detected metadata, OCR, model configuration and results.
+A paper belongs directly to the student who uploads it. Completed work creates
+a private paper attempt without a class, assignment, question bank or
+pre-registered paper pack. A mark scheme is optional. Analysis versions
+preserve the uploaded sources, model configuration and results.
 
 ## Separate student accounts
 
@@ -27,13 +27,16 @@ one-time recovery code is shown once at signup because the product does not
 collect contact details; its digest is stored separately from the password and
 the code is consumed when used.
 
-## Automatic paper detection
+## Whole-document assessment
 
-Students provide only the question paper, completed work and mark scheme.
-Sumkora detects paper metadata and top-level questions during processing,
-reconciles the question paper with the mark scheme, and uses OCR labels to
-match answer pages. The internal mapping remains available to researchers but
-is not presented as a student form or editable JSON.
+Students always provide completed work. Without a mark scheme, Sumkora gives a
+calibrated score range plus strengths and weaknesses. With a complete mark
+scheme, Sumkora performs detailed marking. A question paper is never required.
+
+New analyses send the complete document set to a reasoning model and validate
+the structured result. Detailed mode then runs a second independent
+whole-document audit before storing marks. The old OCR-to-single-page mapper is
+retained only for historical compatibility and is not used by active analyses.
 
 ## Bilingual student experience
 
@@ -56,7 +59,7 @@ is an early signal; recurrence needs multiple papers.
 
 ## Uncertainty is visible
 
-OCR and marking can be ambiguous. Instead of forcing false precision, the
+Document reading and marking can be ambiguous. Instead of forcing false precision, the
 product stores confidence and warnings and displays confirmed minimum,
 provisional and possible maximum marks. Humans can append corrections without
 erasing the model run.
@@ -72,6 +75,6 @@ account, but cannot reach teacher routes.
 ## Limits
 
 The evidence model is transparent but not psychometrically validated.
-Criterion parsing is heuristic. Grade prediction is intentionally excluded.
+Automated marking still requires continued human calibration. Grade prediction is intentionally excluded.
 No model is fine-tuned per student. Production use requires reviewed paper
 packs, durable infrastructure, privacy approval and human calibration.

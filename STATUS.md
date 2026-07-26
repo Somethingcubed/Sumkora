@@ -1,12 +1,13 @@
 # Sumkora release-candidate status
 
-Updated: 25 July 2026
+Updated: 26 July 2026
 
 ## Starting state and safety checkpoint
 
 - Starting commit: `1a3e9e4100c9705d53a4223412df8096129be70d`
 - Previous branch: `feat/numera-0606-upgrade`
 - Release branch: `chore/sumkora-release-candidate`
+- Assessment branch: `feat/whole-document-assessment`
 - Public site: `https://sumkora.com`
 - Deployment: manual Railway upload; no automatic Git source is connected.
 - Runtime: one Singapore service, one persistent volume, SQLite and private
@@ -18,6 +19,24 @@ Updated: 25 July 2026
   production volume was not touched.
 
 ## Changes made
+
+### Whole-document assessment redesign
+
+- Active student analyses no longer require or use a separate question paper.
+- Completed work alone produces a calibrated estimated range, strengths,
+  weaknesses and recommendations.
+- Completed work plus a mark scheme produces detailed question-level marks.
+- The complete PDFs are sent directly to GPT-5.6 Terra through CXSee; the old
+  OCR/page-label mapper is not used for new analyses.
+- Detailed mode runs a second independent whole-document audit. Both passes
+  use strict structured output, and every label must be covered by the audit.
+- Invalid pages, contradictory evidence, malformed output and inconsistent
+  totals are rejected. Technical failures record no zero marks.
+- Historical completed analyses, source paths and internal compatibility
+  columns remain readable.
+- Oscar benchmark gold score: 55/80. The audited detailed run returned 55/80
+  in 175 seconds. Completed-work-only mode returned 58/80 before calibration;
+  the displayed calibrated range is 52-64, which contains the gold score.
 
 ### Product rename
 
@@ -43,7 +62,7 @@ Updated: 25 July 2026
 
 ### Upload and privacy
 
-- Added duplicate-document detection across question paper, completed work and
+- Added duplicate-document detection across completed work and an optional
   mark scheme.
 - Verified invalid PDFs, empty/size limits and Unicode filenames.
 - Preserved ownership checks for result pages, original documents, PDFs and
@@ -59,7 +78,7 @@ Updated: 25 July 2026
 
 ## Test results
 
-- `.venv/bin/pytest -q`: 26 passed.
+- `.venv/bin/python -m pytest -q`: 33 passed.
 - `.venv/bin/python scripts/regression_checks.py`: 10 checks passed.
 - `.venv/bin/python scripts/demo_flow.py`: completed and finalized a demo
   submission.
@@ -70,6 +89,9 @@ Updated: 25 July 2026
 - Browser audit: principal local student and research routes had no old-brand
   text, horizontal overflow or console warnings/errors.
 - PDF render: both sample files passed text-bound checks and PNG inspection.
+- Whole-document validator tests cover invalid evidence pages, contradictory
+  positive marks, null/ungraded handling, provider repair, audit correction
+  and complete audit coverage.
 
 ## Intentionally retained legacy identifiers
 

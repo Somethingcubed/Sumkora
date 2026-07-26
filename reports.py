@@ -424,7 +424,15 @@ def self_service_assessment_report(
     )
     story.append(Spacer(1, 8))
     summary = [
-        ["Score", f"{version['provisional_score']} / {paper['maximum_marks']}"],
+        [
+            "Estimated score"
+            if version["assessment_mode"] == "estimate"
+            else "Score",
+            (
+                ("approximately " if version["assessment_mode"] == "estimate" else "")
+                + f"{version['provisional_score']} / {paper['maximum_marks']}"
+            ),
+        ],
         [
             "Score range",
             f"{version['confirmed_min_score']} - {version['possible_max_score']}",
@@ -437,7 +445,13 @@ def self_service_assessment_report(
     strengths = []
     needs = []
     for row in rows:
-        mark = row["human_mark"] if row["human_mark"] is not None else row["ai_mark"]
+        mark = (
+            row["human_mark"]
+            if row["human_mark"] is not None
+            else row["awarded_mark"]
+        )
+        if mark is None or row["assessment_status"] == "ungraded":
+            continue
         accuracy = pct(float(mark or 0), float(row["maximum_marks"] or 0))
         label = f"{row['question_label']} - {row['skill'] or row['topic']}"
         if accuracy >= 80:
@@ -452,7 +466,11 @@ def self_service_assessment_report(
     story.append(p("Question-by-question analysis", styles["h2"]))
     data = [["Question", "Topic / skill", "Mark", "What this shows"]]
     for row in rows:
-        mark = row["human_mark"] if row["human_mark"] is not None else row["ai_mark"]
+        mark = (
+            row["human_mark"]
+            if row["human_mark"] is not None
+            else row["awarded_mark"]
+        )
         explanation = student_explanation(row["ai_rationale"])
         if row["error_mechanism"]:
             explanation = f"{explanation} Lost marks: {row['error_mechanism']}"
@@ -460,7 +478,11 @@ def self_service_assessment_report(
             [
                 row["question_label"],
                 f"{row['topic']} / {row['skill']}",
-                f"{mark}/{row['maximum_marks']}",
+                (
+                    "Needs review"
+                    if mark is None or row["assessment_status"] == "ungraded"
+                    else f"{mark}/{row['maximum_marks']}"
+                ),
                 explanation[:420],
             ]
         )
@@ -474,7 +496,14 @@ def self_service_assessment_report(
     story.append(p("Interpretation", styles["h2"]))
     story.append(
         p(
-            "Scores with uncertainty are ranges, not hidden precision. Reanalyse with a clearer scan or review the paper when evidence is weak.",
+            (
+                "This is an estimated assessment because no official mark scheme "
+                "was supplied. Treat the score as a range; the learning feedback "
+                "is based on visible methods."
+                if version["assessment_mode"] == "estimate"
+                else "Scores with uncertainty are ranges, not hidden precision. "
+                "Reanalyse with a clearer scan or review the paper when evidence is weak."
+            ),
             styles["body"],
         )
     )

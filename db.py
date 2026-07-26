@@ -400,6 +400,9 @@ def init_db():
             provisional_score REAL,
             possible_max_score REAL,
             warnings TEXT NOT NULL DEFAULT '[]',
+            assessment_mode TEXT NOT NULL DEFAULT 'legacy',
+            assessment_summary TEXT NOT NULL DEFAULT '{}',
+            provider_metadata TEXT NOT NULL DEFAULT '{}',
             failure_message TEXT,
             created_at TEXT NOT NULL,
             started_at TEXT,
@@ -455,6 +458,9 @@ def init_db():
             model TEXT NOT NULL DEFAULT '',
             prompt_version TEXT NOT NULL DEFAULT '',
             raw_provider_response TEXT,
+            assessment_status TEXT NOT NULL DEFAULT 'graded',
+            awarded_mark REAL,
+            evidence_pages TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL,
             UNIQUE(analysis_version_id, question_label)
         );
@@ -729,6 +735,51 @@ def init_db():
             conn.execute(
                 f"ALTER TABLE research_experiments ADD COLUMN {column} {definition}"
             )
+
+    analysis_version_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(paper_analysis_versions)"
+        ).fetchall()
+    }
+    analysis_version_column_defs = {
+        "assessment_mode": "TEXT NOT NULL DEFAULT 'legacy'",
+        "assessment_summary": "TEXT NOT NULL DEFAULT '{}'",
+        "provider_metadata": "TEXT NOT NULL DEFAULT '{}'",
+    }
+    for column, definition in analysis_version_column_defs.items():
+        if column not in analysis_version_columns:
+            conn.execute(
+                f"ALTER TABLE paper_analysis_versions ADD COLUMN {column} {definition}"
+            )
+
+    analysis_result_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(analysis_question_results)"
+        ).fetchall()
+    }
+    analysis_result_column_defs = {
+        "assessment_status": "TEXT NOT NULL DEFAULT 'graded'",
+        "awarded_mark": "REAL",
+        "evidence_pages": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, definition in analysis_result_column_defs.items():
+        if column not in analysis_result_columns:
+            conn.execute(
+                f"ALTER TABLE analysis_question_results ADD COLUMN {column} {definition}"
+            )
+    conn.execute(
+        """
+        UPDATE analysis_question_results
+        SET awarded_mark = ai_mark
+        WHERE awarded_mark IS NULL
+          AND analysis_version_id IN (
+            SELECT id FROM paper_analysis_versions
+            WHERE assessment_mode = 'legacy'
+          )
+        """
+    )
 
     now = datetime.now().isoformat()
     conn.execute(

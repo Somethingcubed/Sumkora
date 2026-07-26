@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -78,6 +79,13 @@ def api_post_json(
     attempts = (config.CXSEE_MAX_RETRIES if retries is None else retries) + 1
     timeout = timeout or config.CXSEE_TIMEOUT_SECONDS
     last_error = None
+    ssl_context = ssl.create_default_context()
+    try:
+        import certifi
+
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
     for attempt in range(attempts):
         request = urllib.request.Request(
             url,
@@ -86,7 +94,11 @@ def api_post_json(
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout,
+                context=ssl_context,
+            ) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             last_error = exc

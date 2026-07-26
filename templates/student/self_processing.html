@@ -3,10 +3,9 @@
 {% block content %}
 {% set stage_labels = {
   'validation': tr('Checking files', '检查文件'),
-  'document_extraction': tr('Reading documents', '读取文档'),
-  'ocr': tr('Reading completed work', '识别答卷内容'),
-  'question_detection': tr('Detecting questions', '识别题目'),
-  'criterion_grading': tr('Applying the mark scheme', '依据评分标准批改'),
+  'document_extraction': tr('Preparing complete documents', '准备完整文档'),
+  'whole_document_reasoning': tr('Assessing the complete paper', '分析整份答卷'),
+  'result_validation': tr('Checking every mark and total', '核对每项得分与总分'),
   'diagnosis': tr('Explaining lost marks', '分析失分原因'),
   'profile_update': tr('Updating your progress', '更新学习进展'),
   'report_generation': tr('Preparing your report', '生成分析报告')
@@ -55,7 +54,7 @@
     if (job.status === "completed") { document.getElementById("overall-progress").style.width="100%"; document.getElementById("result-link").classList.remove("hidden"); return; }
     if (job.status === "failed") {
       const el=document.getElementById("failure");
-      el.textContent=job.failure_message || {{ tr('We could not complete this analysis. Try again; your files and previous results are safe.', '无法完成此次分析。请重试；你的文件和之前的结果仍然安全。')|tojson }};
+      el.textContent=job.failure_message || {{ tr('We could not complete this analysis. No zero marks were recorded. Try again; your files and previous results are safe.', '无法完成此次分析。系统未记录任何零分。请重试；你的文件和之前的结果仍然安全。')|tojson }};
       el.classList.remove("hidden");
       document.getElementById("retry-link").classList.remove("hidden");
       return;

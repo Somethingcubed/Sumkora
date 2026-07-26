@@ -32,6 +32,14 @@ for an email address. The active authentication and student experience can be
 switched between English and Simplified Chinese from the persistent `EN / 中文`
 control.
 
+The student upload flow has two modes:
+
+- Completed work only: a calibrated estimated score range and learning profile.
+- Completed work plus an optional mark scheme: detailed, independently audited
+  question-by-question marking.
+
+A separate question paper is not required in either mode.
+
 Add the deterministic longitudinal demo with:
 
 ```bash

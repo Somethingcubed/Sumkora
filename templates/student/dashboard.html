@@ -9,14 +9,13 @@
     <div>
       <p class="eyebrow">{{ tr('Welcome', '欢迎') }}，{{ user.name }}</p>
       <h1 class="text-3xl md:text-4xl font-bold tracking-tight mt-3">{{ tr('Start with one completed paper.', '从一份已完成的试卷开始。') }}</h1>
-      <p class="text-slate-600 mt-4 leading-7">{{ tr('You’ll need the question paper, your completed work, and the mark scheme.', '你需要试题卷、已完成的答卷和评分标准。') }}</p>
+      <p class="text-slate-600 mt-4 leading-7">{{ tr('Upload your completed work. A mark scheme is optional and unlocks detailed marking.', '上传你已完成的答卷；评分标准为选填，上传后可获得详细批改。') }}</p>
       <a href="/student/analyse" class="button button-primary mt-6">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
     </div>
     <ol class="space-y-3" aria-label="Files needed">
       {% for title, copy in [
-        (tr('Question paper','试题卷'),tr('The original questions','原始试题')),
-        (tr('Completed work','已完成的答卷'),tr('Your handwritten or typed answers','手写或电子答案')),
-        (tr('Mark scheme','评分标准'),tr('The marking instructions and answers','评分说明与答案'))
+        (tr('Completed work','已完成的答卷'),tr('Required: your complete handwritten or typed paper','必填：完整的手写或电子答卷')),
+        (tr('Mark scheme','评分标准'),tr('Optional: add it for exact question-by-question marking','选填：上传后可获得逐题详细批改'))
       ] %}
       <li class="flex gap-3 rounded-xl border border-slate-200 p-4 bg-slate-50/70">
         <span class="upload-number mb-0 shrink-0">{{ loop.index }}</span>

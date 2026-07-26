@@ -74,14 +74,6 @@ def upload_direct_paper(email: str, title: str = "Independent Paper"):
         "/student/analyse",
         data={"title": title},
         files={
-            "question_paper": (
-                "question.pdf",
-                pdf_bytes(
-                    "Cambridge IGCSE Additional Mathematics 0606/11\n"
-                    "1 Differentiate x squared. [4]\n"
-                ),
-                "application/pdf",
-            ),
             "answer_script": (
                 "answers.pdf",
                 pdf_bytes("Q1: derivative is 2x"),
@@ -127,7 +119,7 @@ def confirm_and_run(version_id: int, questions: list[dict], title: str):
     )["status"] == "completed"
 
 
-def test_student_self_service_without_class_and_three_document_upload():
+def test_student_self_service_without_class_and_question_paper():
     student_id = create_user("independent@student.local", "student")
     assert query_one(
         "SELECT COUNT(*) AS n FROM class_enrollments WHERE student_id = ?",
@@ -137,7 +129,7 @@ def test_student_self_service_without_class_and_three_document_upload():
         "independent@student.local"
     )
     assert paper["student_id"] == student_id
-    assert version["question_paper_path"]
+    assert not version["question_paper_path"]
     assert version["answer_script_path"]
     assert version["mark_scheme_path"]
     assert version["status"] == "completed"
@@ -155,7 +147,6 @@ def test_upload_validation_handles_duplicates_invalid_and_unicode_files():
     duplicate = client.post(
         "/student/analyse",
         files={
-            "question_paper": ("question.pdf", repeated, "application/pdf"),
             "answer_script": ("answers.pdf", repeated, "application/pdf"),
             "mark_scheme": ("scheme.pdf", repeated, "application/pdf"),
         },
@@ -167,12 +158,7 @@ def test_upload_validation_handles_duplicates_invalid_and_unicode_files():
     invalid = client.post(
         "/student/analyse",
         files={
-            "question_paper": ("question.pdf", b"not a pdf", "application/pdf"),
-            "answer_script": (
-                "answers.pdf",
-                pdf_bytes("Q1 answer"),
-                "application/pdf",
-            ),
+            "answer_script": ("answers.pdf", b"not a pdf", "application/pdf"),
             "mark_scheme": (
                 "scheme.pdf",
                 pdf_bytes("Q1 mark scheme"),
@@ -182,16 +168,11 @@ def test_upload_validation_handles_duplicates_invalid_and_unicode_files():
         follow_redirects=False,
     )
     assert invalid.status_code == 400
-    assert "valid PDF" in invalid.text
+    assert "PDF, PNG, JPEG, or WebP" in invalid.text
 
     unicode_upload = client.post(
         "/student/analyse",
         files={
-            "question_paper": (
-                "试题卷.pdf",
-                pdf_bytes("Q1 Differentiate x squared. [2]"),
-                "application/pdf",
-            ),
             "answer_script": (
                 "已完成的答卷.pdf",
                 pdf_bytes("Q1 2x"),
@@ -309,6 +290,44 @@ def test_failed_analysis_hides_provider_details_and_offers_retry():
     assert page.status_code == 200
     assert f'href="/student/papers/{paper["id"]}/rerun"' in page.text
     assert "Try again" in page.text
+
+
+def test_provider_failure_records_no_question_zero_marks(monkeypatch):
+    import self_service
+
+    create_user("no-false-zero@student.local", "student")
+    login("no-false-zero@student.local")
+
+    def fail_provider(*_args, **_kwargs):
+        raise RuntimeError("synthetic provider outage")
+
+    monkeypatch.setattr(self_service, "assess_documents", fail_provider)
+    response = client.post(
+        "/student/analyse",
+        files={
+            "answer_script": (
+                "answers.pdf",
+                pdf_bytes("Q1 visible work"),
+                "application/pdf",
+            )
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    version_id = int(response.headers["location"].split("/")[3])
+    version = query_one(
+        "SELECT status, failure_message FROM paper_analysis_versions WHERE id = ?",
+        (version_id,),
+    )
+    assert version["status"] == "failed"
+    assert "No zero marks were recorded" in version["failure_message"]
+    assert query_one(
+        """
+        SELECT COUNT(*) AS n FROM analysis_question_results
+        WHERE analysis_version_id = ?
+        """,
+        (version_id,),
+    )["n"] == 0
 
 
 def test_multiple_experiments_edit_run_and_separate_human_label():

@@ -6,32 +6,42 @@
     <div>
       <p class="eyebrow">{{ tr('New paper analysis', '新试卷分析') }}</p>
       <h1>{{ tr('Analyse a paper', '分析试卷') }}</h1>
-      <p>{{ tr('Add the three files Sumkora needs to mark your work.', '上传三份文件，Sumkora 将自动识别题目并批改。') }}</p>
+      <p>{{ tr('Upload your completed work. Add a mark scheme when you want detailed marking.', '上传你已完成的答卷；如需详细批改，可再添加评分标准。') }}</p>
     </div>
   </div>
 
   {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
 
   <form method="post" action="/student/analyse" enctype="multipart/form-data" class="surface" data-upload-form>
-    <div class="grid md:grid-cols-3 gap-4">
-      {% for number, title, copy, name, accept in [
-        (1,tr('Question paper','试题卷'),tr('The original questions in PDF format.','PDF 格式的原始试题。'),'question_paper','.pdf,application/pdf'),
-        (2,tr('Completed work','已完成的答卷'),tr('Your completed PDF or clear images.','已完成的 PDF 或清晰图片。'),'answer_script','.pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*'),
-        (3,tr('Mark scheme','评分标准'),tr('The marking instructions in PDF format.','PDF 格式的评分标准。'),'mark_scheme','.pdf,application/pdf')
+    <div class="grid md:grid-cols-2 gap-4">
+      {% for number, title, copy, name, accept, required in [
+        (1,tr('Completed work','已完成的答卷'),tr('Required. Upload the complete worked paper as a PDF or clear image.','必填。上传完整作答的 PDF 或清晰图片。'),'answer_script','.pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*',true),
+        (2,tr('Mark scheme','评分标准'),tr('Optional. Add it for exact, question-by-question marking.','选填。上传后可获得逐题详细批改。'),'mark_scheme','.pdf,application/pdf',false)
       ] %}
       <label class="upload-tile" for="{{ name }}">
         <span class="upload-number">{{ number }}</span>
-        <span class="font-semibold">{{ title }}</span>
+        <span class="font-semibold">{{ title }}{% if not required %} <span class="text-xs font-normal text-slate-500">{{ tr('Optional', '选填') }}</span>{% endif %}</span>
         <span class="text-sm text-slate-500 mt-1">{{ copy }}</span>
-        <input id="{{ name }}" type="file" name="{{ name }}" accept="{{ accept }}" required data-file-input>
+        <input id="{{ name }}" type="file" name="{{ name }}" accept="{{ accept }}" {% if required %}required{% endif %} data-file-input>
         <span class="text-xs text-slate-500 mt-2" data-file-status>{{ tr('No file selected', '尚未选择文件') }}</span>
       </label>
       {% endfor %}
     </div>
 
+    <div class="mt-5 grid md:grid-cols-2 gap-3 text-sm">
+      <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
+        <p class="font-semibold text-indigo-900">{{ tr('Completed work only', '仅上传已完成的答卷') }}</p>
+        <p class="text-indigo-800/80 mt-1">{{ tr('You receive a careful score range plus strengths and weaknesses.', '你将获得合理的分数区间，以及强项和待提升项。') }}</p>
+      </div>
+      <div class="rounded-xl bg-emerald-50 border border-emerald-100 p-4">
+        <p class="font-semibold text-emerald-900">{{ tr('Completed work + mark scheme', '已完成的答卷 + 评分标准') }}</p>
+        <p class="text-emerald-800/80 mt-1">{{ tr('You receive detailed marking using the complete official scheme.', '系统将依据完整官方评分标准进行详细批改。') }}</p>
+      </div>
+    </div>
+
     <div class="mt-6 pt-5 border-t border-slate-200">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">{{ tr('Maximum file size: 25 MB each.', '每份文件最大 25 MB。') }}</p>
+        <p class="text-xs text-slate-500">{{ tr('No question paper is required. Maximum file size: 25 MB each.', '无需上传试题卷。每份文件最大 25 MB。') }}</p>
         <button type="submit" class="button button-primary" data-submit-button>{{ tr('Start analysis', '开始分析') }}</button>
       </div>
     </div>

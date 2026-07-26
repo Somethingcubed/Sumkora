@@ -16,6 +16,7 @@ import fitz
 
 import config
 from db import execute, query_all, query_one
+from document_assessment import assess_documents
 from grading import grade_question
 from ocr import cxsee_vl_ocr_detailed
 from pdf_utils import get_page_image_base64, is_valid_pdf, save_upload
@@ -27,9 +28,8 @@ logger = logging.getLogger(__name__)
 SELF_SERVICE_STAGES = [
     "validation",
     "document_extraction",
-    "ocr",
-    "question_detection",
-    "criterion_grading",
+    "whole_document_reasoning",
+    "result_validation",
     "diagnosis",
     "profile_update",
     "report_generation",
@@ -380,32 +380,42 @@ def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str 
 
 def create_student_paper_draft(
     student_id: int,
-    title_hint: str,
-    question_filename: str,
-    question_content: bytes,
     answer_filename: str,
     answer_content: bytes,
-    mark_scheme_filename: str,
-    mark_scheme_content: bytes,
+    mark_scheme_filename: str | None = None,
+    mark_scheme_content: bytes | None = None,
 ) -> tuple[int, int]:
-    document_hashes = {
-        hashlib.sha256(content).hexdigest()
-        for content in (question_content, answer_content, mark_scheme_content)
-    }
-    if len(document_hashes) != 3:
-        raise ValueError("Each upload must be a different document.")
-    if not is_valid_pdf(question_content):
-        raise ValueError("Question paper must be a valid PDF.")
-    if not is_valid_pdf(mark_scheme_content):
-        raise ValueError("Mark scheme must be a valid PDF.")
     answer_filename, answer_content = normalize_answer_upload(
         answer_filename, answer_content
     )
-    question_path = save_document("question", question_filename, question_content)
+    if mark_scheme_content is not None:
+        if not is_valid_pdf(mark_scheme_content):
+            raise ValueError("Mark scheme must be a valid PDF.")
+        if hashlib.sha256(answer_content).digest() == hashlib.sha256(
+            mark_scheme_content
+        ).digest():
+            raise ValueError("Completed work and mark scheme must be different documents.")
     answer_path = save_document("answers", answer_filename, answer_content)
-    scheme_path = save_document("scheme", mark_scheme_filename, mark_scheme_content)
-    detected = detect_documents(question_path, scheme_path, title_hint)
-    metadata = detected["metadata"]
+    scheme_path = (
+        save_document(
+            "scheme",
+            mark_scheme_filename or "mark-scheme.pdf",
+            mark_scheme_content,
+        )
+        if mark_scheme_content is not None
+        else None
+    )
+    metadata = {
+        "title": Path(answer_filename).stem[:160] or "Mathematics paper",
+        "syllabus_code": "Mathematics",
+        "paper_number": "",
+        "paper_year": None,
+        "examination_session": "",
+        "calculator_policy": "unknown",
+        "maximum_marks": 0,
+        "source_type": "student_upload",
+    }
+    mode = "detailed" if scheme_path else "estimate"
     now = now_iso()
     paper_id = execute(
         """
@@ -435,22 +445,27 @@ def create_student_paper_draft(
         (paper_id, version_number, question_paper_path, answer_script_path,
          mark_scheme_path, detected_metadata, question_plan, ocr_model,
          grading_model, diagnosis_model, ocr_prompt_version, image_resolution,
-         warnings, created_at, updated_at)
-        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         warnings, assessment_mode, created_at, updated_at)
+        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             paper_id,
-            question_path,
+            "",
             answer_path,
             scheme_path,
             json_text(metadata),
-            json_text(detected["questions"]),
-            config.CXSEE_OCR_MODEL,
-            config.CXSEE_MARKING_MODEL,
-            config.CXSEE_DIAGNOSIS_MODEL or config.CXSEE_MARKING_MODEL,
-            config.OCR_PROMPT_VERSION,
+            "[]",
+            "",
+            config.WHOLE_DOCUMENT_MODEL,
+            config.WHOLE_DOCUMENT_MODEL,
+            "whole-document-assessment-v1",
             config.OCR_RENDER_DPI,
-            json_text(detected["warnings"]),
+            json_text(
+                []
+                if scheme_path
+                else ["Estimated assessment: no mark scheme was provided."]
+            ),
+            mode,
             now,
             now,
         ),
@@ -461,7 +476,6 @@ def create_student_paper_draft(
 def create_rerun_draft(
     student_id: int,
     paper_id: int,
-    question_file: tuple[str, bytes] | None,
     answer_file: tuple[str, bytes] | None,
     scheme_file: tuple[str, bytes] | None,
 ) -> int:
@@ -478,13 +492,8 @@ def create_rerun_draft(
     )
     if not paper or not latest:
         raise ValueError("Paper was not found.")
-    question_path = latest["question_paper_path"]
     answer_path = latest["answer_script_path"]
     scheme_path = latest["mark_scheme_path"]
-    if question_file:
-        if not is_valid_pdf(question_file[1]):
-            raise ValueError("Replacement question paper must be a PDF.")
-        question_path = save_document("question", *question_file)
     if answer_file:
         filename, content = normalize_answer_upload(*answer_file)
         answer_path = save_document("answers", filename, content)
@@ -493,7 +502,17 @@ def create_rerun_draft(
             raise ValueError("Replacement mark scheme must be a PDF.")
         scheme_path = save_document("scheme", *scheme_file)
     version_number = int(latest["version_number"]) + 1
-    detected = detect_documents(question_path, scheme_path, paper["title"])
+    metadata = {
+        "title": paper["title"],
+        "syllabus_code": paper["syllabus_code"],
+        "paper_number": paper["paper_number"],
+        "paper_year": paper["paper_year"],
+        "examination_session": paper["examination_session"],
+        "calculator_policy": paper["calculator_policy"],
+        "maximum_marks": paper["maximum_marks"],
+        "source_type": paper["source_type"],
+    }
+    mode = "detailed" if scheme_path else "estimate"
     now = now_iso()
     version_id = execute(
         """
@@ -501,24 +520,29 @@ def create_rerun_draft(
         (paper_id, version_number, supersedes_version_id, question_paper_path,
          answer_script_path, mark_scheme_path, detected_metadata, question_plan,
          ocr_model, grading_model, diagnosis_model, ocr_prompt_version,
-         image_resolution, warnings, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         image_resolution, warnings, assessment_mode, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             paper_id,
             version_number,
             latest["id"],
-            question_path,
+            "",
             answer_path,
             scheme_path,
-            json_text(detected["metadata"]),
-            json_text(detected["questions"]),
-            config.CXSEE_OCR_MODEL,
-            config.CXSEE_MARKING_MODEL,
-            config.CXSEE_DIAGNOSIS_MODEL or config.CXSEE_MARKING_MODEL,
-            config.OCR_PROMPT_VERSION,
+            json_text(metadata),
+            "[]",
+            "",
+            config.WHOLE_DOCUMENT_MODEL,
+            config.WHOLE_DOCUMENT_MODEL,
+            "whole-document-assessment-v1",
             config.OCR_RENDER_DPI,
-            json_text(detected["warnings"]),
+            json_text(
+                []
+                if scheme_path
+                else ["Estimated assessment: no mark scheme was provided."]
+            ),
+            mode,
             now,
             now,
         ),
@@ -740,7 +764,7 @@ def _automatic_question_plan(
     return detected["metadata"], questions, detected["warnings"]
 
 
-def run_self_service_analysis(version_id: int) -> dict:
+def _run_legacy_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
         SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
@@ -996,6 +1020,299 @@ def run_self_service_analysis(version_id: int) -> dict:
         public_message = (
             "We could not complete this analysis. Try again; your files and "
             "previous results are safe."
+        )
+        execute(
+            """
+            UPDATE paper_analysis_versions
+            SET status = 'failed', failure_message = ?, updated_at = ?,
+                finished_at = ?
+            WHERE id = ?
+            """,
+            (public_message, now_iso(), now_iso(), version_id),
+        )
+        execute(
+            "UPDATE student_papers SET status = 'failed', updated_at = ? WHERE id = ?",
+            (now_iso(), version["student_paper_id"]),
+        )
+        return {"status": "failed", "error": public_message}
+
+
+def run_self_service_analysis(version_id: int) -> dict:
+    """Run the active whole-document assessment pipeline.
+
+    Historical completed versions remain untouched. Every new run uses the
+    completed-work PDF as the source of questions and student evidence, with
+    the mark scheme included only when the student supplies one.
+    """
+    version = query_one(
+        """
+        SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
+               sp.title AS paper_title
+        FROM paper_analysis_versions pav
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        WHERE pav.id = ?
+        """,
+        (version_id,),
+    )
+    if not version:
+        return {"status": "failed", "error": "Version was not found."}
+    try:
+        if not version["answer_script_path"] or not os.path.isfile(
+            version["answer_script_path"]
+        ):
+            raise RuntimeError("The completed-work document is missing.")
+        scheme_path = version["mark_scheme_path"]
+        if scheme_path and not os.path.isfile(scheme_path):
+            raise RuntimeError("The mark-scheme document is missing.")
+
+        mode = "detailed" if scheme_path else "estimate"
+        _update_version(version_id, "validation", 0)
+        _update_version(version_id, "document_extraction", 1)
+        _update_version(version_id, "whole_document_reasoning", 2)
+        assessment, provider_metadata = assess_documents(
+            version["answer_script_path"],
+            scheme_path,
+        )
+        _update_version(version_id, "result_validation", 3)
+
+        questions = assessment["questions"]
+        metadata = {
+            "title": assessment.get("paper_title") or version["paper_title"],
+            "syllabus_code": assessment.get("syllabus_code") or "Mathematics",
+            "paper_number": assessment.get("paper_reference") or "",
+            "paper_year": None,
+            "examination_session": "",
+            "calculator_policy": "unknown",
+            "maximum_marks": assessment["total_max_marks"],
+            "source_type": "student_upload",
+        }
+        warnings = list(assessment.get("warnings") or [])
+        if mode == "estimate":
+            warnings.insert(
+                0,
+                "Estimated assessment: no official mark scheme was provided.",
+            )
+        execute(
+            """
+            UPDATE paper_analysis_versions
+            SET detected_metadata = ?, confirmed_metadata = ?,
+                question_plan = ?, warnings = ?, assessment_mode = ?,
+                assessment_summary = ?, provider_metadata = ?,
+                grading_model = ?, diagnosis_model = ?,
+                grading_prompt_version = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                json_text(metadata),
+                json_text(metadata),
+                json_text(questions),
+                json_text(warnings),
+                mode,
+                json_text(assessment),
+                json_text(provider_metadata),
+                provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
+                provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
+                provider_metadata.get("prompt_version")
+                or "whole-document-assessment-v1",
+                now_iso(),
+                version_id,
+            ),
+        )
+        execute(
+            """
+            UPDATE student_papers
+            SET title = ?, syllabus_code = ?, paper_number = ?,
+                maximum_marks = ?, source_type = ?, status = 'processing',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                metadata["title"],
+                metadata["syllabus_code"],
+                metadata["paper_number"],
+                metadata["maximum_marks"],
+                metadata["source_type"],
+                now_iso(),
+                version["student_paper_id"],
+            ),
+        )
+
+        execute(
+            "DELETE FROM analysis_question_results WHERE analysis_version_id = ?",
+            (version_id,),
+        )
+        execute(
+            "DELETE FROM analysis_skill_observations WHERE analysis_version_id = ?",
+            (version_id,),
+        )
+        _update_version(version_id, "diagnosis", 4)
+        for item in questions:
+            mark = item.get("awarded_mark")
+            maximum = item.get("maximum_marks")
+            status = item["status"]
+            confidence = float(item.get("confidence") or 0)
+            pages = item.get("evidence_pages") or []
+            lost_marks = (
+                maximum is not None
+                and mark is not None
+                and float(mark) < float(maximum)
+            )
+            risk_flags = []
+            if status in {"uncertain", "ungraded"}:
+                risk_flags.append(f"assessment_{status}")
+            if mode == "estimate":
+                risk_flags.append("estimated_without_mark_scheme")
+            result_id = execute(
+                """
+                INSERT INTO analysis_question_results
+                (analysis_version_id, question_label, question_text,
+                 mark_scheme_text, structured_criteria, maximum_marks, topic,
+                 subtopic, skill, answer_page, response_text,
+                 mapping_confidence, ai_mark, ai_confidence, ai_rationale,
+                 cited_evidence, error_category, error_mechanism,
+                 deterministic_check, risk_flags, model, prompt_version,
+                 assessment_status, awarded_mark, evidence_pages, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    version_id,
+                    item["label"],
+                    item.get("question_text") or "",
+                    "Official mark scheme supplied as a complete document."
+                    if scheme_path
+                    else "No mark scheme supplied; this is an estimate.",
+                    json_text(item.get("mark_breakdown") or []),
+                    float(maximum or 0),
+                    item.get("topic") or "Unclassified",
+                    "",
+                    item.get("skill") or "unclassified",
+                    int(pages[0]) if pages else 1,
+                    item.get("evidence_quote") or "",
+                    confidence,
+                    float(mark or 0),
+                    confidence,
+                    item.get("rationale") or "",
+                    item.get("evidence_quote") or "",
+                    (
+                        "uncertain evidence"
+                        if status in {"uncertain", "ungraded"}
+                        else "method or accuracy loss"
+                        if lost_marks
+                        else None
+                    ),
+                    (
+                        item.get("improvement") or None
+                        if lost_marks or status in {"uncertain", "ungraded"}
+                        else None
+                    ),
+                    json_text(
+                        {
+                            "validated": True,
+                            "whole_document": True,
+                            "mode": mode,
+                            "independent_audit": item.get("audit"),
+                        }
+                    ),
+                    json_text(risk_flags),
+                    provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
+                    provider_metadata.get("prompt_version")
+                    or "whole-document-assessment-v1",
+                    status,
+                    float(mark) if mark is not None else None,
+                    json_text(pages),
+                    now_iso(),
+                ),
+            )
+            if (
+                mark is not None
+                and maximum is not None
+                and float(maximum) > 0
+                and status != "ungraded"
+            ):
+                evidence_weight = max(float(maximum), 1) * max(confidence, 0.1)
+                if mode == "estimate":
+                    evidence_weight *= 0.6
+                execute(
+                    """
+                    INSERT INTO analysis_skill_observations
+                    (student_id, paper_id, analysis_version_id,
+                     question_result_id, observed_at, topic, subtopic, skill,
+                     marks_earned, marks_available, success_fraction,
+                     grading_confidence, extraction_confidence,
+                     evidence_weight, error_category, error_mechanism,
+                     is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        version["student_id"],
+                        version["student_paper_id"],
+                        version_id,
+                        result_id,
+                        now_iso(),
+                        item.get("topic") or "Unclassified",
+                        item.get("skill") or "unclassified",
+                        float(mark),
+                        float(maximum),
+                        float(mark) / float(maximum),
+                        confidence,
+                        confidence,
+                        evidence_weight,
+                        (
+                            "estimated assessment"
+                            if mode == "estimate"
+                            else None
+                        ),
+                        item.get("improvement") or None,
+                    ),
+                )
+
+        execute(
+            """
+            UPDATE analysis_skill_observations
+            SET is_current = 0
+            WHERE paper_id = ? AND analysis_version_id != ?
+            """,
+            (version["student_paper_id"], version_id),
+        )
+        _update_version(version_id, "profile_update", 5)
+        from assessment import rebuild_student_profile
+
+        rebuild_student_profile(version["student_id"])
+        _update_version(version_id, "report_generation", 6)
+        execute(
+            """
+            UPDATE paper_analysis_versions
+            SET status = 'completed', current_stage = 'completed',
+                stage_index = ?, confirmed_min_score = ?,
+                provisional_score = ?, possible_max_score = ?,
+                updated_at = ?, finished_at = ?
+            WHERE id = ?
+            """,
+            (
+                len(SELF_SERVICE_STAGES),
+                assessment["estimated_score_min"],
+                assessment["estimated_score"],
+                assessment["estimated_score_max"],
+                now_iso(),
+                now_iso(),
+                version_id,
+            ),
+        )
+        execute(
+            """
+            UPDATE student_papers
+            SET status = 'completed', latest_version_number = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (version["version_number"], now_iso(), version["student_paper_id"]),
+        )
+        return {"status": "completed", "paper_id": version["student_paper_id"]}
+    except Exception:
+        logger.exception("Whole-document analysis version %s failed", version_id)
+        public_message = (
+            "We could not complete this analysis. No zero marks were recorded. "
+            "Try again; your files and previous results are safe."
         )
         execute(
             """

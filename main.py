@@ -641,38 +641,44 @@ def student_analyse_page(request: Request):
 async def student_analyse_upload(
     request: Request,
     background_tasks: BackgroundTasks,
-    question_paper: UploadFile = File(...),
     answer_script: UploadFile = File(...),
-    mark_scheme: UploadFile = File(...),
+    mark_scheme: UploadFile = File(None),
 ):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    question_content = await question_paper.read()
     answer_content = await answer_script.read()
-    scheme_content = await mark_scheme.read()
-    if any(
-        len(content) <= 0 or len(content) > config.MAX_UPLOAD_BYTES
-        for content in (question_content, answer_content, scheme_content)
+    scheme_content = (
+        await mark_scheme.read()
+        if mark_scheme and mark_scheme.filename
+        else None
+    )
+    if (
+        len(answer_content) <= 0
+        or len(answer_content) > config.MAX_UPLOAD_BYTES
+        or (
+            scheme_content is not None
+            and (
+                len(scheme_content) <= 0
+                or len(scheme_content) > config.MAX_UPLOAD_BYTES
+            )
+        )
     ):
         return render(
             request,
             "student/analyse.html",
             {
                 "user": user,
-                "error": "Each document must be present and no larger than the upload limit.",
+                "error": "Completed work is required. Each file must be within the upload limit.",
             },
             status_code=400,
         )
     try:
         paper_id, version_id = create_student_paper_draft(
             user["id"],
-            "",
-            question_paper.filename or "question-paper.pdf",
-            question_content,
             answer_script.filename or "answer-script.pdf",
             answer_content,
-            mark_scheme.filename or "mark-scheme.pdf",
+            mark_scheme.filename if mark_scheme and mark_scheme.filename else None,
             scheme_content,
         )
     except ValueError as exc:
@@ -790,11 +796,11 @@ def student_self_service_status(request: Request, version_id: int):
     failure_message = None
     if version["status"] == "failed":
         failure_message = (
-            "无法完成此次分析。请重试；你的文件和之前的结果仍然安全。"
+            "无法完成此次分析。系统未记录任何零分。请重试；你的文件和之前的结果仍然安全。"
             if get_lang(request) == "zh"
             else (
-                "We could not complete this analysis. Try again; your files "
-                "and previous results are safe."
+                "We could not complete this analysis. No zero marks were "
+                "recorded. Try again; your files and previous results are safe."
             )
         )
     return {
@@ -845,6 +851,10 @@ def student_paper_result(
             "result": result,
             "paper": paper,
             "versions": versions,
+            "assessment_summary": parse_json(
+                result["version"]["assessment_summary"],
+                {},
+            ),
         },
     )
 
@@ -898,7 +908,6 @@ async def student_paper_rerun(
     request: Request,
     paper_id: int,
     background_tasks: BackgroundTasks,
-    question_paper: UploadFile = File(None),
     answer_script: UploadFile = File(None),
     mark_scheme: UploadFile = File(None),
 ):
@@ -918,7 +927,6 @@ async def student_paper_rerun(
         version_id = create_rerun_draft(
             user["id"],
             paper_id,
-            await optional_file(question_paper),
             await optional_file(answer_script),
             await optional_file(mark_scheme),
         )
