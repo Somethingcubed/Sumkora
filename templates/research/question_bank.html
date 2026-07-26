@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Question bank — Sumkora{% endblock %}
+{% block content %}
+<div class="research-shell">
+  <div class="flex flex-wrap justify-between items-start gap-4">
+    <div><p class="text-xs uppercase tracking-[0.22em] text-indigo-300">Authorized source library</p><h1 class="text-3xl font-bold mt-2 text-white">Question bank</h1><p class="text-slate-400 mt-2">Import Cambridge-style ZIP archives, inspect automatic pairing, and approve worksheet questions.</p></div>
+    <a href="/research" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">Research overview</a>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-7">
+    {% for label, value in [('Papers',inventory.papers),('Questions',inventory.questions),('Ready',inventory.ready),('Needs review',inventory.needs_review)] %}
+    <div class="research-card"><p class="text-xs text-slate-400">{{ label }}</p><p class="text-2xl font-semibold text-white mt-1">{{ value }}</p></div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if imported %}<div class="surface mt-6 border-emerald-200 bg-emerald-50"><p class="text-sm text-emerald-900"><strong>{{ imported }}</strong> questions are worksheet-ready. {{ warnings or 0 }} import warnings.</p></div>{% endif %}
+{% if error %}<div class="surface mt-6 border-red-200 bg-red-50"><p class="text-sm text-red-700">{{ error }}</p></div>{% endif %}
+
+<section class="surface mt-6">
+  <h2 class="text-lg font-semibold">Import a paper archive</h2>
+  <p class="text-sm text-slate-500 mt-1">Keep the original filenames. Sumkora pairs names such as <code>0606_s24_qp_11.pdf</code> and <code>0606_s24_ms_11.pdf</code>, extracts clean question and answer assets, classifies skills, and queues uncertain records for review.</p>
+  <form method="post" action="/research/question-bank/import" enctype="multipart/form-data" class="mt-4 flex flex-wrap gap-3 items-end">
+    <label class="flex-1 min-w-[200px]"><span class="form-label">ZIP archive</span><input type="file" name="archive" accept=".zip,application/zip" required></label>
+    <button class="button button-primary">Import and sort</button>
+  </form>
+</section>
+
+<section class="surface mt-6">
+  <h2 class="text-lg font-semibold">Imported papers</h2>
+  <div class="overflow-x-auto mt-4"><table class="w-full text-sm"><thead><tr class="text-left border-b text-slate-500"><th class="py-2">Paper</th><th>Policy</th><th>Ready</th><th>Status</th></tr></thead><tbody>{% for paper in papers %}<tr class="border-b"><td class="py-3">{{ paper.syllabus_code }} {{ paper.examination_session }} {{ paper.year }} / {{ paper.component }}</td><td>{{ paper.calculator_policy }}</td><td>{{ paper.ready_count or 0 }}/{{ paper.question_count }}</td><td>{{ paper.ingestion_status|replace('_',' ') }}</td></tr>{% else %}<tr><td colspan="4" class="py-5 text-slate-500">No paper archives imported yet.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+{% if questions %}
+<section class="surface mt-6">
+  <div><h2 class="text-lg font-semibold">Question review</h2><p class="text-sm text-slate-500 mt-1">Approve automatic classifications before students receive them in worksheets.</p></div>
+  <div class="mt-4 space-y-4">
+    {% for item in questions %}
+    <details class="rounded-xl border border-slate-200 p-4" {% if item.review_status == 'needs_review' %}open{% endif %}>
+      <summary class="cursor-pointer flex justify-between gap-3"><span class="font-medium">{{ item.source_key or (item.syllabus_code ~ '-' ~ item.year ~ '-' ~ item.component ~ '-Q' ~ item.question_number) }}</span><span class="badge badge-{{ 'completed' if item.review_status == 'ready' else 'pending' }}">{{ item.review_status|replace('_',' ') }}</span></summary>
+      <p class="text-sm text-slate-600 whitespace-pre-wrap mt-3">{{ item.prompt_text|truncate(900) }}</p>
+      <form method="post" action="/research/question-bank/questions/{{ item.id }}" class="grid md:grid-cols-4 gap-3 items-end mt-4">
+        <label><span class="form-label">Topic</span><input name="topic" value="{{ item.topic }}" required></label>
+        <label><span class="form-label">Skills, comma-separated</span><input name="skills" value="{{ item.skills|replace('[','')|replace(']','')|replace('&quot;','') }}"></label>
+        <label><span class="form-label">Difficulty</span><select name="difficulty"><option value="standard" {% if item.question_demand == 'standard' %}selected{% endif %}>Standard</option><option value="challenging" {% if item.question_demand == 'challenging' %}selected{% endif %}>Challenging</option></select></label>
+        <label><span class="form-label">Review status</span><select name="review_status"><option value="needs_review" {% if item.review_status == 'needs_review' %}selected{% endif %}>Needs review</option><option value="ready" {% if item.review_status == 'ready' %}selected{% endif %}>Ready</option></select></label>
+        <button class="button button-secondary md:col-span-4">Save review</button>
+      </form>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

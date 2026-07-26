@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('Targeted practice', '针对练习') }} — Sumkora{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><p class="eyebrow">{{ tr('Real past-paper questions', '真实历年试题') }}</p><h1>{{ tr('Targeted practice', '针对练习') }}</h1><p>{{ tr('Create a printable worksheet and a separate answer booklet.', '生成可打印练习册和单独的答案册。') }}</p></div>
+</div>
+
+{% if bank.ready %}
+<form method="post" class="surface mb-6">
+  <h2 class="text-lg font-semibold">{{ tr('Build a worksheet', '生成练习册') }}</h2>
+  <div class="grid md:grid-cols-2 gap-4 mt-4">
+    <label><span class="form-label">{{ tr('Number of questions', '题目数量') }}</span><select name="count">{% for count in [10,20,30,40,50] %}<option value="{{ count }}">{{ count }}</option>{% endfor %}</select></label>
+    <label><span class="form-label">{{ tr('Question selection', '选题方式') }}</span><select name="selection_mode"><option value="weaknesses">{{ tr('Target my weaknesses', '针对我的薄弱项') }}</option><option value="topic">{{ tr('Choose one topic', '选择一个知识点') }}</option><option value="mixed">{{ tr('Mixed revision', '综合复习') }}</option><option value="mistakes">{{ tr('Retry matched mistakes', '重练已匹配错题') }}</option></select></label>
+    <label><span class="form-label">{{ tr('Topic (for topic mode)', '知识点（专题模式）') }}</span><select name="topic"><option value="">{{ tr('Choose automatically', '自动选择') }}</option>{% for item in bank.topics %}<option value="{{ item.topic }}">{{ topic_label(item.topic) }} ({{ item.question_count }})</option>{% endfor %}</select></label>
+    <label><span class="form-label">{{ tr('Difficulty', '难度') }}</span><select name="difficulty"><option value="mixed">{{ tr('Mixed difficulty', '难度混合') }}</option><option value="standard">{{ tr('Standard', '标准') }}</option><option value="challenging">{{ tr('Challenging', '挑战') }}</option></select></label>
+    <label><span class="form-label">{{ tr('Calculator', '计算器') }}</span><select name="calculator_policy"><option value="any">{{ tr('Any', '不限') }}</option><option value="calculator">{{ tr('Calculator', '可用计算器') }}</option><option value="non-calculator">{{ tr('Non-calculator', '不可用计算器') }}</option></select></label>
+  </div>
+  <button class="button button-primary mt-5">{{ tr('Generate worksheet', '生成练习册') }}</button>
+  <p class="text-xs text-slate-500 mt-3">{{ tr('Questions are never repeated inside one worksheet. If fewer suitable questions are available, Sumkora uses every suitable question and tells you the final count.', '同一练习册内不会重复题目。如果合适题目不足，Sumkora 会使用全部合适题目并显示实际数量。') }}</p>
+</form>
+{% else %}
+<section class="surface mb-6 border-amber-200 bg-amber-50"><h2 class="font-semibold text-amber-900">{{ tr('The question bank is being prepared', '题库正在准备中') }}</h2><p class="text-sm text-amber-800 mt-2">{{ tr('Worksheet generation will become available as soon as approved past papers and mark schemes are imported.', '历年试卷和评分标准导入并审核后，即可生成练习册。') }}</p></section>
+{% endif %}
+
+<section class="surface">
+  <div class="flex justify-between gap-3"><div><h2 class="text-lg font-semibold">{{ tr('Your worksheets', '我的练习册') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Question and answer PDFs remain separate.', '题目 PDF 与答案 PDF 始终分开。') }}</p></div><span class="badge badge-completed">{{ bank.ready }} {{ tr('questions ready', '道题可用') }}</span></div>
+  <div class="mt-4 divide-y divide-slate-100">
+    {% for item in sets %}
+    <a href="/student/practice/{{ item.id }}" class="flex justify-between gap-4 py-4 group"><div><p class="font-medium group-hover:text-indigo-700">{{ item.title }}</p><p class="text-xs text-slate-500 mt-1">{{ item.created_at[:10] }} · {{ item.actual_count }}/{{ item.requested_count }} {{ tr('questions', '道题') }}</p></div><span aria-hidden="true">→</span></a>
+    {% else %}<p class="text-sm text-slate-500 py-4">{{ tr('No worksheets generated yet.', '尚未生成练习册。') }}</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

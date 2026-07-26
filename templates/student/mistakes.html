@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('Mistake Book', '错题本') }} — Sumkora{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><p class="eyebrow">{{ tr('Review and retry', '复习与重练') }}</p><h1>{{ tr('Mistake Book', '错题本') }}</h1><p>{{ tr('Every partially correct or incorrect question from your latest paper analyses.', '收集每份最新试卷分析中部分得分或错误的题目。') }}</p></div>
+  {% if book['items'] %}<div class="flex flex-wrap gap-2"><a href="/student/mistakes/questions.pdf" class="button button-primary">{{ tr('Print questions', '打印题目') }}</a><a href="/student/mistakes/answers.pdf" class="button button-secondary">{{ tr('Print answers', '打印答案') }}</a></div>{% endif %}
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('All mistakes', '全部错题') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.total }}</p></div>
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Not retried', '未重练') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.not_retried }}</p></div>
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Improving', '正在进步') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.improving }}</p></div>
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Mastered', '已掌握') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.mastered }}</p></div>
+</div>
+
+<form method="get" class="surface mb-5">
+  <div class="grid md:grid-cols-3 gap-3 items-end">
+    <label><span class="form-label">{{ tr('Topic', '知识点') }}</span><select name="topic"><option value="">{{ tr('All topics', '全部知识点') }}</option>{% for topic in book.topics %}<option value="{{ topic }}" {% if topic == book.selected_topic %}selected{% endif %}>{{ topic_label(topic) }}</option>{% endfor %}</select></label>
+    <label><span class="form-label">{{ tr('Progress status', '掌握状态') }}</span><select name="status"><option value="">{{ tr('All statuses', '全部状态') }}</option><option value="not_retried" {% if book.selected_status == 'not_retried' %}selected{% endif %}>{{ tr('Not retried', '未重练') }}</option><option value="improving" {% if book.selected_status == 'improving' %}selected{% endif %}>{{ tr('Improving', '正在进步') }}</option><option value="mastered" {% if book.selected_status == 'mastered' %}selected{% endif %}>{{ tr('Mastered', '已掌握') }}</option></select></label>
+    <button class="button button-secondary">{{ tr('Apply filters', '应用筛选') }}</button>
+  </div>
+</form>
+
+{% if book['items'] %}
+<div class="space-y-4">
+  {% for item in book['items'] %}
+  <section class="surface">
+    <div class="flex flex-wrap justify-between gap-3">
+      <div><p class="eyebrow">{{ topic_label(item.topic) }} · {{ skill_label(item.skill) }}</p><h2 class="font-semibold mt-1">{{ item.paper_title }} — {{ item.question_label }}</h2><p class="text-xs text-slate-500 mt-1">{{ item.paper_date[:10] }} · {{ tr('Estimated', '估分') if item.assessment_mode == 'estimate' else tr('Detailed', '详细批改') }}</p></div>
+      <div class="text-right"><p class="text-2xl font-bold {{ 'text-red-700' if item.outcome == 'incorrect' else 'text-amber-700' }}">{{ item.mark }}/{{ item.maximum_marks }}</p><p class="text-xs text-slate-500">{{ tr('marks', '分') }}</p></div>
+    </div>
+    <p class="text-sm mt-4">{{ item.question_text or tr('Question text will be linked when the source paper is added to the question bank.', '原试卷加入题库后将显示完整题目。') }}</p>
+    <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm mt-3"><p class="font-medium">{{ tr('What to improve', '需要改进') }}</p><p class="text-slate-600 mt-1">{{ item.error_mechanism_zh if lang == 'zh' and item.error_mechanism_zh else (item.error_mechanism or item.ai_rationale_zh if lang == 'zh' and item.ai_rationale_zh else item.ai_rationale) }}</p></div>
+    <form method="post" action="/student/mistakes/{{ item.id }}/status" class="flex flex-wrap gap-2 items-end mt-4">
+      <label class="flex-1 min-w-[200px]"><span class="form-label">{{ tr('My progress', '我的掌握情况') }}</span><select name="status"><option value="not_retried" {% if item.status == 'not_retried' %}selected{% endif %}>{{ tr('Not retried', '未重练') }}</option><option value="improving" {% if item.status == 'improving' %}selected{% endif %}>{{ tr('Improving', '正在进步') }}</option><option value="mastered" {% if item.status == 'mastered' %}selected{% endif %}>{{ tr('Mastered', '已掌握') }}</option></select></label>
+      <button class="button button-secondary">{{ tr('Save status', '保存状态') }}</button>
+    </form>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('No mistakes match these filters', '没有符合筛选条件的错题') }}</h2><p class="text-slate-500 mt-2">{{ tr('Mistakes appear automatically after a paper analysis.', '试卷分析完成后，错题会自动出现在这里。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse a paper', '分析试卷') }}</a></section>
+{% endif %}
+{% endblock %}

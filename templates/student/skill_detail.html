@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ skill_label(detail.display_skill) }} — Sumkora{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <p class="eyebrow">{{ topic_label(detail.topic) }}</p>
+    <h1>{{ skill_label(detail.display_skill) }}</h1>
+    <p>{{ tr('See how your performance in this skill changes from paper to paper.', '查看你在这一技能上的表现如何随每次试卷分析而变化。') }}</p>
+  </div>
+  <a href="/student/skills" class="button button-secondary">{{ tr('Back to all skills', '返回全部技能') }}</a>
+</div>
+
+{% if detail.state %}
+<div class="grid md:grid-cols-3 gap-4 mb-5">
+  <div class="surface"><p class="text-sm text-slate-500">{{ tr('Current mark yield', '当前得分率') }}</p><p class="text-3xl font-bold text-indigo-700 mt-2">{{ (detail.state.current_estimate * 100)|round|int }}%</p></div>
+  <div class="surface"><p class="text-sm text-slate-500">{{ tr('Evidence', '证据量') }}</p><p class="text-3xl font-bold mt-2">{{ detail.state.evidence_count }}</p><p class="text-xs text-slate-500 mt-1">{{ tr('question observations', '次题目记录') }}</p></div>
+  <div class="surface"><p class="text-sm text-slate-500">{{ tr('Papers', '试卷数') }}</p><p class="text-3xl font-bold mt-2">{{ detail.paper_count }}</p><p class="text-xs text-slate-500 mt-1">{{ tr('Estimated papers are shown with hollow points.', '估分试卷以空心点显示。') }}</p></div>
+</div>
+{% endif %}
+
+{% if detail.papers %}
+<section class="surface mb-5">
+  <div class="flex flex-wrap justify-between gap-3 items-start">
+    <div><h2 class="text-lg font-semibold">{{ tr('Progress by paper', '按试卷查看进步') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Marks earned as a percentage of marks available for this skill.', '该技能得分占可得分数的百分比。') }}</p></div>
+    <div class="text-xs text-slate-500 flex gap-4"><span>● {{ tr('Detailed', '详细批改') }}</span><span>○ {{ tr('Estimated', '估分') }}</span></div>
+  </div>
+  <div class="skill-chart mt-5" role="img" aria-label="{{ tr('Skill percentage over time', '技能得分率随时间变化图') }}">
+    <svg viewBox="0 0 800 270" preserveAspectRatio="none">
+      {% for tick in [0,25,50,75,100] %}
+      {% set y = 220 - tick * 1.7 %}
+      <line x1="70" y1="{{ y }}" x2="750" y2="{{ y }}" class="chart-grid"/>
+      <text x="55" y="{{ y + 4 }}" text-anchor="end" class="chart-label">{{ tick }}%</text>
+      {% endfor %}
+      <polyline class="chart-line" points="{% for paper in detail.papers %}{% if detail.paper_count == 1 %}{% set x = 410 %}{% else %}{% set x = 70 + (loop.index0 * 680 / (detail.paper_count - 1)) %}{% endif %}{% set y = 220 - paper.percentage * 1.7 %}{{ x }},{{ y }} {% endfor %}"/>
+      {% for paper in detail.papers %}
+      {% if detail.paper_count == 1 %}{% set x = 410 %}{% else %}{% set x = 70 + (loop.index0 * 680 / (detail.paper_count - 1)) %}{% endif %}
+      {% set y = 220 - paper.percentage * 1.7 %}
+      <circle cx="{{ x }}" cy="{{ y }}" r="7" class="{{ 'chart-point-estimate' if paper.assessment_mode == 'estimate' else 'chart-point' }}"><title>{{ paper.title }}: {{ paper.percentage }}%</title></circle>
+      <text x="{{ x }}" y="248" text-anchor="middle" class="chart-label">{{ paper.date[5:] }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</section>
+
+<div class="space-y-4">
+  {% for paper in detail.papers %}
+  <section class="surface">
+    <div class="flex flex-wrap justify-between gap-3">
+      <div><p class="font-semibold">{{ paper.title }}</p><p class="text-xs text-slate-500 mt-1">{{ paper.date }} · {{ tr('Estimated', '估分') if paper.assessment_mode == 'estimate' else tr('Detailed', '详细批改') }}</p></div>
+      <div class="text-right"><p class="text-2xl font-bold text-indigo-700">{{ paper.percentage }}%</p><p class="text-xs text-slate-500">{{ paper.earned }}/{{ paper.available }} {{ tr('marks', '分') }}</p></div>
+    </div>
+    {% set total = paper.correct + paper.partial + paper.incorrect %}
+    <div class="outcome-bar mt-4" aria-label="{{ paper.correct }} {{ tr('correct', '全对') }}, {{ paper.partial }} {{ tr('partial', '部分得分') }}, {{ paper.incorrect }} {{ tr('incorrect', '错误') }}">
+      {% if total %}<span class="outcome-correct" style="width:{{ 100 * paper.correct / total }}%"></span><span class="outcome-partial" style="width:{{ 100 * paper.partial / total }}%"></span><span class="outcome-incorrect" style="width:{{ 100 * paper.incorrect / total }}%"></span>{% endif %}
+    </div>
+    <div class="flex flex-wrap gap-4 text-xs mt-2"><span class="text-emerald-700">{{ paper.correct }} {{ tr('correct', '全对') }}</span><span class="text-amber-700">{{ paper.partial }} {{ tr('partial', '部分得分') }}</span><span class="text-red-700">{{ paper.incorrect }} {{ tr('incorrect', '错误') }}</span></div>
+    <details class="mt-4 pt-4 border-t border-slate-100">
+      <summary class="cursor-pointer text-sm font-medium">{{ tr('View contributing questions', '查看相关题目') }}</summary>
+      <div class="mt-3 divide-y divide-slate-100">
+        {% for question in paper.questions %}
+        <div class="py-3 text-sm"><div class="flex justify-between gap-3"><p class="font-medium">{{ question.label }} · {{ question.question_text|truncate(100) }}</p><p>{{ question.earned }}/{{ question.available }}</p></div><p class="text-slate-500 mt-1">{{ question.rationale_zh if lang == 'zh' and question.rationale_zh else question.rationale }}</p></div>
+        {% endfor %}
+      </div>
+    </details>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('Not enough evidence yet', '目前证据不足') }}</h2><p class="text-slate-500 mt-2">{{ tr('Analyse another paper containing this skill to start the trend.', '再分析一份包含该技能的试卷即可开始形成趋势。') }}</p></section>
+{% endif %}
+{% endblock %}

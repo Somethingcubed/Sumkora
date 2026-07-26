@@ -1014,6 +1014,9 @@ def _run_legacy_self_service_analysis(version_id: int) -> dict:
             """,
             (version["version_number"], now_iso(), version["student_paper_id"]),
         )
+        from question_bank import link_analysis_results_to_bank
+
+        link_analysis_results_to_bank(version_id)
         return {"status": "completed", "paper_id": version["student_paper_id"]}
     except Exception as exc:
         logger.exception("Paper analysis version %s failed", version_id)
@@ -1169,11 +1172,12 @@ def run_self_service_analysis(version_id: int) -> dict:
                  mark_scheme_text, structured_criteria, maximum_marks, topic,
                  subtopic, skill, answer_page, response_text,
                  mapping_confidence, ai_mark, ai_confidence, ai_rationale,
-                 cited_evidence, error_category, error_mechanism,
+                 ai_rationale_zh, cited_evidence, error_category, error_mechanism,
+                 error_mechanism_zh,
                  deterministic_check, risk_flags, model, prompt_version,
                  assessment_status, awarded_mark, evidence_pages, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     version_id,
@@ -1193,6 +1197,7 @@ def run_self_service_analysis(version_id: int) -> dict:
                     float(mark or 0),
                     confidence,
                     item.get("rationale") or "",
+                    item.get("rationale_zh") or "",
                     item.get("evidence_quote") or "",
                     (
                         "uncertain evidence"
@@ -1205,6 +1210,11 @@ def run_self_service_analysis(version_id: int) -> dict:
                         item.get("improvement") or None
                         if lost_marks or status in {"uncertain", "ungraded"}
                         else None
+                    ),
+                    (
+                        item.get("improvement_zh") or ""
+                        if lost_marks or status in {"uncertain", "ungraded"}
+                        else ""
                     ),
                     json_text(
                         {

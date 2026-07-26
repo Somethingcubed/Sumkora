@@ -10,8 +10,8 @@
 </div>
 
 {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
-{% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">Your display name has been updated.</div>{% endif %}
-{% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">Your password has been updated.</div>{% endif %}
+{% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your display name has been updated.', '显示名称已更新。') }}</div>{% endif %}
+{% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your password has been updated.', '密码已更新。') }}</div>{% endif %}
 
 <div class="settings-grid">
   <section class="surface">

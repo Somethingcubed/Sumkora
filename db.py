@@ -504,6 +504,49 @@ def init_db():
             UNIQUE(analysis_version_id, question_result_id, skill)
         );
 
+        CREATE TABLE IF NOT EXISTS mistake_book_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            analysis_question_result_id INTEGER NOT NULL REFERENCES analysis_question_results(id) ON DELETE CASCADE,
+            paper_question_id INTEGER REFERENCES paper_questions(id) ON DELETE SET NULL,
+            status TEXT NOT NULL DEFAULT 'not_retried'
+                CHECK(status IN ('not_retried', 'improving', 'mastered')),
+            first_added_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(student_id, analysis_question_result_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS practice_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            selection_mode TEXT NOT NULL DEFAULT 'weaknesses'
+                CHECK(selection_mode IN ('weaknesses', 'topic', 'mixed', 'mistakes')),
+            requested_count INTEGER NOT NULL,
+            actual_count INTEGER NOT NULL DEFAULT 0,
+            topic TEXT NOT NULL DEFAULT '',
+            difficulty TEXT NOT NULL DEFAULT 'mixed',
+            calculator_policy TEXT NOT NULL DEFAULT 'any',
+            language TEXT NOT NULL DEFAULT 'en',
+            status TEXT NOT NULL DEFAULT 'ready'
+                CHECK(status IN ('draft', 'ready', 'completed', 'archived')),
+            selection_explanation TEXT NOT NULL DEFAULT '',
+            analysis_paper_id INTEGER REFERENCES student_papers(id) ON DELETE SET NULL,
+            submitted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS practice_set_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            practice_set_id INTEGER NOT NULL REFERENCES practice_sets(id) ON DELETE CASCADE,
+            paper_question_id INTEGER NOT NULL REFERENCES paper_questions(id) ON DELETE RESTRICT,
+            mistake_book_entry_id INTEGER REFERENCES mistake_book_entries(id) ON DELETE SET NULL,
+            order_index INTEGER NOT NULL,
+            selection_reason TEXT NOT NULL DEFAULT '',
+            UNIQUE(practice_set_id, paper_question_id)
+        );
+
         CREATE TABLE IF NOT EXISTS research_experiment_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             experiment_id INTEGER NOT NULL REFERENCES research_experiments(id) ON DELETE CASCADE,
@@ -769,6 +812,63 @@ def init_db():
             conn.execute(
                 f"ALTER TABLE analysis_question_results ADD COLUMN {column} {definition}"
             )
+
+    paper_question_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(paper_questions)").fetchall()
+    }
+    paper_question_column_defs = {
+        "source_key": "TEXT",
+        "question_asset_path": "TEXT",
+        "answer_asset_path": "TEXT",
+        "answer_text": "TEXT NOT NULL DEFAULT ''",
+        "dependency_group": "TEXT NOT NULL DEFAULT ''",
+        "review_status": "TEXT NOT NULL DEFAULT 'needs_review'",
+        "classification_confidence": "REAL NOT NULL DEFAULT 0",
+    }
+    for column, definition in paper_question_column_defs.items():
+        if column not in paper_question_columns:
+            conn.execute(
+                f"ALTER TABLE paper_questions ADD COLUMN {column} {definition}"
+            )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_questions_source_key
+        ON paper_questions(source_key)
+        WHERE source_key IS NOT NULL AND source_key != ''
+        """
+    )
+
+    analysis_result_extended_defs = {
+        "paper_question_id": "INTEGER REFERENCES paper_questions(id)",
+        "ai_rationale_zh": "TEXT NOT NULL DEFAULT ''",
+        "error_mechanism_zh": "TEXT NOT NULL DEFAULT ''",
+    }
+    analysis_result_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(analysis_question_results)"
+        ).fetchall()
+    }
+    for column, definition in analysis_result_extended_defs.items():
+        if column not in analysis_result_columns:
+            conn.execute(
+                f"ALTER TABLE analysis_question_results ADD COLUMN {column} {definition}"
+            )
+
+    practice_set_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(practice_sets)").fetchall()
+    }
+    practice_set_column_defs = {
+        "analysis_paper_id": "INTEGER REFERENCES student_papers(id)",
+        "submitted_at": "TEXT",
+    }
+    for column, definition in practice_set_column_defs.items():
+        if column not in practice_set_columns:
+            conn.execute(
+                f"ALTER TABLE practice_sets ADD COLUMN {column} {definition}"
+            )
     conn.execute(
         """
         UPDATE analysis_question_results
@@ -800,6 +900,13 @@ def init_db():
         """
         UPDATE users SET name = 'Oscar'
         WHERE lower(email) = 'teacher@school.edu' AND name = 'Ms. Chen'
+        """
+    )
+    conn.execute(
+        """
+        UPDATE assignments
+        SET title = replace(replace(title, 'NUMERA', 'Sumkora'), 'Numera', 'Sumkora')
+        WHERE title LIKE '%Numera%' OR title LIKE '%NUMERA%'
         """
     )
     conn.commit()

@@ -13,7 +13,7 @@
       {% for item in attempts %}
       <label class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm hover:border-indigo-300">
         <input type="checkbox" name="ids" value="{{ item.id }}" {% if item.id in selected_ids %}checked{% endif %}>
-        <span><strong class="font-medium">{{ item.title }}</strong><span class="block text-xs text-slate-500 mt-1">{{ item.updated_at[:10] }} · Analysis v{{ item.latest_version_number }}</span></span>
+        <span><strong class="font-medium">{{ item.title }}</strong><span class="block text-xs text-slate-500 mt-1">{{ item.updated_at[:10] }} · {{ tr('Analysis version', '分析版本') }} {{ item.latest_version_number }}</span></span>
       </label>
       {% endfor %}
     </div>
@@ -26,8 +26,8 @@
 
 {% if comparison.warnings %}
 <details class="surface mb-6">
-  <summary class="cursor-pointer font-medium">Things to keep in mind</summary>
-  <ul class="mt-3 list-disc pl-5 text-sm text-slate-600 space-y-1">{% for warning in comparison.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  <summary class="cursor-pointer font-medium">{{ tr('Things to keep in mind', '需要注意') }}</summary>
+  <ul class="mt-3 list-disc pl-5 text-sm text-slate-600 space-y-1">{% for warning in comparison.warnings %}<li>{% if warning.startswith('Select at least') %}{{ tr(warning, '至少选择两份已完成的试卷，才能进行有效对比。') }}{% elif warning.startswith('Maximum marks') %}{{ tr(warning, '试卷满分不同；请同时比较百分比和原始分数。') }}{% elif warning.startswith('Calculator policies') %}{{ tr(warning, '所选试卷的计算器规定不同。') }}{% else %}{{ warning }}{% endif %}</li>{% endfor %}</ul>
 </details>
 {% endif %}
 
@@ -35,7 +35,7 @@
 <div class="grid lg:grid-cols-2 gap-5">
   {% for paper in comparison.papers %}
   <section class="surface">
-    <p class="eyebrow">{{ paper.syllabus_code }} · {{ paper.paper_number or 'Custom paper' }}</p>
+    <p class="eyebrow">{{ paper.syllabus_code }} · {{ paper.paper_number or tr('Custom paper', '自定义试卷') }}</p>
     <h2 class="font-semibold text-lg mt-2">{{ paper.title }}</h2>
     <p class="text-4xl font-bold tracking-tight text-indigo-700 mt-5">{{ paper.percentage }}%</p>
     <p class="text-sm text-slate-500 mt-1">{{ paper.earned }} / {{ paper.possible }} marks</p>
@@ -43,8 +43,8 @@
       <summary class="cursor-pointer text-sm font-medium">{{ tr('Marks lost by topic', '按知识点查看失分') }}</summary>
       <div class="mt-3 space-y-2 text-sm">
         {% for topic, marks in paper.marks_lost.items() %}
-        <div class="flex justify-between gap-4"><span>{{ topic }}</span><span>{{ count_label(marks, 'mark') }} lost</span></div>
-        {% else %}<p class="text-slate-500">No topic-level mark loss recorded.</p>{% endfor %}
+        <div class="flex justify-between gap-4"><span>{{ topic_label(topic) }}</span><span>{{ tr(count_label(marks, 'mark') ~ ' lost', '失分 ' ~ marks) }}</span></div>
+        {% else %}<p class="text-slate-500">{{ tr('No topic-level mark loss recorded.', '没有记录按知识点划分的失分。') }}</p>{% endfor %}
       </div>
     </details>
   </section>

@@ -1,0 +1,264 @@
+"""End-to-end checks for progress, mistakes, worksheets, and ZIP ingestion."""
+
+import io
+import json
+import zipfile
+from datetime import datetime, timezone
+
+import fitz
+from fastapi.testclient import TestClient
+
+from assessment import rebuild_student_profile
+from db import execute, hash_password, query_one
+from learning import (
+    create_practice_set,
+    mistake_book,
+    mistake_book_pdf,
+    practice_pdf,
+    practice_set_detail,
+    skill_detail,
+)
+from main import app
+from question_bank import ingest_question_bank_zip
+
+
+client = TestClient(app)
+
+
+def now():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def create_student(email: str):
+    student_id = execute(
+        "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, 'student')",
+        (email, hash_password("pass123"), "Learning Student"),
+    )
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'student', ?)",
+        (student_id, now()),
+    )
+    return student_id
+
+
+def create_researcher(email: str):
+    researcher_id = execute(
+        "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, 'teacher')",
+        (email, hash_password("pass123"), "Question Bank Researcher"),
+    )
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'researcher', ?)",
+        (researcher_id, now()),
+    )
+    return researcher_id
+
+
+def login(email: str):
+    response = client.post(
+        "/login",
+        data={"email": email, "password": "pass123"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    return response.cookies
+
+
+def seed_direct_observation(student_id: int):
+    paper_id = execute(
+        """
+        INSERT INTO student_papers
+        (student_id, title, syllabus_code, paper_number, calculator_policy,
+         maximum_marks, source_type, status, latest_version_number,
+         created_at, updated_at)
+        VALUES (?, '0606/11/O/N/25', '0606', '11', 'non-calculator',
+                5, 'official', 'completed', 1, ?, ?)
+        """,
+        (student_id, now(), now()),
+    )
+    version_id = execute(
+        """
+        INSERT INTO paper_analysis_versions
+        (paper_id, version_number, question_paper_path, answer_script_path,
+         status, current_stage, assessment_mode, assessment_summary,
+         created_at, updated_at)
+        VALUES (?, 1, '', 'test.pdf', 'completed', 'completed', 'detailed',
+                '{"paper_reference":"0606/11/O/N/25"}', ?, ?)
+        """,
+        (paper_id, now(), now()),
+    )
+    result_id = execute(
+        """
+        INSERT INTO analysis_question_results
+        (analysis_version_id, question_label, question_text, maximum_marks,
+         topic, skill, ai_mark, ai_confidence, ai_rationale,
+         ai_rationale_zh, error_mechanism, error_mechanism_zh,
+         assessment_status, awarded_mark, created_at)
+        VALUES (?, 'Q1', 'Sketch the trigonometric graph.', 5,
+                'Trigonometry', 'trigonometric graphs', 2, 0.9,
+                'The period is correct but the amplitude is not.',
+                '周期正确，但振幅错误。', 'Incorrect amplitude',
+                '振幅错误', 'graded', 2, ?)
+        """,
+        (version_id, now()),
+    )
+    execute(
+        """
+        INSERT INTO analysis_skill_observations
+        (student_id, paper_id, analysis_version_id, question_result_id,
+         observed_at, topic, skill, marks_earned, marks_available,
+         success_fraction, grading_confidence, extraction_confidence,
+         evidence_weight, is_current)
+        VALUES (?, ?, ?, ?, ?, 'Trigonometry', 'trigonometric graphs',
+                2, 5, 0.4, 0.9, 0.9, 4.5, 1)
+        """,
+        (student_id, paper_id, version_id, result_id, now()),
+    )
+    rebuild_student_profile(student_id)
+    return paper_id, result_id
+
+
+def seed_bank_questions(count=15):
+    pack_id = execute(
+        """
+        INSERT INTO paper_packs
+        (syllabus_code, year, examination_session, component, paper_number,
+         calculator_policy, ingestion_status, created_at, updated_at)
+        VALUES ('0606', 2025, 'October/November', '11', '1',
+                'non-calculator', 'ready', ?, ?)
+        """,
+        (now(), now()),
+    )
+    ids = []
+    for index in range(1, count + 1):
+        ids.append(
+            execute(
+                """
+                INSERT INTO paper_questions
+                (paper_pack_id, question_number, prompt_text, maximum_marks,
+                 topic, skills, calculator_policy, question_demand,
+                 parsing_confidence, answer_text, source_key,
+                 dependency_group, review_status, order_index)
+                VALUES (?, ?, ?, 5, 'Trigonometry',
+                        '["trigonometric graphs"]', 'non-calculator',
+                        'standard', 1, ?, ?, ?, 'ready', ?)
+                """,
+                (
+                    pack_id,
+                    str(index),
+                    f"Question {index}: Sketch a trigonometric graph.",
+                    f"Answer {index}: correct graph with labelled amplitude and period.",
+                    f"0606_w25_11_q{index}",
+                    f"0606_w25_11_q{index}",
+                    index,
+                ),
+            )
+        )
+    return ids
+
+
+def test_clickable_skill_mistake_book_and_worksheet_pdfs():
+    email = "learning-loop@student.local"
+    student_id = create_student(email)
+    seed_direct_observation(student_id)
+    seed_bank_questions()
+
+    detail = skill_detail(student_id, "trigonometric graphs")
+    assert detail["papers"][0]["percentage"] == 40
+    assert detail["papers"][0]["partial"] == 1
+
+    book = mistake_book(student_id)
+    assert book["counts"]["total"] == 1
+    assert book["items"][0]["outcome"] == "partial"
+    chinese_book = mistake_book_pdf(student_id, "questions", "zh")
+    with fitz.open(stream=chinese_book, filetype="pdf") as document:
+        assert "错题本" in document[0].get_text()
+        assert "共 1 道题" in document[0].get_text()
+
+    set_id = create_practice_set(
+        student_id,
+        count=10,
+        selection_mode="weaknesses",
+        topic="",
+        difficulty="mixed",
+        calculator_policy="any",
+        lang="en",
+    )
+    practice = practice_set_detail(student_id, set_id)
+    assert practice["set"]["requested_count"] == 10
+    assert len(practice["items"]) == 10
+    assert practice_pdf(student_id, set_id, "questions", "en").startswith(b"%PDF")
+    assert practice_pdf(student_id, set_id, "answers", "zh").startswith(b"%PDF")
+
+    cookies = login(email)
+    assert client.get(
+        "/student/skills/detail?skill=trigonometric%20graphs", cookies=cookies
+    ).status_code == 200
+    assert client.get("/student/mistakes", cookies=cookies).status_code == 200
+    assert client.get("/student/practice", cookies=cookies).status_code == 200
+    assert client.get(
+        f"/student/practice/{set_id}/questions.pdf", cookies=cookies
+    ).headers["content-type"].startswith("application/pdf")
+
+
+def _pdf(pages):
+    document = fitz.open()
+    for lines in pages:
+        page = document.new_page()
+        for index, line in enumerate(lines):
+            page.insert_text((50, 70 + index * 28), line, fontsize=11)
+    payload = document.tobytes()
+    document.close()
+    return payload
+
+
+def test_zip_import_pairs_extracts_and_totals_questions():
+    question_paper = _pdf(
+        [
+            ["Cambridge IGCSE", "0606/11"],
+            ["Formula page"],
+            ["1 Differentiate x squared. [2]"],
+            ["2 Solve the equation x + 3 = 7. [2]"],
+        ]
+    )
+    mark_scheme = _pdf(
+        [
+            ["Cover"],
+            ["General principles"],
+            ["Annotations"],
+            ["Notes"],
+            ["More notes"],
+            [
+                "Question Answer Marks Guidance",
+                "1 2x M1 A1",
+                "2 x = 4 M1 A1",
+            ],
+        ]
+    )
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("0606_s24_qp_11.pdf", question_paper)
+        zipped.writestr("0606_s24_ms_11.pdf", mark_scheme)
+    result = ingest_question_bank_zip(archive.getvalue(), "papers.zip")
+    assert result["pair_count"] == 1
+    assert result["papers"][0]["questions"] == 2
+    pack_id = result["papers"][0]["paper_pack_id"]
+    total = query_one(
+        "SELECT SUM(maximum_marks) AS total FROM paper_questions WHERE paper_pack_id = ?",
+        (pack_id,),
+    )["total"]
+    assert total == 4
+    first = query_one(
+        "SELECT * FROM paper_questions WHERE paper_pack_id = ? ORDER BY order_index LIMIT 1",
+        (pack_id,),
+    )
+    assert first["question_asset_path"]
+    assert first["answer_asset_path"]
+    assert json.loads(first["source_pages"]) == [3]
+
+    researcher_email = "question-bank@research.local"
+    create_researcher(researcher_email)
+    cookies = login(researcher_email)
+    page = client.get("/research/question-bank", cookies=cookies)
+    assert page.status_code == 200
+    assert "0606" in page.text
+    assert "Question bank" in page.text

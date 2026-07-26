@@ -5,6 +5,9 @@
     "build:css": "tailwindcss -i ./static/tailwind-input.css -o ./static/tailwind.css --minify",
     "build": "tailwindcss -i ./static/tailwind-input.css -o ./static/tailwind.css --minify"
   },
+  "dependencies": {
+    "mathjax": "3.2.2"
+  },
   "devDependencies": {
     "tailwindcss": "3.4.17"
   }

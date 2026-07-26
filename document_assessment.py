@@ -78,9 +78,11 @@ def assessment_schema() -> dict[str, Any]:
             },
             "evidence_quote": {"type": "string"},
             "rationale": {"type": "string"},
+            "rationale_zh": {"type": "string"},
             "topic": {"type": "string"},
             "skill": {"type": "string"},
             "improvement": {"type": "string"},
+            "improvement_zh": {"type": "string"},
         },
     }
     return {
@@ -131,6 +133,22 @@ def assessment_schema() -> dict[str, Any]:
                 "items": {"type": "string"},
             },
             "warnings": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "strengths_zh": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "weaknesses_zh": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "recommendations_zh": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "warnings_zh": {
                 "type": "array",
                 "items": {"type": "string"},
             },
@@ -208,6 +226,11 @@ Rules:
   answer. A visible wrong final value cannot receive its accuracy mark even
   when earlier method marks are earned.
 - Keep rationales concise, specific, and understandable to a student.
+- For every question, also return rationale_zh and improvement_zh in natural,
+  student-friendly Simplified Chinese. Return the same learning meaning in
+  both languages; translation must never change any mark.
+- Also return strengths_zh, weaknesses_zh, recommendations_zh, and warnings_zh
+  as Simplified Chinese equivalents of the English summary arrays.
 - Totals must be arithmetically consistent with question results.
 - The overall estimate must satisfy min <= estimate <= max <= total maximum.
 - Never turn a technical or reading failure into zero marks.
@@ -331,9 +354,11 @@ def validate_assessment(
                 "question_text": str(item.get("question_text") or "").strip(),
                 "evidence_quote": evidence.strip(),
                 "rationale": rationale.strip(),
+                "rationale_zh": str(item.get("rationale_zh") or "").strip(),
                 "topic": str(item.get("topic") or "Unclassified").strip(),
                 "skill": str(item.get("skill") or "unclassified").strip(),
                 "improvement": str(item.get("improvement") or "").strip(),
+                "improvement_zh": str(item.get("improvement_zh") or "").strip(),
             }
         )
         normalized_questions.append(item)
@@ -395,7 +420,16 @@ def validate_assessment(
             "questions": normalized_questions,
         }
     )
-    for field in ("strengths", "weaknesses", "recommendations", "warnings"):
+    for field in (
+        "strengths",
+        "weaknesses",
+        "recommendations",
+        "warnings",
+        "strengths_zh",
+        "weaknesses_zh",
+        "recommendations_zh",
+        "warnings_zh",
+    ):
         values = result.get(field)
         result[field] = [
             str(value).strip()

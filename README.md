@@ -40,6 +40,23 @@ The student upload flow has two modes:
 
 A separate question paper is not required in either mode.
 
+After analysis, the student learning loop includes:
+
+- clickable skill pages with a paper-by-paper trend graph and question evidence;
+- an automatically maintained Mistake Book with separate printable question
+  and answer booklets;
+- targeted worksheets of 10, 20, 30, 40 or 50 real past-paper questions,
+  selected by weakness, topic, mixed practice or saved mistakes;
+- worksheet re-upload, marking and automatic progress updates.
+
+Researchers prepare the practice bank at **Research → Question bank** by
+uploading one ZIP containing Cambridge-style question-paper/mark-scheme pairs,
+for example `0606_s24_qp_11.pdf` and `0606_s24_ms_11.pdf`. Sumkora pairs the
+files, separates top-level questions while keeping dependent subparts
+together, extracts the original PDF question/answer assets, classifies them
+and exposes uncertain items for human review. A separate manual sorting step
+is not required.
+
 Add the deterministic longitudinal demo with:
 
 ```bash

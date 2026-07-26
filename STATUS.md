@@ -76,9 +76,27 @@ Updated: 26 July 2026
 - Removed internal corrected-mapping wording from the student report.
 - Rendered and inspected student and research PDFs with Sumkora footers.
 
+### Student learning loop and question bank
+
+- Added clickable skill detail pages with longitudinal percentage graphs,
+  detailed/estimated markers, outcome bars and contributing-question evidence.
+- Added the automatic Mistake Book, status tracking and separate printable
+  question/answer PDFs.
+- Added targeted 10–50 question worksheets, repeat avoidance, difficulty and
+  calculator filters, separate answer booklets and completed-work re-upload.
+- Added a researcher ZIP importer for Cambridge-style question paper and mark
+  scheme pairs, source-preserving PDF extraction, deterministic classification
+  and review controls.
+- Added English/Chinese UI and model-feedback fields for the complete learning
+  loop. MathJax is now served locally rather than from a public CDN so formulas
+  do not depend on a blocked international script host.
+- Added a compatibility migration that changes old seeded assignment titles
+  from the previous product name to Sumkora without changing accounts,
+  sessions, uploads or marks.
+
 ## Test results
 
-- `.venv/bin/python -m pytest -q`: 33 passed.
+- `.venv/bin/python -m pytest -q`: 35 passed.
 - `.venv/bin/python scripts/regression_checks.py`: 10 checks passed.
 - `.venv/bin/python scripts/demo_flow.py`: completed and finalized a demo
   submission.
@@ -92,6 +110,10 @@ Updated: 26 July 2026
 - Whole-document validator tests cover invalid evidence pages, contradictory
   positive marks, null/ungraded handling, provider repair, audit correction
   and complete audit coverage.
+- Learning-loop tests cover skill detail, Mistake Book PDFs, targeted worksheet
+  PDFs/routes and safe ZIP question-bank ingestion.
+- A real 0606 question-paper/mark-scheme pair imported into an isolated
+  database as 12 ready questions totalling 80 marks.
 
 ## Intentionally retained legacy identifiers
 

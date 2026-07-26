@@ -412,16 +412,67 @@ STRINGS = {
 TOPIC_ZH = {
     "Number": "数",
     "Algebra": "代数",
+    "Algebra and graphs": "代数与图像",
+    "Equations, inequalities and graphs": "方程、不等式与图像",
+    "Quadratics and functions": "二次函数与函数",
+    "Logarithmic and exponential functions": "对数与指数函数",
     "Geometry": "几何",
     "Mensuration": "测量",
     "Coordinates": "坐标",
+    "Coordinate geometry": "坐标几何",
     "Trigonometry": "三角",
     "Vectors": "向量",
+    "Calculus": "微积分",
+    "Series": "数列与级数",
+    "Binomial theorem": "二项式定理",
+    "Circular measure": "弧度制",
+    "Polynomials": "多项式",
+    "Permutations and combinations": "排列与组合",
     "Statistics": "统计",
     "Probability": "概率",
     "Graphs": "图像",
     "Functions": "函数",
     "Sequences": "数列",
+    "Unclassified": "待分类",
+}
+
+SKILL_ZH = {
+    "algebraic manipulation": "代数式运算",
+    "equations and inequalities": "方程与不等式",
+    "functions and graphs": "函数与图像",
+    "coordinate geometry": "坐标几何",
+    "circular measure": "弧度制",
+    "trigonometric identities and equations": "三角恒等式与方程",
+    "trigonometric graphs": "三角函数图像",
+    "differentiation": "微分",
+    "integration": "积分",
+    "kinematics": "运动学",
+    "binomial theorem": "二项式定理",
+    "vectors in two dimensions": "二维向量",
+    "simultaneous equations": "联立方程",
+    "solving equations": "解方程",
+    "solving logarithmic and exponential equations": "解对数与指数方程",
+    "discriminant conditions": "判别式条件",
+    "unclassified": "待分类",
+}
+
+SKILL_STATUS_LABELS = {
+    "en": {
+        "strong": "Strong",
+        "improving": "Improving",
+        "early_signal": "Early signal",
+        "recurring_concern": "Recurring concern",
+        "concern": "Needs attention",
+        "untested": "Not yet covered",
+    },
+    "zh": {
+        "strong": "强项",
+        "improving": "正在进步",
+        "early_signal": "初步迹象",
+        "recurring_concern": "持续薄弱",
+        "concern": "需要关注",
+        "untested": "尚未覆盖",
+    },
 }
 
 
@@ -457,6 +508,20 @@ def topic_label(lang: str, topic: str) -> str:
     if lang == "zh":
         return TOPIC_ZH.get(topic, topic)
     return topic
+
+
+def skill_label(lang: str, skill: str) -> str:
+    cleaned = (skill or "").replace("_", " ")
+    if lang == "zh":
+        return SKILL_ZH.get(cleaned.lower(), cleaned)
+    return cleaned
+
+
+def skill_status_label(lang: str, status: str) -> str:
+    key = (status or "").replace(" ", "_").lower()
+    return SKILL_STATUS_LABELS.get(lang, SKILL_STATUS_LABELS["en"]).get(
+        key, key.replace("_", " ").capitalize()
+    )
 
 
 QUESTION_TYPE_LABELS = {

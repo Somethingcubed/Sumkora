@@ -4,7 +4,7 @@
 <div class="research-shell">
   <div class="flex flex-wrap justify-between items-start gap-4">
     <div><p class="text-xs uppercase tracking-[0.22em] text-indigo-300">Private research workbench</p><h1 class="text-3xl font-bold mt-2 text-white">Research overview</h1><p class="text-slate-400 mt-2">Inspect model performance, human labels, experiments, and longitudinal evidence.</p></div>
-    <div class="flex gap-2"><a href="/research/experiments/new" class="bg-indigo-300 text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold">New experiment</a><a href="/research/export?dataset=skill_observations&format=jsonl&mode=pseudonymized" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">Export data</a></div>
+    <div class="flex gap-2"><a href="/research/question-bank" class="bg-indigo-300 text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold">Question bank</a><a href="/research/experiments/new" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">New experiment</a><a href="/research/export?dataset=skill_observations&format=jsonl&mode=pseudonymized" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">Export data</a></div>
   </div>
   <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mt-7">
     {% for label, value in [('Attempts',overview.attempts),('Responses',overview.question_responses),('Criteria',overview.criterion_decisions),('OCR runs',overview.ocr_runs),('Grading runs',overview.grading_runs),('Corrections',overview.human_corrections),('Low confidence',overview.uncertain_decisions),('Failed',overview.failed_jobs),('Active experiments',overview.active_experiments),('Completed experiments',overview.completed_experiments)] %}

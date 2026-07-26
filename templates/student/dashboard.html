@@ -12,7 +12,7 @@
       <p class="text-slate-600 mt-4 leading-7">{{ tr('Upload your completed work. A mark scheme is optional and unlocks detailed marking.', '上传你已完成的答卷；评分标准为选填，上传后可获得详细批改。') }}</p>
       <a href="/student/analyse" class="button button-primary mt-6">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
     </div>
-    <ol class="space-y-3" aria-label="Files needed">
+    <ol class="space-y-3" aria-label="{{ tr('Files needed', '所需文件') }}">
       {% for title, copy in [
         (tr('Completed work','已完成的答卷'),tr('Required: your complete handwritten or typed paper','必填：完整的手写或电子答卷')),
         (tr('Mark scheme','评分标准'),tr('Optional: add it for exact question-by-question marking','选填：上传后可获得逐题详细批改'))
@@ -74,7 +74,7 @@
       </div>
       <div class="grid md:grid-cols-2 gap-3 mt-4">
         {% for item in skill_profile.strengths[:4] %}
-        <div class="rounded-xl border border-slate-200 p-4"><div class="flex justify-between gap-3"><p class="font-medium">{{ item.skill }}</p><span class="badge badge-completed">{{ item.status.replace('_', ' ')|capitalize }}</span></div><p class="text-xs text-slate-500 mt-2">{{ count_label(item.evidence_count, 'observation') }} across {{ count_label(item.distinct_papers, 'paper') }}</p></div>
+        <a href="{{ skill_url(item.skill) }}" class="rounded-xl border border-slate-200 p-4 hover:border-indigo-400 group"><div class="flex justify-between gap-3"><p class="font-medium group-hover:text-indigo-700">{{ skill_label(item.skill) }}</p><span class="badge badge-completed">{{ skill_status_label(item.status) }}</span></div><p class="text-xs text-slate-500 mt-2">{{ item.evidence_count }} {{ tr('observations', '次记录') }} · {{ item.distinct_papers }} {{ tr('papers', '份试卷') }}</p></a>
         {% else %}<p class="md:col-span-2 text-sm text-slate-500">{{ tr('Complete more papers to build a reliable picture of your strengths.', '完成更多试卷后，系统才能更可靠地判断你的强项。') }}</p>{% endfor %}
       </div>
     </section>
@@ -85,9 +85,9 @@
       <p class="eyebrow">{{ tr('Focus next', '下一步重点') }}</p>
       {% if skill_profile.concerns %}
       {% set concern = skill_profile.concerns[0] %}
-      <h2 class="text-xl font-semibold mt-2">{{ concern.skill }}</h2>
-      <p class="text-sm text-slate-500 mt-2">{{ concern.status.replace('_', ' ')|capitalize }} across {{ count_label(concern.distinct_papers, 'paper') }}.</p>
-      <a href="/student/skills" class="inline-block text-sm font-semibold text-indigo-600 mt-4">{{ tr('See supporting evidence', '查看相关证据') }}</a>
+      <h2 class="text-xl font-semibold mt-2">{{ skill_label(concern.skill) }}</h2>
+      <p class="text-sm text-slate-500 mt-2">{{ concern.distinct_papers }} {{ tr('papers provide supporting evidence.', '份试卷提供了相关证据。') }}</p>
+      <a href="{{ skill_url(concern.skill) }}" class="inline-block text-sm font-semibold text-indigo-600 mt-4">{{ tr('See supporting evidence', '查看相关证据') }}</a>
       {% else %}
       <h2 class="text-lg font-semibold mt-2">{{ tr('Keep building evidence', '继续积累学习证据') }}</h2>
       <p class="text-sm text-slate-500 mt-2">{{ tr('No recurring concern is clear yet.', '目前还没有明确的重复性问题。') }}</p>
@@ -97,6 +97,8 @@
       <h2 class="font-semibold">{{ tr('Useful next steps', '建议的下一步') }}</h2>
       <div class="mt-4 space-y-3 text-sm">
         <a class="block text-indigo-600 font-medium" href="/student/compare">{{ tr('Compare completed papers', '对比已完成的试卷') }}</a>
+        <a class="block text-indigo-600 font-medium" href="/student/mistakes">{{ tr('Review your Mistake Book', '复习错题本') }}</a>
+        <a class="block text-indigo-600 font-medium" href="/student/practice">{{ tr('Create targeted practice', '生成针对练习') }}</a>
         <a class="block text-indigo-600 font-medium" href="/student/report">{{ tr('Download progress report', '下载学习进展报告') }}</a>
       </div>
     </section>

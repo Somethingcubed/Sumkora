@@ -3,13 +3,15 @@ import json
 import csv
 import hashlib
 import io
+import mimetypes
 import sqlite3
 import uuid
+import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
 from time import monotonic
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -63,6 +65,8 @@ from i18n import (
     get_lang,
     other_lang,
     role_label,
+    skill_label,
+    skill_status_label,
     status_label,
     strings,
     question_type_label,
@@ -79,6 +83,24 @@ from reports import (
     research_experiment_report,
     safe_filename,
     self_service_assessment_report,
+)
+from learning import (
+    create_practice_set,
+    mistake_book,
+    mistake_book_pdf,
+    practice_pdf,
+    practice_set_detail,
+    practice_sets,
+    question_bank_inventory,
+    skill_detail,
+    skill_url,
+    update_mistake_status,
+)
+from question_bank import (
+    ingest_question_bank_zip,
+    paper_bank_rows,
+    review_questions,
+    update_question_review,
 )
 from self_service import (
     SELF_SERVICE_STAGES,
@@ -109,6 +131,7 @@ app = FastAPI(
 )
 templates = Jinja2Templates(directory="templates")
 os.makedirs("static", exist_ok=True)
+mimetypes.add_type("font/woff", ".woff")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
@@ -181,7 +204,7 @@ async def security_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
     )
     return response
@@ -203,9 +226,12 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "type_label": lambda ty: type_label(lang, ty),
         "role_label": lambda r: role_label(lang, r),
         "topic_label": lambda top: topic_label(lang, top),
+        "skill_label": lambda skill: skill_label(lang, skill),
+        "skill_status_label": lambda status: skill_status_label(lang, status),
         "question_type_label": lambda key: question_type_label(lang, key),
         "count_label": count_label,
         "student_explanation": student_explanation,
+        "skill_url": skill_url,
         "current_path": request.url.path,
         "is_researcher": bool(
             context.get("user")
@@ -2229,6 +2255,216 @@ def student_skills(request: Request):
     )
 
 
+@app.get("/student/skills/detail", response_class=HTMLResponse)
+def student_skill_detail(request: Request, skill: str = ""):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    detail = skill_detail(user["id"], skill)
+    if not detail:
+        return RedirectResponse("/student/skills", status_code=303)
+    return render(
+        request,
+        "student/skill_detail.html",
+        {"user": user, "detail": detail},
+    )
+
+
+@app.get("/student/mistakes", response_class=HTMLResponse)
+def student_mistakes(
+    request: Request,
+    topic: str = "",
+    status: str = "",
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "student/mistakes.html",
+        {
+            "user": user,
+            "book": mistake_book(user["id"], topic=topic, status=status),
+        },
+    )
+
+
+@app.post("/student/mistakes/{entry_id}/status")
+def student_mistake_status(
+    request: Request,
+    entry_id: int,
+    status: str = Form(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    update_mistake_status(user["id"], entry_id, status)
+    return RedirectResponse("/student/mistakes", status_code=303)
+
+
+@app.get("/student/mistakes/{kind}.pdf")
+def student_mistake_book_pdf(request: Request, kind: str):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    if kind not in {"questions", "answers"}:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    content = mistake_book_pdf(user["id"], kind, get_lang(request))
+    suffix = "questions" if kind == "questions" else "answers"
+    return pdf_response(content, f"sumkora-mistake-book-{suffix}.pdf")
+
+
+@app.get("/student/practice", response_class=HTMLResponse)
+def student_practice(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "student/practice.html",
+        {
+            "user": user,
+            "sets": practice_sets(user["id"]),
+            "bank": question_bank_inventory(),
+        },
+    )
+
+
+@app.post("/student/practice")
+def student_create_practice(
+    request: Request,
+    count: int = Form(...),
+    selection_mode: str = Form("weaknesses"),
+    topic: str = Form(""),
+    difficulty: str = Form("mixed"),
+    calculator_policy: str = Form("any"),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    set_id = create_practice_set(
+        user["id"],
+        count=count,
+        selection_mode=selection_mode,
+        topic=topic,
+        difficulty=difficulty,
+        calculator_policy=calculator_policy,
+        lang=get_lang(request),
+    )
+    return RedirectResponse(f"/student/practice/{set_id}", status_code=303)
+
+
+@app.get("/student/practice/{set_id}", response_class=HTMLResponse)
+def student_practice_detail(request: Request, set_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    detail = practice_set_detail(user["id"], set_id)
+    if not detail:
+        return RedirectResponse("/student/practice", status_code=303)
+    return render(
+        request,
+        "student/practice_detail.html",
+        {"user": user, "practice": detail},
+    )
+
+
+@app.get("/student/practice/{set_id}/{kind}.pdf")
+def student_practice_pdf(request: Request, set_id: int, kind: str):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    if kind not in {"questions", "answers"}:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    content = practice_pdf(user["id"], set_id, kind, get_lang(request))
+    if not content:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return pdf_response(
+        content,
+        f"sumkora-practice-{set_id}-{kind}.pdf",
+    )
+
+
+@app.post("/student/practice/{set_id}/submit")
+async def student_practice_submit(
+    request: Request,
+    set_id: int,
+    background_tasks: BackgroundTasks,
+    completed_work: UploadFile = File(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    detail = practice_set_detail(user["id"], set_id)
+    if not detail:
+        return RedirectResponse("/student/practice", status_code=303)
+    payload = await completed_work.read()
+    if (
+        not payload
+        or len(payload) > config.MAX_UPLOAD_BYTES
+        or not is_valid_pdf(payload)
+    ):
+        return RedirectResponse(
+            f"/student/practice/{set_id}?upload_error=1",
+            status_code=303,
+        )
+    answer_key = practice_pdf(user["id"], set_id, "answers", get_lang(request))
+    if not answer_key:
+        return RedirectResponse(f"/student/practice/{set_id}", status_code=303)
+    try:
+        paper_id, version_id = create_student_paper_draft(
+            user["id"],
+            completed_work.filename or f"practice-{set_id}.pdf",
+            payload,
+            f"sumkora-practice-{set_id}-answers.pdf",
+            answer_key,
+        )
+    except ValueError:
+        return RedirectResponse(
+            f"/student/practice/{set_id}?upload_error=1",
+            status_code=303,
+        )
+    execute(
+        """
+        UPDATE student_papers
+        SET title = ?, source_type = 'practice', updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            f"Practice: {detail['set']['title']}",
+            datetime.now().isoformat(),
+            paper_id,
+        ),
+    )
+    execute(
+        """
+        UPDATE practice_sets
+        SET status = 'completed', analysis_paper_id = ?, submitted_at = ?,
+            updated_at = ?
+        WHERE id = ? AND student_id = ?
+        """,
+        (
+            paper_id,
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+            set_id,
+            user["id"],
+        ),
+    )
+    version = _owned_analysis_version(user["id"], version_id)
+    confirm_version(
+        user["id"],
+        version_id,
+        parse_json(version["detected_metadata"], {}),
+        parse_json(version["question_plan"], []),
+    )
+    background_tasks.add_task(run_self_service_analysis, version_id)
+    return RedirectResponse(
+        f"/student/analysis/{version_id}/processing",
+        status_code=303,
+    )
+
+
 @app.get(
     "/student/results/{submission_id}/questions/{question_id}",
     response_class=HTMLResponse,
@@ -2464,6 +2700,81 @@ def research_ingest_paper_packs(request: Request):
         (user["id"], json.dumps(imported), datetime.now().isoformat()),
     )
     return RedirectResponse("/research", status_code=303)
+
+
+@app.get("/research/question-bank", response_class=HTMLResponse)
+def research_question_bank(request: Request):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    return render(
+        request,
+        "research/question_bank.html",
+        {
+            "user": user,
+            "inventory": question_bank_inventory(),
+            "papers": paper_bank_rows(),
+            "questions": review_questions(),
+            "imported": request.query_params.get("imported"),
+            "warnings": request.query_params.get("warnings"),
+            "error": request.query_params.get("error"),
+        },
+    )
+
+
+@app.post("/research/question-bank/import")
+async def research_question_bank_import(
+    request: Request,
+    archive: UploadFile = File(...),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    payload = await archive.read()
+    try:
+        result = ingest_question_bank_zip(
+            payload,
+            archive.filename or "question-bank.zip",
+        )
+    except (ValueError, zipfile.BadZipFile) as exc:
+        return RedirectResponse(
+            f"/research/question-bank?error={quote(str(exc), safe='')}",
+            status_code=303,
+        )
+    execute(
+        """
+        INSERT INTO audit_logs (actor_id, action, entity_type, metadata, created_at)
+        VALUES (?, 'question_bank_import', 'paper_pack', ?, ?)
+        """,
+        (user["id"], json.dumps(result), datetime.now().isoformat()),
+    )
+    ready = sum(item["ready"] for item in result["papers"])
+    return RedirectResponse(
+        f"/research/question-bank?imported={ready}&warnings={len(result['warnings'])}",
+        status_code=303,
+    )
+
+
+@app.post("/research/question-bank/questions/{question_id}")
+def research_question_bank_review(
+    request: Request,
+    question_id: int,
+    topic: str = Form(...),
+    skills: str = Form(""),
+    difficulty: str = Form("standard"),
+    review_status: str = Form("needs_review"),
+):
+    user = require_researcher(request)
+    if not user:
+        return redirect_login()
+    update_question_review(
+        question_id,
+        topic=topic,
+        skills=skills,
+        difficulty=difficulty,
+        review_status=review_status,
+    )
+    return RedirectResponse("/research/question-bank", status_code=303)
 
 
 @app.post("/research/decisions/{decision_id}/correct")

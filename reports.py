@@ -115,14 +115,21 @@ def report_styles(lang="en"):
 
 def draw_footer(canvas, doc):
     canvas.saveState()
-    canvas.setFont("Helvetica", 8)
+    lang = getattr(doc, "report_lang", "en")
+    canvas.setFont(font_for_lang(lang), 8)
     canvas.setFillColor(colors.HexColor("#64748b"))
     canvas.drawString(1.5 * cm, 1.0 * cm, "Sumkora")
-    canvas.drawRightString(A4[0] - 1.5 * cm, 1.0 * cm, f"Page {doc.page}")
+    page_label = "第" if lang == "zh" else "Page "
+    page_suffix = "页" if lang == "zh" else ""
+    canvas.drawRightString(
+        A4[0] - 1.5 * cm,
+        1.0 * cm,
+        f"{page_label}{doc.page}{page_suffix}",
+    )
     canvas.restoreState()
 
 
-def build_pdf(story, title):
+def build_pdf(story, title, lang="en"):
     buffer = BytesIO()
     doc = BaseDocTemplate(
         buffer,
@@ -133,6 +140,7 @@ def build_pdf(story, title):
         bottomMargin=1.6 * cm,
         title=title,
     )
+    doc.report_lang = lang
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="normal")
     doc.addPageTemplates([PageTemplate(id="page", frames=[frame], onPage=draw_footer)])
     doc.build(story)
@@ -286,7 +294,7 @@ def profile_report(student_id, lang="en", variant="teacher", teacher_id=None):
             type_rows.append([question_type_label(lang, item["key"]), f"{item['accuracy']}%", item["question_count"]])
         story.append(table(type_rows, widths=[7 * cm, 4 * cm, 4 * cm], lang=lang))
 
-    return build_pdf(story, title)
+    return build_pdf(story, title, lang)
 
 
 def assessment_report(submission_id, lang="en", variant="teacher"):
@@ -359,7 +367,7 @@ def assessment_report(submission_id, lang="en", variant="teacher"):
             if diagnostics:
                 story.append(p(f"{row['label']}: {' | '.join(diagnostics)}", styles["small"]))
 
-    return build_pdf(story, title)
+    return build_pdf(story, title, lang)
 
 
 def self_service_assessment_report(
@@ -369,6 +377,7 @@ def self_service_assessment_report(
     lang: str = "en",
 ):
     styles = report_styles(lang)
+    tr = lambda english, chinese: chinese if lang == "zh" else english
     paper = query_one(
         """
         SELECT sp.*, u.name AS student_name
@@ -410,14 +419,26 @@ def self_service_assessment_report(
         """,
         (version["id"],),
     )
-    title = f"Paper analysis: {paper['title']}"
+    title = (
+        f"试卷分析：{paper['title']}"
+        if lang == "zh"
+        else f"Paper analysis: {paper['title']}"
+    )
     story = [p(title, styles["title"])]
     story.append(
         p(
             (
-                f"Student: {paper['student_name']} | Analysis v{version['version_number']} | "
-                f"{paper['syllabus_code']} {paper['paper_number'] or 'custom paper'} | "
-                f"Generated: {datetime.now().strftime('%Y-%m-%d')}"
+                (
+                    f"学生：{paper['student_name']} | 分析版本 {version['version_number']} | "
+                    f"{paper['syllabus_code']} {paper['paper_number'] or '自定义试卷'} | "
+                    f"生成日期：{datetime.now().strftime('%Y-%m-%d')}"
+                )
+                if lang == "zh"
+                else (
+                    f"Student: {paper['student_name']} | Analysis v{version['version_number']} | "
+                    f"{paper['syllabus_code']} {paper['paper_number'] or 'custom paper'} | "
+                    f"Generated: {datetime.now().strftime('%Y-%m-%d')}"
+                )
             ),
             styles["small"],
         )
@@ -425,20 +446,24 @@ def self_service_assessment_report(
     story.append(Spacer(1, 8))
     summary = [
         [
-            "Estimated score"
+            tr("Estimated score", "估计分数")
             if version["assessment_mode"] == "estimate"
-            else "Score",
+            else tr("Score", "分数"),
             (
-                ("approximately " if version["assessment_mode"] == "estimate" else "")
+                (
+                    tr("approximately ", "约 ")
+                    if version["assessment_mode"] == "estimate"
+                    else ""
+                )
                 + f"{version['provisional_score']} / {paper['maximum_marks']}"
             ),
         ],
         [
-            "Score range",
+            tr("Score range", "分数范围"),
             f"{version['confirmed_min_score']} - {version['possible_max_score']}",
         ],
-        ["Maximum mark", paper["maximum_marks"]],
-        ["Questions analysed", len(rows)],
+        [tr("Maximum mark", "满分"), paper["maximum_marks"]],
+        [tr("Questions analysed", "已分析题目"), len(rows)],
     ]
     story.append(table(summary, widths=[7 * cm, 8 * cm], header=False, lang=lang))
 
@@ -458,28 +483,59 @@ def self_service_assessment_report(
             strengths.append(label)
         elif accuracy < 60:
             needs.append(label)
-    story.append(p("What went well", styles["h2"]))
-    story.append(p(", ".join(strengths[:8]) or "More evidence is needed.", styles["body"]))
-    story.append(p("What to work on", styles["h2"]))
-    story.append(p(", ".join(needs[:8]) or "No clear priority from this paper.", styles["body"]))
+    story.append(p(tr("What went well", "做得好的方面"), styles["h2"]))
+    story.append(
+        p(
+            ", ".join(strengths[:8])
+            or tr("More evidence is needed.", "需要更多证据。"),
+            styles["body"],
+        )
+    )
+    story.append(p(tr("What to work on", "需要改进的方面"), styles["h2"]))
+    story.append(
+        p(
+            ", ".join(needs[:8])
+            or tr(
+                "No clear priority from this paper.",
+                "本次试卷尚未显示明确的优先改进项。",
+            ),
+            styles["body"],
+        )
+    )
 
-    story.append(p("Question-by-question analysis", styles["h2"]))
-    data = [["Question", "Topic / skill", "Mark", "What this shows"]]
+    story.append(p(tr("Question-by-question analysis", "逐题分析"), styles["h2"]))
+    data = [[
+        tr("Question", "题目"),
+        tr("Topic / skill", "知识点 / 技能"),
+        tr("Mark", "得分"),
+        tr("What this shows", "分析说明"),
+    ]]
     for row in rows:
         mark = (
             row["human_mark"]
             if row["human_mark"] is not None
             else row["awarded_mark"]
         )
-        explanation = student_explanation(row["ai_rationale"])
-        if row["error_mechanism"]:
-            explanation = f"{explanation} Lost marks: {row['error_mechanism']}"
+        explanation = (
+            row["ai_rationale_zh"]
+            if lang == "zh" and row["ai_rationale_zh"]
+            else student_explanation(row["ai_rationale"])
+        )
+        mechanism = (
+            row["error_mechanism_zh"]
+            if lang == "zh" and row["error_mechanism_zh"]
+            else row["error_mechanism"]
+        )
+        if mechanism:
+            explanation = (
+                f"{explanation} {tr('Lost marks:', '失分原因：')} {mechanism}"
+            )
         data.append(
             [
                 row["question_label"],
                 f"{row['topic']} / {row['skill']}",
                 (
-                    "Needs review"
+                    tr("Needs review", "需要复核")
                     if mark is None or row["assessment_status"] == "ungraded"
                     else f"{mark}/{row['maximum_marks']}"
                 ),
@@ -493,21 +549,29 @@ def self_service_assessment_report(
             lang=lang,
         )
     )
-    story.append(p("Interpretation", styles["h2"]))
+    story.append(p(tr("Interpretation", "结果说明"), styles["h2"]))
     story.append(
         p(
             (
-                "This is an estimated assessment because no official mark scheme "
-                "was supplied. Treat the score as a range; the learning feedback "
-                "is based on visible methods."
+                tr(
+                    "This is an estimated assessment because no official mark scheme "
+                    "was supplied. Treat the score as a range; the learning feedback "
+                    "is based on visible methods.",
+                    "由于未提供官方评分标准，本次为估分分析。请将分数视为范围；"
+                    "学习反馈依据答卷中可见的解题过程。",
+                )
                 if version["assessment_mode"] == "estimate"
-                else "Scores with uncertainty are ranges, not hidden precision. "
-                "Reanalyse with a clearer scan or review the paper when evidence is weak."
+                else tr(
+                    "Scores with uncertainty are ranges, not hidden precision. "
+                    "Reanalyse with a clearer scan or review the paper when evidence is weak.",
+                    "存在不确定性的分数会显示为范围，而不会假装精确。证据较弱时，"
+                    "请使用更清晰的扫描件重新分析或人工复核。",
+                )
             ),
             styles["body"],
         )
     )
-    return build_pdf(story, title)
+    return build_pdf(story, title, lang)
 
 
 def research_experiment_report(experiment_id: int):
