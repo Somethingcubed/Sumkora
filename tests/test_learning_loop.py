@@ -195,6 +195,9 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert practice_pdf(student_id, set_id, "answers", "zh").startswith(b"%PDF")
 
     cookies = login(email)
+    dashboard = client.get("/student", cookies=cookies)
+    assert "/static/style.css?v=20260726-2" in dashboard.text
+    assert 'width="24" height="24" fill="none"' in dashboard.text
     assert client.get(
         "/student/skills/detail?skill=trigonometric%20graphs", cookies=cookies
     ).status_code == 200

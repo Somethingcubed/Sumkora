@@ -206,6 +206,8 @@ async def security_middleware(request: Request, call_next):
         "script-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
     )
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return response
 
 
