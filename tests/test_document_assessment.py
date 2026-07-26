@@ -81,6 +81,13 @@ def test_provider_json_parser_repairs_unescaped_tex_without_changing_json_escape
     assert parsed["rationale"] == "Line one.\nLine two."
 
 
+def test_provider_json_parser_accepts_literal_newline_inside_string():
+    parsed = document_assessment._parse_provider_json(
+        '{"rationale":"Line one.\nLine two."}'
+    )
+    assert parsed["rationale"] == "Line one.\nLine two."
+
+
 def test_validator_preserves_ungraded_as_null_instead_of_zero():
     result = valid_assessment("estimate")
     item = result["questions"][0]
@@ -189,7 +196,10 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
     monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
-    result, metadata = document_assessment.assess_documents(str(answer))
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="gpt-5.6-terra",
+    )
     assert len(calls) == 2
     assert result["estimated_score"] == 2
     assert metadata["attempts"] == 2
@@ -234,6 +244,7 @@ def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
     monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
     result, _ = document_assessment.assess_documents(
         str(answer),
+        model="gpt-5.6-terra",
         completed_work_text=(
             "--- COMPLETED STUDENT WORK, PAGE 1 ---\n"
             "Q1 Student Work: 2x"
@@ -248,6 +259,49 @@ def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
     assert "input_file" not in content[0]["text"]
     assert calls[0][1]["retries"] == 0
     assert result["questions"][0]["question_latex"] == r"Differentiate \(x^2\)."
+
+
+def test_qwen_receives_complete_ocr_transcript_without_rendered_images(
+    tmp_path, monkeypatch
+):
+    answer = tmp_path / "answer.pdf"
+    make_pdf(answer, "Scanned answer placeholder")
+    calls = []
+
+    def fake_post(_url, payload, **_kwargs):
+        calls.append(payload)
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "qwen-transcript",
+            "model": "qwen3-vl-plus",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps(body)},
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="qwen3-vl-plus",
+        completed_work_text=(
+            "--- COMPLETED STUDENT WORK, PAGE 1 ---\n"
+            "Q1 Student Work: 2x"
+        ),
+    )
+
+    content = calls[0]["messages"][0]["content"]
+    assert all(part["type"] == "text" for part in content)
+    assert "Student Work: 2x" in content[1]["text"]
+    assert calls[0]["max_tokens"] == 16384
+    assert metadata["provider"] == "cxsee_qwen_vision"
+    assert metadata["render_dpi"] is None
+    assert result["estimated_score"] == 2
 
 
 def test_independent_audit_corrects_semantic_mark_and_recalculates_total():

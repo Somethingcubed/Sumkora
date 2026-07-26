@@ -431,7 +431,14 @@ def _parse_provider_json(text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        parsed = json.loads(_repair_json_string_escapes(text))
+        repaired = _repair_json_string_escapes(text)
+        try:
+            parsed = json.loads(repaired)
+        except json.JSONDecodeError:
+            # Some compatible providers leave literal newlines or tabs inside
+            # otherwise valid JSON strings. Python's non-strict parser accepts
+            # those control characters after TeX backslashes have been fixed.
+            parsed = json.loads(repaired, strict=False)
     if not isinstance(parsed, dict):
         raise AssessmentValidationError(
             ["structured assessment response was not a JSON object"]
@@ -469,22 +476,31 @@ def _call_structured_document_model(
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt + schema_instruction},
         ]
-        for index, path in enumerate(document_paths):
-            label = (
-                "Completed student work"
-                if index == 0
-                else "Official mark scheme"
-            )
+        if document_texts:
             content.extend(
-                _render_document_image_parts(path, label=label, dpi=dpi)
+                {
+                    "type": "text",
+                    "text": f"=== {label} ===\n{text}",
+                }
+                for label, text in document_texts
             )
+        else:
+            for index, path in enumerate(document_paths):
+                label = (
+                    "Completed student work"
+                    if index == 0
+                    else "Official mark scheme"
+                )
+                content.extend(
+                    _render_document_image_parts(path, label=label, dpi=dpi)
+                )
         result = api_post_json(
             f"{cxsee_api_base()}/chat/completions",
             {
                 "model": model,
                 "messages": [{"role": "user", "content": content}],
                 "temperature": 0,
-                "max_tokens": 32768,
+                "max_tokens": 16384,
                 "response_format": {"type": "json_object"},
             },
             headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
@@ -513,7 +529,7 @@ def _call_structured_document_model(
             "usage": result.get("usage") or {},
             "response_id": result.get("id"),
             "model_version": result.get("model"),
-            "render_dpi": dpi,
+            "render_dpi": None if document_texts else dpi,
         }
 
     if model.startswith("gemini-"):
