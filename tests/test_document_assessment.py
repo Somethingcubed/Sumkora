@@ -70,6 +70,16 @@ def test_assessment_contract_requires_complete_latex_question_context():
     assert r"\frac" in prompt
 
 
+def test_provider_json_parser_repairs_unescaped_tex_without_changing_json_escapes():
+    payload = (
+        '{"question_latex":"Solve \\(x^2\\) using \\frac{1}{2}.",'
+        '"rationale":"Line one.\\nLine two."}'
+    )
+    parsed = document_assessment._parse_provider_json(payload)
+    assert parsed["question_latex"] == r"Solve \(x^2\) using \frac{1}{2}."
+    assert parsed["rationale"] == "Line one.\nLine two."
+
+
 def test_validator_preserves_ungraded_as_null_instead_of_zero():
     result = valid_assessment("estimate")
     item = result["questions"][0]
@@ -94,6 +104,27 @@ def test_validator_preserves_ungraded_as_null_instead_of_zero():
         validate_assessment(result, mode="estimate", completed_work_pages=2)
     assert "overall score range is incomplete" in str(exc.value)
     assert "ungraded but has an awarded mark" not in str(exc.value)
+
+
+def test_estimate_uses_visible_question_marks_not_inferred_full_paper_total():
+    result = valid_assessment("estimate")
+    result.update(
+        {
+            "total_max_marks": 127,
+            "estimated_score_min": 90,
+            "estimated_score": 100,
+            "estimated_score_max": 110,
+        }
+    )
+    validated = validate_assessment(
+        result,
+        mode="estimate",
+        completed_work_pages=2,
+    )
+    assert validated["total_max_marks"] == 3
+    assert validated["estimated_score"] == 2
+    assert validated["estimated_score_min"] == 0
+    assert validated["estimated_score_max"] == 3
 
 
 def test_validator_derives_detailed_range_from_uncertain_questions():
@@ -123,11 +154,13 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
         body = invalid if len(calls) == 1 else corrected
         return {
             "id": f"response-{len(calls)}",
-            "output": [
+            "model": "qwen3-vl-plus",
+            "choices": [
                 {
-                    "content": [
-                        {"type": "output_text", "text": json.dumps(body)}
-                    ]
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": f"```json\n{json.dumps(body)}\n```"
+                    },
                 }
             ],
             "usage": {"total_tokens": 10},
@@ -139,8 +172,15 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
     assert len(calls) == 2
     assert result["estimated_score"] == 2
     assert metadata["attempts"] == 2
-    repair_text = calls[1]["input"][0]["content"][0]["text"]
+    assert metadata["provider"] == "cxsee_qwen_vision"
+    assert metadata["response_id"] == "response-2"
+    repair_text = calls[1]["messages"][0]["content"][0]["text"]
     assert "invalid completed-work page" in repair_text
+    assert "follow this exact JSON Schema yourself" in repair_text
+    assert '"assessment_mode"' in repair_text
+    image_part = calls[1]["messages"][0]["content"][2]["image_url"]["url"]
+    assert image_part.startswith("data:image/jpeg;base64,")
+    assert calls[1]["response_format"] == {"type": "json_object"}
 
 
 def test_independent_audit_corrects_semantic_mark_and_recalculates_total():

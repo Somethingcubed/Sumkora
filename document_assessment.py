@@ -163,6 +163,60 @@ def _pdf_data_url(path: str) -> str:
     return "data:application/pdf;base64," + base64.b64encode(payload).decode("ascii")
 
 
+def _pdf_inline_part(path: str) -> dict[str, Any]:
+    return {
+        "inlineData": {
+            "mimeType": "application/pdf",
+            "data": base64.b64encode(Path(path).read_bytes()).decode("ascii"),
+        }
+    }
+
+
+def _render_document_image_parts(
+    path: str,
+    *,
+    label: str,
+    dpi: int,
+) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
+    with fitz.open(path) as document:
+        total = len(document)
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        for index, page in enumerate(document):
+            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            encoded = base64.b64encode(
+                pixmap.tobytes("jpeg", jpg_quality=88)
+            ).decode("ascii")
+            parts.extend(
+                [
+                    {
+                        "type": "text",
+                        "text": f"{label}, page {index + 1} of {total}:",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded}",
+                        },
+                    },
+                ]
+            )
+    return parts
+
+
+def _document_render_dpi(paths: list[str]) -> int:
+    pages = sum(_page_count(path) for path in paths)
+    if pages <= 4:
+        return 160
+    if pages <= 10:
+        return 130
+    if pages <= 20:
+        return 100
+    if pages <= 40:
+        return 75
+    return 60
+
+
 def _page_count(path: str) -> int:
     with fitz.open(path) as document:
         return len(document)
@@ -270,6 +324,265 @@ def _extract_response_text(result: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _extract_gemini_text(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for candidate in result.get("candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            if not isinstance(part, dict) or part.get("thought"):
+                continue
+            value = part.get("text")
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    if not parts:
+        reasons = [
+            str(candidate.get("finishReason") or "")
+            for candidate in result.get("candidates") or []
+            if isinstance(candidate, dict)
+        ]
+        reason = ", ".join(value for value in reasons if value) or "unknown"
+        raise RuntimeError(
+            f"Assessment provider returned no structured text (finish reason: {reason})."
+        )
+    return "\n".join(parts)
+
+
+def _strip_json_fence(text: str) -> str:
+    value = text.strip()
+    if not value.startswith("```"):
+        return value
+    lines = value.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _repair_json_string_escapes(text: str) -> str:
+    """Escape provider-emitted TeX commands without altering valid JSON escapes."""
+    repaired: list[str] = []
+    in_string = False
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == '"':
+            backslashes = 0
+            cursor = index - 1
+            while cursor >= 0 and text[cursor] == "\\":
+                backslashes += 1
+                cursor -= 1
+            if backslashes % 2 == 0:
+                in_string = not in_string
+            repaired.append(char)
+            index += 1
+            continue
+        if char != "\\" or not in_string or index + 1 >= length:
+            repaired.append(char)
+            index += 1
+            continue
+
+        next_char = text[index + 1]
+        if next_char in {'"', "\\", "/"}:
+            repaired.extend((char, next_char))
+            index += 2
+            continue
+        if (
+            next_char == "u"
+            and index + 5 < length
+            and all(
+                value in "0123456789abcdefABCDEF"
+                for value in text[index + 2 : index + 6]
+            )
+        ):
+            repaired.extend(text[index : index + 6])
+            index += 6
+            continue
+        if next_char in "bfnrt":
+            if index + 2 >= length or not text[index + 2].islower():
+                repaired.extend((char, next_char))
+                index += 2
+                continue
+
+        repaired.extend(("\\", "\\"))
+        index += 1
+    return "".join(repaired)
+
+
+def _parse_provider_json(text: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = json.loads(_repair_json_string_escapes(text))
+    if not isinstance(parsed, dict):
+        raise AssessmentValidationError(
+            ["structured assessment response was not a JSON object"]
+        )
+    return parsed
+
+
+def _thinking_budget(effort: str) -> int:
+    return {
+        "minimal": 512,
+        "low": 1024,
+        "medium": 4096,
+        "high": 8192,
+    }.get(effort, 4096)
+
+
+def _call_structured_document_model(
+    *,
+    model: str,
+    prompt: str,
+    schema: dict[str, Any],
+    document_paths: list[str],
+    reasoning_effort: str,
+) -> tuple[str, dict[str, Any]]:
+    schema_instruction = (
+        "\n\nYou must follow this exact JSON Schema yourself. Return every "
+        "required field with the exact property names and enum values. "
+        "Return one JSON object only, without Markdown fences or commentary. "
+        "Escape every backslash inside JSON strings.\n"
+        + json.dumps(schema, ensure_ascii=False)
+    )
+    if model.startswith("qwen"):
+        dpi = _document_render_dpi(document_paths)
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": prompt + schema_instruction},
+        ]
+        for index, path in enumerate(document_paths):
+            label = (
+                "Completed student work"
+                if index == 0
+                else "Official mark scheme"
+            )
+            content.extend(
+                _render_document_image_parts(path, label=label, dpi=dpi)
+            )
+        result = api_post_json(
+            f"{cxsee_api_base()}/chat/completions",
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": content}],
+                "temperature": 0,
+                "max_tokens": 32768,
+                "response_format": {"type": "json_object"},
+            },
+            headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
+            timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+            retries=config.CXSEE_MAX_RETRIES,
+        )
+        choices = result.get("choices") or []
+        message = (
+            choices[0].get("message") or {}
+            if choices and isinstance(choices[0], dict)
+            else {}
+        )
+        value = message.get("content")
+        if not isinstance(value, str) or not value.strip():
+            finish_reason = (
+                choices[0].get("finish_reason")
+                if choices and isinstance(choices[0], dict)
+                else "unknown"
+            )
+            raise RuntimeError(
+                "Assessment provider returned no structured text "
+                f"(finish reason: {finish_reason})."
+            )
+        return _strip_json_fence(value), {
+            "provider": "cxsee_qwen_vision",
+            "usage": result.get("usage") or {},
+            "response_id": result.get("id"),
+            "model_version": result.get("model"),
+            "render_dpi": dpi,
+        }
+
+    if model.startswith("gemini-"):
+        gateway_schema_instruction = (
+            "\n\nThe API gateway may not enforce responseJsonSchema. You must "
+            "therefore follow this exact JSON Schema yourself. Return every "
+            "required field with the exact property names and enum values. "
+            "Escape every backslash inside JSON strings.\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+        result = api_post_json(
+            (
+                f"{config.CXSEE_BASE_URL.rstrip('/')}/v1beta/models/"
+                f"{model}:generateContent"
+            ),
+            {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt + gateway_schema_instruction},
+                            *[_pdf_inline_part(path) for path in document_paths],
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0,
+                    "maxOutputTokens": 32768,
+                    "thinkingConfig": {
+                        "thinkingBudget": _thinking_budget(reasoning_effort),
+                        "includeThoughts": False,
+                    },
+                    "responseMimeType": "application/json",
+                    "responseJsonSchema": schema,
+                },
+            },
+            headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
+            timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+            retries=config.CXSEE_MAX_RETRIES,
+        )
+        return _strip_json_fence(_extract_gemini_text(result)), {
+            "provider": "cxsee_gemini_native",
+            "usage": result.get("usageMetadata") or {},
+            "response_id": result.get("responseId"),
+            "model_version": result.get("modelVersion"),
+        }
+
+    content: list[dict[str, Any]] = [
+        {"type": "input_text", "text": prompt},
+        *[
+            {
+                "type": "input_file",
+                "filename": Path(path).name,
+                "file_data": _pdf_data_url(path),
+            }
+            for path in document_paths
+        ],
+    ]
+    result = api_post_json(
+        f"{cxsee_api_base()}/responses",
+        {
+            "model": model,
+            "input": [{"role": "user", "content": content}],
+            "reasoning": {"effort": reasoning_effort},
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "sumkora_structured_document_result",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+            "store": False,
+        },
+        headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
+        timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+        retries=config.CXSEE_MAX_RETRIES,
+    )
+    return _strip_json_fence(_extract_response_text(result)), {
+        "provider": "cxsee_responses",
+        "usage": result.get("usage") or {},
+        "response_id": result.get("id"),
+        "model_version": result.get("model"),
+    }
+
+
 def _as_number(value: Any) -> float | None:
     if value is None:
         return None
@@ -296,7 +609,7 @@ def validate_assessment(
     labels: set[str] = set()
     graded_marks = 0.0
     known_maximum = 0.0
-    uncertain_available = 0.0
+    ungraded_available = 0.0
     normalized_questions = []
     for index, original in enumerate(questions):
         if not isinstance(original, dict):
@@ -379,13 +692,15 @@ def validate_assessment(
         normalized_questions.append(item)
         if maximum is not None and maximum > 0:
             known_maximum += maximum
-            if status == "uncertain":
-                uncertain_available += maximum
+            if status == "ungraded":
+                ungraded_available += maximum
         if mark is not None and status != "ungraded":
             graded_marks += mark
 
     total_maximum = _as_number(assessment.get("total_max_marks"))
-    if total_maximum is None:
+    if mode == "estimate" and known_maximum:
+        total_maximum = known_maximum
+    elif total_maximum is None:
         total_maximum = known_maximum or None
     elif known_maximum and abs(total_maximum - known_maximum) > 0.51:
         errors.append(
@@ -396,6 +711,28 @@ def validate_assessment(
     score_min = _as_number(assessment.get("estimated_score_min"))
     score = _as_number(assessment.get("estimated_score"))
     score_max = _as_number(assessment.get("estimated_score_max"))
+    if mode == "estimate" and known_maximum:
+        score = graded_marks
+        score_min = sum(
+            float(item["awarded_mark"])
+            for item in normalized_questions
+            if item["awarded_mark"] is not None
+            and item["status"] in {"estimated", "graded"}
+        )
+        score_max = min(
+            known_maximum,
+            graded_marks
+            + sum(
+                max(
+                    0.0,
+                    float(item["maximum_marks"] or 0)
+                    - float(item["awarded_mark"] or 0),
+                )
+                for item in normalized_questions
+                if item["status"] == "uncertain"
+            )
+            + ungraded_available,
+        )
     if mode == "detailed":
         derived_min = sum(
             float(item["awarded_mark"])
@@ -653,50 +990,15 @@ def _audit_detailed_assessment(
     completed_work_pages: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     started = time.monotonic()
-    result = api_post_json(
-        f"{cxsee_api_base()}/responses",
-        {
-            "model": config.WHOLE_DOCUMENT_AUDIT_MODEL,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": _audit_prompt(assessment),
-                        },
-                        {
-                            "type": "input_file",
-                            "filename": Path(completed_work_path).name,
-                            "file_data": _pdf_data_url(completed_work_path),
-                        },
-                        {
-                            "type": "input_file",
-                            "filename": Path(mark_scheme_path).name,
-                            "file_data": _pdf_data_url(mark_scheme_path),
-                        },
-                    ],
-                }
-            ],
-            "reasoning": {
-                "effort": config.WHOLE_DOCUMENT_AUDIT_REASONING_EFFORT
-            },
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "sumkora_assessment_audit",
-                    "strict": True,
-                    "schema": audit_schema(),
-                }
-            },
-            "store": False,
-        },
-        headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-        timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-        retries=config.CXSEE_MAX_RETRIES,
+    response_text, response_metadata = _call_structured_document_model(
+        model=config.WHOLE_DOCUMENT_AUDIT_MODEL,
+        prompt=_audit_prompt(assessment),
+        schema=audit_schema(),
+        document_paths=[completed_work_path, mark_scheme_path],
+        reasoning_effort=config.WHOLE_DOCUMENT_AUDIT_REASONING_EFFORT,
     )
     try:
-        parsed = json.loads(_extract_response_text(result))
+        parsed = _parse_provider_json(response_text)
     except json.JSONDecodeError as exc:
         raise AssessmentValidationError(
             ["independent audit response was not valid JSON"]
@@ -707,11 +1009,14 @@ def _audit_detailed_assessment(
         completed_work_pages=completed_work_pages,
     )
     return audited, {
+        "provider": response_metadata["provider"],
         "model": config.WHOLE_DOCUMENT_AUDIT_MODEL,
         "reasoning_effort": config.WHOLE_DOCUMENT_AUDIT_REASONING_EFFORT,
         "duration_ms": int((time.monotonic() - started) * 1000),
-        "usage": result.get("usage") or {},
-        "response_id": result.get("id"),
+        "usage": response_metadata["usage"],
+        "response_id": response_metadata["response_id"],
+        "model_version": response_metadata["model_version"],
+        "render_dpi": response_metadata.get("render_dpi"),
     }
 
 
@@ -745,58 +1050,34 @@ def assess_documents(
     started = time.monotonic()
     attempts = 2 if allow_repair else 1
     for attempt in range(attempts):
-        content: list[dict[str, Any]] = [
-            {"type": "input_text", "text": _prompt(mode, repair_errors)},
-            {
-                "type": "input_file",
-                "filename": Path(completed_work_path).name,
-                "file_data": _pdf_data_url(completed_work_path),
-            },
-        ]
+        document_paths = [completed_work_path]
         if mark_scheme_path:
-            content.append(
-                {
-                    "type": "input_file",
-                    "filename": Path(mark_scheme_path).name,
-                    "file_data": _pdf_data_url(mark_scheme_path),
-                }
-            )
-        result = api_post_json(
-            f"{cxsee_api_base()}/responses",
-            {
-                "model": selected_model,
-                "input": [{"role": "user", "content": content}],
-                "reasoning": {"effort": effort},
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "sumkora_document_assessment",
-                        "strict": True,
-                        "schema": assessment_schema(),
-                    }
-                },
-                "store": False,
-            },
-            headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-            timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-            retries=config.CXSEE_MAX_RETRIES,
+            document_paths.append(mark_scheme_path)
+        response_text, response_metadata = _call_structured_document_model(
+            model=selected_model,
+            prompt=_prompt(mode, repair_errors),
+            schema=assessment_schema(),
+            document_paths=document_paths,
+            reasoning_effort=effort,
         )
         try:
-            parsed = json.loads(_extract_response_text(result))
+            parsed = _parse_provider_json(response_text)
             validated = validate_assessment(
                 parsed,
                 mode=mode,
                 completed_work_pages=pages,
             )
             provider_metadata = {
-                "provider": "cxsee",
+                "provider": response_metadata["provider"],
                 "model": selected_model,
                 "prompt_version": ASSESSMENT_PROMPT_VERSION,
                 "reasoning_effort": effort,
                 "duration_ms": int((time.monotonic() - started) * 1000),
                 "attempts": attempt + 1,
-                "usage": result.get("usage") or {},
-                "response_id": result.get("id"),
+                "usage": response_metadata["usage"],
+                "response_id": response_metadata["response_id"],
+                "model_version": response_metadata["model_version"],
+                "render_dpi": response_metadata.get("render_dpi"),
             }
             if (
                 mode == "detailed"
