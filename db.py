@@ -401,6 +401,7 @@ def init_db():
             possible_max_score REAL,
             warnings TEXT NOT NULL DEFAULT '[]',
             assessment_mode TEXT NOT NULL DEFAULT 'legacy',
+            expected_maximum_marks REAL,
             assessment_summary TEXT NOT NULL DEFAULT '{}',
             provider_metadata TEXT NOT NULL DEFAULT '{}',
             failure_message TEXT,
@@ -787,6 +788,7 @@ def init_db():
     }
     analysis_version_column_defs = {
         "assessment_mode": "TEXT NOT NULL DEFAULT 'legacy'",
+        "expected_maximum_marks": "REAL",
         "assessment_summary": "TEXT NOT NULL DEFAULT '{}'",
         "provider_metadata": "TEXT NOT NULL DEFAULT '{}'",
     }

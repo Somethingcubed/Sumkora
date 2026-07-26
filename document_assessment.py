@@ -51,7 +51,6 @@ def assessment_schema() -> dict[str, Any]:
         "required": [
             "label",
             "question_text",
-            "question_latex",
             "maximum_marks",
             "awarded_mark",
             "status",
@@ -59,14 +58,15 @@ def assessment_schema() -> dict[str, Any]:
             "evidence_pages",
             "evidence_quote",
             "rationale",
+            "rationale_zh",
             "topic",
             "skill",
             "improvement",
+            "improvement_zh",
         ],
         "properties": {
             "label": {"type": "string"},
             "question_text": {"type": "string"},
-            "question_latex": {"type": "string"},
             "maximum_marks": nullable_number,
             "awarded_mark": nullable_number,
             "status": {
@@ -92,31 +92,23 @@ def assessment_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "required": [
             "assessment_mode",
-            "paper_title",
-            "syllabus_code",
-            "paper_reference",
             "total_max_marks",
-            "estimated_score_min",
-            "estimated_score",
-            "estimated_score_max",
             "questions",
             "strengths",
             "weaknesses",
             "recommendations",
             "warnings",
+            "strengths_zh",
+            "weaknesses_zh",
+            "recommendations_zh",
+            "warnings_zh",
         ],
         "properties": {
             "assessment_mode": {
                 "type": "string",
                 "enum": ["estimate", "detailed"],
             },
-            "paper_title": {"type": "string"},
-            "syllabus_code": {"type": "string"},
-            "paper_reference": {"type": "string"},
             "total_max_marks": nullable_number,
-            "estimated_score_min": nullable_number,
-            "estimated_score": nullable_number,
-            "estimated_score_max": nullable_number,
             "questions": {
                 "type": "array",
                 "minItems": 1,
@@ -222,7 +214,11 @@ def _page_count(path: str) -> int:
         return len(document)
 
 
-def _prompt(mode: str, repair_errors: list[str] | None = None) -> str:
+def _prompt(
+    mode: str,
+    repair_errors: list[str] | None = None,
+    expected_maximum_marks: float | None = None,
+) -> str:
     mode_instruction = (
         """
 This is the DETAILED mode. You receive:
@@ -255,6 +251,16 @@ the evidence is genuinely insufficient.
             + "\n- ".join(repair_errors[:12])
             + "\nReturn a fully corrected assessment of the documents.\n"
         )
+    expected_total = ""
+    if expected_maximum_marks is not None:
+        expected_total = f"""
+The student supplied an expected maximum of {expected_maximum_marks:g} marks
+for this complete paper. Treat this as a coverage checksum, not evidence for
+awarding marks. Read all pages, include every visible question and subquestion,
+and ensure the sum of question maximum_marks and total_max_marks both equal
+{expected_maximum_marks:g}. If the document genuinely contradicts this value,
+explain the discrepancy in warnings without inventing questions or marks.
+"""
     return rf"""
 You are Sumkora's senior Cambridge IGCSE mathematics assessor. Assess the
 documents as a whole. Work question by question internally, but do not rely on
@@ -265,18 +271,20 @@ an external OCR mapper or assume one answer page per question.
 Rules:
 - Read every page. Page numbers in evidence_pages refer to the completed-work
   PDF, starting at 1.
+- First establish a complete inventory of question labels across the entire
+  document. Do not stop after the first few pages. Before returning, verify
+  that the questions array covers student work from the beginning through the
+  final page and that no visible top-level question or subquestion was omitted.
 - Preserve labels such as Q1, Q2(a), and Q2(b) when separable. Do not invent
   questions or omit visible answered questions.
 - question_text must contain the complete readable question, not a summary of
   the task. When an item is a subquestion, repeat the parent stem, definitions,
   sequence notation, diagram description, table context, and any earlier
   results needed to understand that subquestion independently.
-- question_latex must contain the same complete question as question_text, but
-  place every mathematical expression inside valid TeX delimiters \( ... \)
-  or \[ ... \]. Use proper TeX such as \frac, \sqrt, superscripts, subscripts,
-  inequalities, vectors, matrices, and set notation. Do not leave display
-  mathematics as plain text such as x^2 or sqrt(x). Keep ordinary prose outside
-  TeX delimiters. If no mathematics is present, return the question text.
+- In question_text, place mathematical expressions inside valid TeX delimiters
+  \( ... \) or \[ ... \]. Use proper TeX such as \frac, \sqrt, superscripts,
+  subscripts, inequalities, vectors, matrices, and set notation. Keep ordinary
+  prose outside TeX delimiters.
 - A positive mark requires visible supporting student evidence.
 - A blank, unrelated, wrong, or unreadable region must never receive a
   positive mark.
@@ -301,11 +309,18 @@ Rules:
 - The overall estimate must satisfy min <= estimate <= max <= total maximum.
 - Never turn a technical or reading failure into zero marks.
 - Return only the requested structured JSON.
+- Keep every rationale, evidence quote, improvement, and summary item concise.
+  The response contract is intentionally compact so that long papers complete
+  reliably; do not add fields that were not requested.
+{expected_total}
 {repair}
 """
 
 
 def _extract_response_text(result: dict[str, Any]) -> str:
+    error = result.get("error")
+    if isinstance(error, dict) and error.get("message"):
+        raise RuntimeError(f"Assessment provider error: {error['message']}")
     direct = result.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
@@ -440,6 +455,7 @@ def _call_structured_document_model(
     schema: dict[str, Any],
     document_paths: list[str],
     reasoning_effort: str,
+    document_texts: list[tuple[str, str]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     schema_instruction = (
         "\n\nYou must follow this exact JSON Schema yourself. Return every "
@@ -544,17 +560,24 @@ def _call_structured_document_model(
             "model_version": result.get("modelVersion"),
         }
 
-    content: list[dict[str, Any]] = [
-        {"type": "input_text", "text": prompt},
-        *[
+    text_sections = [prompt]
+    if document_texts:
+        text_sections.extend(
+            f"=== {label} ===\n{text}" for label, text in document_texts
+        )
+        content: list[dict[str, Any]] = [
+            {"type": "input_text", "text": "\n\n".join(text_sections)}
+        ]
+    else:
+        content = [{"type": "input_text", "text": prompt}]
+        content.extend(
             {
                 "type": "input_file",
                 "filename": Path(path).name,
                 "file_data": _pdf_data_url(path),
             }
             for path in document_paths
-        ],
-    ]
+        )
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -569,11 +592,12 @@ def _call_structured_document_model(
                     "schema": schema,
                 }
             },
+            "max_output_tokens": 8192,
             "store": False,
         },
         headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
         timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-        retries=config.CXSEE_MAX_RETRIES,
+        retries=0,
     )
     return _strip_json_fence(_extract_response_text(result)), {
         "provider": "cxsee_responses",
@@ -598,6 +622,7 @@ def validate_assessment(
     *,
     mode: str,
     completed_work_pages: int,
+    expected_maximum_marks: float | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     if assessment.get("assessment_mode") != mode:
@@ -698,7 +723,21 @@ def validate_assessment(
             graded_marks += mark
 
     total_maximum = _as_number(assessment.get("total_max_marks"))
-    if mode == "estimate" and known_maximum:
+    if mode == "estimate" and expected_maximum_marks is not None:
+        total_maximum = float(expected_maximum_marks)
+        if known_maximum and abs(total_maximum - known_maximum) > 0.51:
+            errors.append(
+                f"question maximums total {known_maximum:g}, but the student "
+                f"supplied {total_maximum:g}; re-read every page and include "
+                "all questions before returning the assessment"
+            )
+        provider_total = _as_number(assessment.get("total_max_marks"))
+        if provider_total is not None and abs(provider_total - total_maximum) > 0.51:
+            errors.append(
+                f"provider total maximum {provider_total:g} does not match "
+                f"the student-supplied maximum {total_maximum:g}"
+            )
+    elif mode == "estimate" and known_maximum:
         total_maximum = known_maximum
     elif total_maximum is None:
         total_maximum = known_maximum or None
@@ -1027,10 +1066,21 @@ def assess_documents(
     model: str | None = None,
     reasoning_effort: str | None = None,
     allow_repair: bool = True,
+    expected_maximum_marks: float | None = None,
+    completed_work_text: str | None = None,
+    mark_scheme_text: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not config.CXSEE_API_KEY:
         raise RuntimeError("The assessment API key is not configured.")
     mode = "detailed" if mark_scheme_path else "estimate"
+    if mode == "detailed":
+        expected_maximum_marks = None
+    elif expected_maximum_marks is not None:
+        expected_maximum_marks = float(expected_maximum_marks)
+        if not math.isfinite(expected_maximum_marks) or not (
+            1 <= expected_maximum_marks <= 500
+        ):
+            raise ValueError("Expected maximum marks must be between 1 and 500.")
     pages = _page_count(completed_work_path)
     if not 1 <= pages <= config.WHOLE_DOCUMENT_MAX_PAGES:
         raise ValueError(
@@ -1053,12 +1103,26 @@ def assess_documents(
         document_paths = [completed_work_path]
         if mark_scheme_path:
             document_paths.append(mark_scheme_path)
+        document_texts = None
+        if completed_work_text:
+            document_texts = [
+                ("COMPLETED STUDENT WORK — OCR TRANSCRIPT", completed_work_text)
+            ]
+            if mark_scheme_text:
+                document_texts.append(
+                    ("OFFICIAL MARK SCHEME — OCR TRANSCRIPT", mark_scheme_text)
+                )
         response_text, response_metadata = _call_structured_document_model(
             model=selected_model,
-            prompt=_prompt(mode, repair_errors),
+            prompt=_prompt(
+                mode,
+                repair_errors,
+                expected_maximum_marks=expected_maximum_marks,
+            ),
             schema=assessment_schema(),
             document_paths=document_paths,
             reasoning_effort=effort,
+            document_texts=document_texts,
         )
         try:
             parsed = _parse_provider_json(response_text)
@@ -1066,6 +1130,7 @@ def assess_documents(
                 parsed,
                 mode=mode,
                 completed_work_pages=pages,
+                expected_maximum_marks=expected_maximum_marks,
             )
             provider_metadata = {
                 "provider": response_metadata["provider"],
@@ -1078,6 +1143,7 @@ def assess_documents(
                 "response_id": response_metadata["response_id"],
                 "model_version": response_metadata["model_version"],
                 "render_dpi": response_metadata.get("render_dpi"),
+                "expected_maximum_marks": expected_maximum_marks,
             }
             if (
                 mode == "detailed"

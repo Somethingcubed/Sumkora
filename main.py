@@ -652,6 +652,21 @@ def _owned_analysis_version(student_id: int, version_id: int):
     )
 
 
+def _parse_expected_maximum_marks(raw_value: str) -> int | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise ValueError(
+            "Maximum marks must be a whole number from 1 to 500."
+        ) from exc
+    if not number.is_integer() or not 1 <= number <= 500:
+        raise ValueError("Maximum marks must be a whole number from 1 to 500.")
+    return int(number)
+
+
 @app.get("/student/analyse", response_class=HTMLResponse)
 def student_analyse_page(request: Request):
     user = require_role(request, "student")
@@ -660,7 +675,7 @@ def student_analyse_page(request: Request):
     return render(
         request,
         "student/analyse.html",
-        {"user": user, "error": None},
+        {"user": user, "error": None, "maximum_marks": ""},
     )
 
 
@@ -670,10 +685,24 @@ async def student_analyse_upload(
     background_tasks: BackgroundTasks,
     answer_script: UploadFile = File(...),
     mark_scheme: UploadFile = File(None),
+    maximum_marks: str = Form(""),
 ):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
+    try:
+        expected_maximum_marks = _parse_expected_maximum_marks(maximum_marks)
+    except ValueError as exc:
+        return render(
+            request,
+            "student/analyse.html",
+            {
+                "user": user,
+                "error": str(exc),
+                "maximum_marks": maximum_marks,
+            },
+            status_code=400,
+        )
     answer_content = await answer_script.read()
     scheme_content = (
         await mark_scheme.read()
@@ -697,6 +726,7 @@ async def student_analyse_upload(
             {
                 "user": user,
                 "error": "Completed work is required. Each file must be within the upload limit.",
+                "maximum_marks": maximum_marks,
             },
             status_code=400,
         )
@@ -707,12 +737,17 @@ async def student_analyse_upload(
             answer_content,
             mark_scheme.filename if mark_scheme and mark_scheme.filename else None,
             scheme_content,
+            expected_maximum_marks=expected_maximum_marks,
         )
     except ValueError as exc:
         return render(
             request,
             "student/analyse.html",
-            {"user": user, "error": str(exc)},
+            {
+                "user": user,
+                "error": str(exc),
+                "maximum_marks": maximum_marks,
+            },
             status_code=400,
         )
     version = _owned_analysis_version(user["id"], version_id)
@@ -729,7 +764,12 @@ async def student_analyse_upload(
         (
             user["id"],
             str(paper_id),
-            json.dumps({"analysis_version_id": version_id}),
+            json.dumps(
+                {
+                    "analysis_version_id": version_id,
+                    "expected_maximum_marks": expected_maximum_marks,
+                }
+            ),
             datetime.now().isoformat(),
         ),
     )
@@ -926,7 +966,15 @@ def student_paper_rerun_page(request: Request, paper_id: int):
     return render(
         request,
         "student/rerun.html",
-        {"user": user, "paper": paper, "versions": versions, "error": None},
+        {
+            "user": user,
+            "paper": paper,
+            "versions": versions,
+            "error": None,
+            "maximum_marks": (
+                versions[0]["expected_maximum_marks"] if versions else ""
+            ),
+        },
     )
 
 
@@ -937,10 +985,27 @@ async def student_paper_rerun(
     background_tasks: BackgroundTasks,
     answer_script: UploadFile = File(None),
     mark_scheme: UploadFile = File(None),
+    maximum_marks: str = Form(""),
 ):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
+    try:
+        expected_maximum_marks = _parse_expected_maximum_marks(maximum_marks)
+    except ValueError as exc:
+        paper, versions = paper_with_versions(user["id"], paper_id)
+        return render(
+            request,
+            "student/rerun.html",
+            {
+                "user": user,
+                "paper": paper,
+                "versions": versions,
+                "error": str(exc),
+                "maximum_marks": maximum_marks,
+            },
+            status_code=400,
+        )
 
     async def optional_file(upload: UploadFile | None):
         if not upload or not upload.filename:
@@ -956,13 +1021,20 @@ async def student_paper_rerun(
             paper_id,
             await optional_file(answer_script),
             await optional_file(mark_scheme),
+            expected_maximum_marks=expected_maximum_marks,
         )
     except ValueError as exc:
         paper, versions = paper_with_versions(user["id"], paper_id)
         return render(
             request,
             "student/rerun.html",
-            {"user": user, "paper": paper, "versions": versions, "error": str(exc)},
+            {
+                "user": user,
+                "paper": paper,
+                "versions": versions,
+                "error": str(exc),
+                "maximum_marks": maximum_marks,
+            },
             status_code=400,
         )
     version = _owned_analysis_version(user["id"], version_id)

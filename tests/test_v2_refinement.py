@@ -140,6 +140,48 @@ def test_student_self_service_without_class_and_question_paper():
     )["n"] >= 1
 
 
+def test_optional_maximum_marks_is_stored_for_estimate_coverage_checks():
+    create_user("maximum@student.local", "student")
+    login("maximum@student.local")
+    page = client.get("/student/analyse")
+    assert 'name="maximum_marks"' in page.text
+    assert "Maximum marks on the paper" in page.text
+
+    response = client.post(
+        "/student/analyse",
+        data={"maximum_marks": "80"},
+        files={
+            "answer_script": (
+                "answers.pdf",
+                pdf_bytes("Q1 visible work"),
+                "application/pdf",
+            )
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    version_id = int(response.headers["location"].split("/")[3])
+    version = query_one(
+        "SELECT expected_maximum_marks FROM paper_analysis_versions WHERE id = ?",
+        (version_id,),
+    )
+    assert version["expected_maximum_marks"] == 80
+
+    invalid = client.post(
+        "/student/analyse",
+        data={"maximum_marks": "80.5"},
+        files={
+            "answer_script": (
+                "answers.pdf",
+                pdf_bytes("Q1 visible work"),
+                "application/pdf",
+            )
+        },
+    )
+    assert invalid.status_code == 400
+    assert "whole number from 1 to 500" in invalid.text
+
+
 def test_upload_validation_handles_duplicates_invalid_and_unicode_files():
     create_user("validation@student.local", "student")
     login("validation@student.local")

@@ -9,6 +9,7 @@
   <form method="post" enctype="multipart/form-data" class="surface space-y-5" data-rerun-form>
     <label class="form-label">{{ tr('Completed work', '已完成的答卷') }} <span>{{ tr('PDF or image', 'PDF 或图片') }}</span><input class="mt-2 block text-sm" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*"></label>
     <label class="form-label">{{ tr('Mark scheme', '评分标准') }} <span>{{ tr('Optional PDF', '选填 PDF') }}</span><input class="mt-2 block text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf"></label>
+    <label class="form-label max-w-xs" for="rerun-maximum-marks">{{ tr('Maximum marks on the paper', '试卷总分') }} <span>{{ tr('Optional coverage check', '选填，用于完整性检查') }}</span><input class="field" id="rerun-maximum-marks" name="maximum_marks" type="number" min="1" max="500" step="1" value="{{ maximum_marks or '' }}" placeholder="{{ tr('For example, 80', '例如：80') }}"></label>
     <div class="pt-5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3"><p class="text-xs text-slate-500">{{ tr('This will create analysis', '将创建分析') }} v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="button button-primary" type="submit">{{ tr('Start new analysis', '开始新分析') }}</button></div>
   </form>
 </div>

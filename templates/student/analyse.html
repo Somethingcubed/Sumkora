@@ -28,6 +28,26 @@
       {% endfor %}
     </div>
 
+    <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <label class="form-label max-w-xs" for="maximum-marks">
+        {{ tr('Maximum marks on the paper', '试卷总分') }}
+        <span>{{ tr('Optional', '选填') }}</span>
+        <input
+          class="field"
+          id="maximum-marks"
+          name="maximum_marks"
+          type="number"
+          min="1"
+          max="500"
+          step="1"
+          inputmode="numeric"
+          value="{{ maximum_marks or '' }}"
+          placeholder="{{ tr('For example, 80', '例如：80') }}"
+        >
+      </label>
+      <p class="text-xs text-slate-500 mt-2">{{ tr('Helpful when no mark scheme is available. Sumkora will use this to check that every question was found, but it will not use it to invent marks.', '没有评分标准时尤其有用。Sumkora 会用总分检查是否识别了全部题目，但不会据此编造分数。') }}</p>
+    </div>
+
     <div class="mt-5 grid md:grid-cols-2 gap-3 text-sm">
       <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
         <p class="font-semibold text-indigo-900">{{ tr('Completed work only', '仅上传已完成的答卷') }}</p>

@@ -430,6 +430,7 @@ def create_student_paper_draft(
     answer_content: bytes,
     mark_scheme_filename: str | None = None,
     mark_scheme_content: bytes | None = None,
+    expected_maximum_marks: float | None = None,
 ) -> tuple[int, int]:
     answer_filename, answer_content = normalize_answer_upload(
         answer_filename, answer_content
@@ -491,8 +492,8 @@ def create_student_paper_draft(
         (paper_id, version_number, question_paper_path, answer_script_path,
          mark_scheme_path, detected_metadata, question_plan, ocr_model,
          grading_model, diagnosis_model, ocr_prompt_version, image_resolution,
-         warnings, assessment_mode, created_at, updated_at)
-        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         warnings, assessment_mode, expected_maximum_marks, created_at, updated_at)
+        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             paper_id,
@@ -512,6 +513,7 @@ def create_student_paper_draft(
                 else ["Estimated assessment: no mark scheme was provided."]
             ),
             mode,
+            expected_maximum_marks,
             now,
             now,
         ),
@@ -524,6 +526,7 @@ def create_rerun_draft(
     paper_id: int,
     answer_file: tuple[str, bytes] | None,
     scheme_file: tuple[str, bytes] | None,
+    expected_maximum_marks: float | None = None,
 ) -> int:
     paper = query_one(
         "SELECT * FROM student_papers WHERE id = ? AND student_id = ?",
@@ -566,8 +569,9 @@ def create_rerun_draft(
         (paper_id, version_number, supersedes_version_id, question_paper_path,
          answer_script_path, mark_scheme_path, detected_metadata, question_plan,
          ocr_model, grading_model, diagnosis_model, ocr_prompt_version,
-         image_resolution, warnings, assessment_mode, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         image_resolution, warnings, assessment_mode, expected_maximum_marks,
+         created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             paper_id,
@@ -589,6 +593,7 @@ def create_rerun_draft(
                 else ["Estimated assessment: no mark scheme was provided."]
             ),
             mode,
+            expected_maximum_marks,
             now,
             now,
         ),
@@ -758,6 +763,20 @@ def _extract_analysis_document(
                 ),
             )
     return page_texts, page_confidences
+
+
+def _ordered_page_transcript(
+    page_texts: dict[int, str],
+    *,
+    document_label: str,
+) -> str:
+    return "\n\n".join(
+        (
+            f"--- {document_label}, PAGE {page_number} ---\n"
+            f"{text.strip() or '[No readable text detected on this page]'}"
+        )
+        for page_number, text in sorted(page_texts.items())
+    )
 
 
 def _automatic_question_plan(
@@ -1117,10 +1136,38 @@ def run_self_service_analysis(version_id: int) -> dict:
         mode = "detailed" if scheme_path else "estimate"
         _update_version(version_id, "validation", 0)
         _update_version(version_id, "document_extraction", 1)
+        answer_pages, _ = _extract_analysis_document(
+            version,
+            "answer_script",
+            version["answer_script_path"],
+            force_vision=True,
+        )
+        scheme_pages = {}
+        if scheme_path:
+            scheme_pages, _ = _extract_analysis_document(
+                version,
+                "mark_scheme",
+                scheme_path,
+            )
+        answer_transcript = _ordered_page_transcript(
+            answer_pages,
+            document_label="COMPLETED STUDENT WORK",
+        )
+        scheme_transcript = (
+            _ordered_page_transcript(
+                scheme_pages,
+                document_label="OFFICIAL MARK SCHEME",
+            )
+            if scheme_pages
+            else None
+        )
         _update_version(version_id, "whole_document_reasoning", 2)
         assessment, provider_metadata = assess_documents(
             version["answer_script_path"],
             scheme_path,
+            expected_maximum_marks=version["expected_maximum_marks"],
+            completed_work_text=answer_transcript,
+            mark_scheme_text=scheme_transcript,
         )
         _update_version(version_id, "result_validation", 3)
 

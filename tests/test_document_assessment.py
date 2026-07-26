@@ -60,10 +60,11 @@ def test_validator_rejects_wrong_page_and_positive_mark_for_blank_evidence():
     assert "awards marks while describing missing or wrong evidence" in message
 
 
-def test_assessment_contract_requires_complete_latex_question_context():
+def test_assessment_contract_requires_complete_math_question_context():
     schema = document_assessment.assessment_schema()
     question_schema = schema["properties"]["questions"]["items"]
-    assert "question_latex" in question_schema["required"]
+    assert "question_text" in question_schema["required"]
+    assert "question_latex" not in question_schema["properties"]
     prompt = document_assessment._prompt("detailed")
     assert "complete readable question" in prompt
     assert "repeat the parent stem" in prompt
@@ -127,6 +128,27 @@ def test_estimate_uses_visible_question_marks_not_inferred_full_paper_total():
     assert validated["estimated_score_max"] == 3
 
 
+def test_student_maximum_marks_detects_incomplete_question_coverage():
+    result = valid_assessment("estimate")
+    result["total_max_marks"] = 80
+    with pytest.raises(AssessmentValidationError) as exc:
+        validate_assessment(
+            result,
+            mode="estimate",
+            completed_work_pages=2,
+            expected_maximum_marks=80,
+        )
+    message = str(exc.value)
+    assert "question maximums total 3" in message
+    assert "student supplied 80" in message
+    prompt = document_assessment._prompt(
+        "estimate",
+        expected_maximum_marks=80,
+    )
+    assert "coverage checksum" in prompt
+    assert "80 marks" in prompt
+
+
 def test_validator_derives_detailed_range_from_uncertain_questions():
     result = valid_assessment()
     result["questions"][0]["status"] = "uncertain"
@@ -154,13 +176,12 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
         body = invalid if len(calls) == 1 else corrected
         return {
             "id": f"response-{len(calls)}",
-            "model": "qwen3-vl-plus",
-            "choices": [
+            "model": "gpt-5.6-terra",
+            "output": [
                 {
-                    "finish_reason": "stop",
-                    "message": {
-                        "content": f"```json\n{json.dumps(body)}\n```"
-                    },
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
                 }
             ],
             "usage": {"total_tokens": 10},
@@ -172,15 +193,61 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
     assert len(calls) == 2
     assert result["estimated_score"] == 2
     assert metadata["attempts"] == 2
-    assert metadata["provider"] == "cxsee_qwen_vision"
+    assert metadata["provider"] == "cxsee_responses"
     assert metadata["response_id"] == "response-2"
-    repair_text = calls[1]["messages"][0]["content"][0]["text"]
+    repair_text = calls[1]["input"][0]["content"][0]["text"]
     assert "invalid completed-work page" in repair_text
-    assert "follow this exact JSON Schema yourself" in repair_text
-    assert '"assessment_mode"' in repair_text
-    image_part = calls[1]["messages"][0]["content"][2]["image_url"]["url"]
-    assert image_part.startswith("data:image/jpeg;base64,")
-    assert calls[1]["response_format"] == {"type": "json_object"}
+    file_part = calls[1]["input"][0]["content"][1]
+    assert file_part["type"] == "input_file"
+    assert file_part["file_data"].startswith("data:application/pdf;base64,")
+    assert calls[1]["max_output_tokens"] == 8192
+
+
+def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
+    tmp_path, monkeypatch
+):
+    answer = tmp_path / "answer.pdf"
+    make_pdf(answer, "Scanned answer placeholder")
+    calls = []
+
+    def fake_post(_url, payload, **kwargs):
+        calls.append((payload, kwargs))
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "response-transcript",
+            "model": "gpt-5.6-terra",
+            "output": [
+                {
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(body),
+                        }
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+    result, _ = document_assessment.assess_documents(
+        str(answer),
+        completed_work_text=(
+            "--- COMPLETED STUDENT WORK, PAGE 1 ---\n"
+            "Q1 Student Work: 2x"
+        ),
+    )
+
+    content = calls[0][0]["input"][0]["content"]
+    assert len(content) == 1
+    assert content[0]["type"] == "input_text"
+    assert "PAGE 1" in content[0]["text"]
+    assert "Student Work: 2x" in content[0]["text"]
+    assert "input_file" not in content[0]["text"]
+    assert calls[0][1]["retries"] == 0
+    assert result["questions"][0]["question_latex"] == r"Differentiate \(x^2\)."
 
 
 def test_independent_audit_corrects_semantic_mark_and_recalculates_total():
