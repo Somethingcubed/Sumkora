@@ -198,6 +198,22 @@ def test_student_self_service_without_class_and_question_paper():
     )["n"] >= 1
 
 
+def test_active_whole_document_analysis_never_runs_page_ocr(monkeypatch):
+    create_user("direct-pdf@student.local", "student")
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("the active direct-PDF path must not run page OCR")
+
+    monkeypatch.setattr(
+        self_service,
+        "_extract_analysis_document",
+        fail_if_called,
+    )
+    paper, version, _ = upload_direct_paper("direct-pdf@student.local")
+    assert paper["status"] == "completed"
+    assert version["status"] == "completed"
+
+
 def test_optional_maximum_marks_is_stored_for_estimate_coverage_checks():
     create_user("maximum@student.local", "student")
     login("maximum@student.local")

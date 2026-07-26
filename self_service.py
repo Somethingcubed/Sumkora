@@ -1190,38 +1190,14 @@ def run_self_service_analysis(version_id: int) -> dict:
         mode = "detailed" if scheme_path else "estimate"
         _update_version(version_id, "validation", 0)
         _update_version(version_id, "document_extraction", 1)
-        answer_pages, _ = _extract_analysis_document(
-            version,
-            "answer_script",
-            version["answer_script_path"],
-            force_vision=True,
-        )
-        scheme_pages = {}
-        if scheme_path:
-            scheme_pages, _ = _extract_analysis_document(
-                version,
-                "mark_scheme",
-                scheme_path,
-            )
-        answer_transcript = _ordered_page_transcript(
-            answer_pages,
-            document_label="COMPLETED STUDENT WORK",
-        )
-        scheme_transcript = (
-            _ordered_page_transcript(
-                scheme_pages,
-                document_label="OFFICIAL MARK SCHEME",
-            )
-            if scheme_pages
-            else None
-        )
+        # The reasoning model receives the original complete PDFs. Do not
+        # pre-OCR pages or map page fragments to questions: both operations
+        # previously lost handwriting and created incorrect question matches.
         _update_version(version_id, "whole_document_reasoning", 2)
         assessment, provider_metadata = assess_documents(
             version["answer_script_path"],
             scheme_path,
             expected_maximum_marks=version["expected_maximum_marks"],
-            completed_work_text=answer_transcript,
-            mark_scheme_text=scheme_transcript,
         )
         _update_version(version_id, "result_validation", 3)
 

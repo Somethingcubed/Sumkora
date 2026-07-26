@@ -1,8 +1,9 @@
 """Whole-document assessment for student-owned mathematics papers.
 
-New analyses send the completed work, and optionally a mark scheme, to one
-reasoning model request.  The response is validated before any marks are
-persisted so provider failures or contradictory output never become zero marks.
+New analyses send the completed work, and optionally a mark scheme, directly
+to a reasoning model. The compact marking response is validated before
+optional context and bilingual-feedback passes, so provider failures or
+contradictory output never become zero marks.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import config
 from ocr import api_post_json, cxsee_api_base
 
 
-ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v2"
+ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v3-gpt55-direct"
 VALID_STATUSES = {"graded", "estimated", "uncertain", "ungraded"}
 CONTRADICTION_PHRASES = (
     "blank",
@@ -50,23 +51,16 @@ def assessment_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "required": [
             "label",
-            "question_text",
             "maximum_marks",
             "awarded_mark",
             "status",
             "confidence",
             "evidence_pages",
-            "evidence_quote",
             "rationale",
-            "rationale_zh",
             "topic",
-            "skill",
-            "improvement",
-            "improvement_zh",
         ],
         "properties": {
             "label": {"type": "string"},
-            "question_text": {"type": "string"},
             "maximum_marks": nullable_number,
             "awarded_mark": nullable_number,
             "status": {
@@ -78,13 +72,8 @@ def assessment_schema() -> dict[str, Any]:
                 "type": "array",
                 "items": {"type": "integer", "minimum": 1},
             },
-            "evidence_quote": {"type": "string"},
             "rationale": {"type": "string"},
-            "rationale_zh": {"type": "string"},
             "topic": {"type": "string"},
-            "skill": {"type": "string"},
-            "improvement": {"type": "string"},
-            "improvement_zh": {"type": "string"},
         },
     }
     return {
@@ -94,14 +83,7 @@ def assessment_schema() -> dict[str, Any]:
             "assessment_mode",
             "total_max_marks",
             "questions",
-            "strengths",
-            "weaknesses",
-            "recommendations",
             "warnings",
-            "strengths_zh",
-            "weaknesses_zh",
-            "recommendations_zh",
-            "warnings_zh",
         ],
         "properties": {
             "assessment_mode": {
@@ -114,38 +96,91 @@ def assessment_schema() -> dict[str, Any]:
                 "minItems": 1,
                 "items": question,
             },
-            "strengths": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "weaknesses": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "recommendations": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
             "warnings": {
                 "type": "array",
                 "items": {"type": "string"},
             },
-            "strengths_zh": {
+        },
+    }
+
+
+def document_context_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["questions"],
+        "properties": {
+            "questions": {
                 "type": "array",
-                "items": {"type": "string"},
-            },
-            "weaknesses_zh": {
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "label",
+                        "question_text",
+                        "evidence_quote",
+                        "skill",
+                    ],
+                    "properties": {
+                        "label": {"type": "string"},
+                        "question_text": {"type": "string"},
+                        "evidence_quote": {"type": "string"},
+                        "skill": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+
+def feedback_schema() -> dict[str, Any]:
+    """Small text-only contract for bilingual student feedback.
+
+    Marking stays in the direct-PDF call. Keeping translation and coaching out
+    of that vision response prevents long papers from exceeding the provider's
+    upstream generation window.
+    """
+    string_array = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "questions",
+            "strengths",
+            "weaknesses",
+            "recommendations",
+            "warnings_zh",
+            "strengths_zh",
+            "weaknesses_zh",
+            "recommendations_zh",
+        ],
+        "properties": {
+            "questions": {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "label",
+                        "rationale_zh",
+                        "improvement",
+                        "improvement_zh",
+                    ],
+                    "properties": {
+                        "label": {"type": "string"},
+                        "rationale_zh": {"type": "string"},
+                        "improvement": {"type": "string"},
+                        "improvement_zh": {"type": "string"},
+                    },
+                },
             },
-            "recommendations_zh": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "warnings_zh": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
+            "strengths": string_array,
+            "weaknesses": string_array,
+            "recommendations": string_array,
+            "warnings_zh": string_array,
+            "strengths_zh": string_array,
+            "weaknesses_zh": string_array,
+            "recommendations_zh": string_array,
         },
     }
 
@@ -277,14 +312,6 @@ Rules:
   final page and that no visible top-level question or subquestion was omitted.
 - Preserve labels such as Q1, Q2(a), and Q2(b) when separable. Do not invent
   questions or omit visible answered questions.
-- question_text must contain the complete readable question, not a summary of
-  the task. When an item is a subquestion, repeat the parent stem, definitions,
-  sequence notation, diagram description, table context, and any earlier
-  results needed to understand that subquestion independently.
-- In question_text, place mathematical expressions inside valid TeX delimiters
-  \( ... \) or \[ ... \]. Use proper TeX such as \frac, \sqrt, superscripts,
-  subscripts, inequalities, vectors, matrices, and set notation. Keep ordinary
-  prose outside TeX delimiters.
 - A positive mark requires visible supporting student evidence.
 - A blank, unrelated, wrong, or unreadable region must never receive a
   positive mark.
@@ -293,25 +320,21 @@ Rules:
   when the official allocation is identifiable; use null only when the
   allocation itself cannot be determined.
 - Confidence describes confidence in the mark and document matching together.
-- evidence_quote must briefly transcribe the exact visible student step or
-  answer supporting the decision. Use an empty string for ungraded work.
 - Transcribe the student's final answer exactly. Before calling a final answer
   correct, compare its signs, digits, variables, and domain with the expected
   answer. A visible wrong final value cannot receive its accuracy mark even
   when earlier method marks are earned.
 - Keep rationales concise, specific, and understandable to a student.
-- For every question, also return rationale_zh and improvement_zh in natural,
-  student-friendly Simplified Chinese. Return the same learning meaning in
-  both languages; translation must never change any mark.
-- Also return strengths_zh, weaknesses_zh, recommendations_zh, and warnings_zh
-  as Simplified Chinese equivalents of the English summary arrays.
 - Totals must be arithmetically consistent with question results.
 - The overall estimate must satisfy min <= estimate <= max <= total maximum.
 - Never turn a technical or reading failure into zero marks.
 - Return only the requested structured JSON.
-- Keep every rationale, evidence quote, improvement, and summary item concise.
-  The response contract is intentionally compact so that long papers complete
-  reliably; do not add fields that were not requested.
+- Keep every rationale to one concise sentence. Marking and complete document
+  coverage are the only jobs in this call; full question transcription,
+  evidence excerpts, and bilingual coaching are produced separately after the
+  marks have been validated.
+- Before returning, verify that maximum_marks sum to total_max_marks and that
+  awarded_mark values sum to the score implied by the question results.
 {expected_total}
 {repair}
 """
@@ -608,12 +631,12 @@ def _call_structured_document_model(
                     "schema": schema,
                 }
             },
-            "max_output_tokens": 8192,
+            "max_output_tokens": 16384,
             "store": False,
         },
         headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
         timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-        retries=0,
+        retries=1,
     )
     return _strip_json_fence(_extract_response_text(result)), {
         "provider": "cxsee_responses",
@@ -849,6 +872,266 @@ def validate_assessment(
             "mark scheme was supplied."
         )
     return result
+
+
+def _context_targets(assessment: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = []
+    for item in assessment["questions"]:
+        maximum = item.get("maximum_marks")
+        awarded = item.get("awarded_mark")
+        if (
+            item.get("status") in {"uncertain", "ungraded"}
+            or maximum is None
+            or awarded is None
+            or float(awarded) < float(maximum)
+        ):
+            targets.append(
+                {
+                    "label": item["label"],
+                    "topic": item["topic"],
+                    "evidence_pages": item["evidence_pages"],
+                }
+            )
+    return targets
+
+
+def _ensure_question_display_fields(
+    assessment: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(assessment)
+    questions = []
+    for original in assessment["questions"]:
+        item = dict(original)
+        fallback = f"{item['label']} — {item['topic']}"
+        item["question_text"] = item.get("question_text") or fallback
+        item["question_latex"] = item.get("question_latex") or item["question_text"]
+        item["skill"] = item.get("skill") or item["topic"]
+        questions.append(item)
+    result["questions"] = questions
+    return result
+
+
+def _document_context_prompt(assessment: dict[str, Any]) -> str:
+    targets = _context_targets(assessment)
+    return rf"""
+You are transcribing only the lost-mark questions from the same complete
+student mathematics paper that has already been marked. Read the attached PDF
+visually and return exactly one item for each target label below, in the same
+order. Do not mark or recalculate anything.
+
+For question_text, transcribe the complete readable printed question. A
+subquestion must stand alone: repeat its parent stem, definitions, diagram or
+table context, sequence notation, and any earlier result it depends on. Place
+mathematics inside valid TeX delimiters \( ... \) or \[ ... \], using proper
+TeX such as \frac, \sqrt, superscripts, subscripts, inequalities, vectors,
+matrices, and set notation. Keep prose outside TeX delimiters.
+
+For evidence_quote, briefly transcribe the exact visible student step or final
+answer relevant to the lost mark. Use an empty string only when no work is
+visible. skill must be a concise mathematical skill name.
+
+Target labels and already-verified page hints:
+{json.dumps(targets, ensure_ascii=False)}
+"""
+
+
+def _apply_document_context(
+    assessment: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    targets = [item["label"] for item in _context_targets(assessment)]
+    received = context.get("questions")
+    if not isinstance(received, list):
+        raise AssessmentValidationError(["document context questions are missing"])
+    by_label: dict[str, dict[str, Any]] = {}
+    for item in received:
+        if not isinstance(item, dict):
+            raise AssessmentValidationError(
+                ["document context contains a non-object question"]
+            )
+        label = str(item.get("label") or "").strip()
+        if not label or label in by_label:
+            raise AssessmentValidationError(
+                [f"document context has an invalid or duplicate label {label!r}"]
+            )
+        by_label[label] = item
+    if set(by_label) != set(targets):
+        raise AssessmentValidationError(
+            ["document context labels do not match the lost-mark questions"]
+        )
+
+    enriched = dict(assessment)
+    questions = []
+    for original in assessment["questions"]:
+        item = dict(original)
+        source = by_label.get(item["label"])
+        if source:
+            item["question_text"] = str(source.get("question_text") or "").strip()
+            item["question_latex"] = item["question_text"]
+            item["evidence_quote"] = str(
+                source.get("evidence_quote") or ""
+            ).strip()
+            item["skill"] = str(source.get("skill") or item["topic"]).strip()
+        else:
+            item["question_text"] = (
+                item.get("question_text")
+                or f"{item['label']} — {item['topic']}"
+            )
+            item["question_latex"] = (
+                item.get("question_latex") or item["question_text"]
+            )
+            item["skill"] = item.get("skill") or item["topic"]
+        questions.append(item)
+    enriched["questions"] = questions
+    return enriched
+
+
+def _enrich_document_context(
+    assessment: dict[str, Any],
+    *,
+    model: str,
+    document_paths: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    targets = _context_targets(assessment)
+    if not targets:
+        return assessment, {"status": "not_needed", "duration_ms": 0}
+    started = time.monotonic()
+    response_text, response_metadata = _call_structured_document_model(
+        model=model,
+        prompt=_document_context_prompt(assessment),
+        schema=document_context_schema(),
+        document_paths=document_paths,
+        reasoning_effort="low",
+    )
+    parsed = _parse_provider_json(response_text)
+    enriched = _apply_document_context(assessment, parsed)
+    return enriched, {
+        "provider": response_metadata["provider"],
+        "model": model,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "usage": response_metadata["usage"],
+        "response_id": response_metadata["response_id"],
+        "model_version": response_metadata["model_version"],
+        "question_count": len(targets),
+    }
+
+
+def _feedback_prompt(assessment: dict[str, Any]) -> str:
+    source = {
+        "assessment_mode": assessment["assessment_mode"],
+        "total_max_marks": assessment["total_max_marks"],
+        "estimated_score": assessment["estimated_score"],
+        "questions": [
+            {
+                "label": item["label"],
+                "maximum_marks": item["maximum_marks"],
+                "awarded_mark": item["awarded_mark"],
+                "status": item["status"],
+                "topic": item["topic"],
+                "skill": item["skill"],
+                "rationale": item["rationale"],
+            }
+            for item in assessment["questions"]
+        ],
+        "warnings": assessment.get("warnings") or [],
+    }
+    return f"""
+You are Sumkora's bilingual mathematics learning coach. The marks below have
+already been validated and are immutable. Do not recalculate, reinterpret, or
+change any mark.
+
+For every question label, return:
+- rationale_zh: a faithful, natural Simplified Chinese translation of the
+  English rationale;
+- improvement: one concise, specific English next step, or a short positive
+  continuation tip when full marks were earned;
+- improvement_zh: the same learning meaning in natural Simplified Chinese.
+
+Return exactly one feedback item for every supplied label, in the same order.
+Then provide concise English strengths, weaknesses, and recommendations and
+their Simplified Chinese equivalents. Translate each warning into warnings_zh.
+Do not add generic motivational filler and do not mention being an AI.
+
+Validated assessment:
+{json.dumps(source, ensure_ascii=False)}
+"""
+
+
+def _apply_feedback(
+    assessment: dict[str, Any],
+    feedback: dict[str, Any],
+) -> dict[str, Any]:
+    expected = [item["label"] for item in assessment["questions"]]
+    received = feedback.get("questions")
+    if not isinstance(received, list):
+        raise AssessmentValidationError(["bilingual feedback questions are missing"])
+    by_label: dict[str, dict[str, Any]] = {}
+    for item in received:
+        if not isinstance(item, dict):
+            raise AssessmentValidationError(
+                ["bilingual feedback contains a non-object question"]
+            )
+        label = str(item.get("label") or "").strip()
+        if not label or label in by_label:
+            raise AssessmentValidationError(
+                [f"bilingual feedback has an invalid or duplicate label {label!r}"]
+            )
+        by_label[label] = item
+    if set(by_label) != set(expected):
+        raise AssessmentValidationError(
+            ["bilingual feedback labels do not match the validated assessment"]
+        )
+
+    enriched = dict(assessment)
+    enriched_questions = []
+    for original in assessment["questions"]:
+        item = dict(original)
+        translated = by_label[item["label"]]
+        for field in ("rationale_zh", "improvement", "improvement_zh"):
+            item[field] = str(translated.get(field) or "").strip()
+        enriched_questions.append(item)
+    enriched["questions"] = enriched_questions
+    for field in (
+        "strengths",
+        "weaknesses",
+        "recommendations",
+        "warnings_zh",
+        "strengths_zh",
+        "weaknesses_zh",
+        "recommendations_zh",
+    ):
+        values = feedback.get(field)
+        enriched[field] = [
+            str(value).strip()
+            for value in (values if isinstance(values, list) else [])
+            if str(value).strip()
+        ]
+    return enriched
+
+
+def _enrich_feedback(
+    assessment: dict[str, Any],
+    *,
+    model: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    started = time.monotonic()
+    response_text, response_metadata = _call_structured_document_model(
+        model=model,
+        prompt=_feedback_prompt(assessment),
+        schema=feedback_schema(),
+        document_paths=[],
+        reasoning_effort="low",
+    )
+    parsed = _parse_provider_json(response_text)
+    enriched = _apply_feedback(assessment, parsed)
+    return enriched, {
+        "provider": response_metadata["provider"],
+        "model": model,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "usage": response_metadata["usage"],
+        "response_id": response_metadata["response_id"],
+        "model_version": response_metadata["model_version"],
+    }
 
 
 def audit_schema() -> dict[str, Any]:
@@ -1173,6 +1456,49 @@ def assess_documents(
                     completed_work_pages=pages,
                 )
                 provider_metadata["audit"] = audit_metadata
+                provider_metadata["duration_ms"] = int(
+                    (time.monotonic() - started) * 1000
+                )
+            validated = _ensure_question_display_fields(validated)
+            if config.WHOLE_DOCUMENT_CONTEXT_ENABLED:
+                try:
+                    validated, context_metadata = _enrich_document_context(
+                        validated,
+                        model=selected_model,
+                        document_paths=document_paths,
+                    )
+                    provider_metadata["document_context"] = context_metadata
+                except Exception as exc:
+                    provider_metadata["document_context"] = {
+                        "status": "unavailable",
+                        "error_type": type(exc).__name__,
+                    }
+                    validated["warnings"] = list(
+                        validated.get("warnings") or []
+                    ) + [
+                        "Complete question transcription could not be generated "
+                        "for this run; the validated marks are unaffected."
+                    ]
+            if config.WHOLE_DOCUMENT_FEEDBACK_ENABLED:
+                try:
+                    validated, feedback_metadata = _enrich_feedback(
+                        validated,
+                        model=selected_model,
+                    )
+                    provider_metadata["feedback"] = feedback_metadata
+                except Exception as exc:
+                    # A translation/coaching outage must not discard validated
+                    # marks. The English marking rationale remains available.
+                    provider_metadata["feedback"] = {
+                        "status": "unavailable",
+                        "error_type": type(exc).__name__,
+                    }
+                    validated["warnings"] = list(
+                        validated.get("warnings") or []
+                    ) + [
+                        "Bilingual coaching could not be generated for this "
+                        "run; the validated marks are unaffected."
+                    ]
                 provider_metadata["duration_ms"] = int(
                     (time.monotonic() - started) * 1000
                 )

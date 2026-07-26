@@ -63,11 +63,20 @@ def test_validator_rejects_wrong_page_and_positive_mark_for_blank_evidence():
 def test_assessment_contract_requires_complete_math_question_context():
     schema = document_assessment.assessment_schema()
     question_schema = schema["properties"]["questions"]["items"]
-    assert "question_text" in question_schema["required"]
-    assert "question_latex" not in question_schema["properties"]
-    prompt = document_assessment._prompt("detailed")
-    assert "complete readable question" in prompt
-    assert "repeat the parent stem" in prompt
+    assert "question_text" not in question_schema["properties"]
+    context_schema = document_assessment.document_context_schema()
+    context_question = context_schema["properties"]["questions"]["items"]
+    assert "question_text" in context_question["required"]
+    assert "question_latex" not in context_question["properties"]
+    prompt = document_assessment._document_context_prompt(
+        validate_assessment(
+            valid_assessment("detailed"),
+            mode="detailed",
+            completed_work_pages=2,
+        )
+    )
+    assert "complete readable printed question" in prompt
+    assert "repeat its parent stem" in prompt
     assert r"\frac" in prompt
 
 
@@ -210,7 +219,7 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
     file_part = calls[1]["input"][0]["content"][1]
     assert file_part["type"] == "input_file"
     assert file_part["file_data"].startswith("data:application/pdf;base64,")
-    assert calls[1]["max_output_tokens"] == 8192
+    assert calls[1]["max_output_tokens"] == 16384
 
 
 def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
@@ -257,7 +266,7 @@ def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
     assert "PAGE 1" in content[0]["text"]
     assert "Student Work: 2x" in content[0]["text"]
     assert "input_file" not in content[0]["text"]
-    assert calls[0][1]["retries"] == 0
+    assert calls[0][1]["retries"] == 1
     assert result["questions"][0]["question_latex"] == r"Differentiate \(x^2\)."
 
 
@@ -342,3 +351,35 @@ def test_independent_audit_must_cover_every_question():
             completed_work_pages=2,
         )
     assert "audit omitted labels" in str(exc.value)
+
+
+def test_bilingual_feedback_enriches_without_changing_validated_marks():
+    result = validate_assessment(
+        valid_assessment("estimate"),
+        mode="estimate",
+        completed_work_pages=2,
+    )
+    enriched = document_assessment._apply_feedback(
+        result,
+        {
+            "questions": [
+                {
+                    "label": "Q1",
+                    "rationale_zh": "方法正确，但最后一步没有化简。",
+                    "improvement": "Complete the final simplification.",
+                    "improvement_zh": "完成最后的化简。",
+                }
+            ],
+            "strengths": ["Correct differentiation method."],
+            "weaknesses": ["Final simplification."],
+            "recommendations": ["Check the final line."],
+            "warnings_zh": [],
+            "strengths_zh": ["求导方法正确。"],
+            "weaknesses_zh": ["最后的化简。"],
+            "recommendations_zh": ["检查最后一行。"],
+        },
+    )
+    assert enriched["estimated_score"] == result["estimated_score"]
+    assert enriched["questions"][0]["awarded_mark"] == 2
+    assert enriched["questions"][0]["rationale_zh"].startswith("方法正确")
+    assert enriched["recommendations_zh"] == ["检查最后一行。"]

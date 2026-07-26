@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import http.client
 import json
 import os
 import ssl
@@ -104,7 +105,12 @@ def api_post_json(
             last_error = exc
             if exc.code not in {408, 429, 500, 502, 503, 504} or attempt + 1 >= attempts:
                 raise
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionResetError,
+            http.client.RemoteDisconnected,
+        ) as exc:
             last_error = exc
             if attempt + 1 >= attempts:
                 raise
