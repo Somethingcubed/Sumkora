@@ -20,6 +20,7 @@ from learning import (
 )
 from main import app
 from question_bank import ingest_question_bank_zip
+from self_service import _match_question_bank_parent
 
 
 client = TestClient(app)
@@ -186,7 +187,11 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     practice = practice_set_detail(student_id, set_id)
     assert practice["set"]["requested_count"] == 10
     assert len(practice["items"]) == 10
-    assert practice_pdf(student_id, set_id, "questions", "en").startswith(b"%PDF")
+    question_pdf = practice_pdf(student_id, set_id, "questions", "en")
+    assert question_pdf.startswith(b"%PDF")
+    with fitz.open(stream=question_pdf, filetype="pdf") as document:
+        assert len(document) < 11
+        assert "Sumkora worksheet" in document[0].get_text()
     assert practice_pdf(student_id, set_id, "answers", "zh").startswith(b"%PDF")
 
     cookies = login(email)
@@ -198,6 +203,120 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert client.get(
         f"/student/practice/{set_id}/questions.pdf", cookies=cookies
     ).headers["content-type"].startswith("application/pdf")
+
+
+def test_mistake_book_recombines_sibling_subquestions_for_context():
+    student_id = create_student("question-context@student.local")
+    paper_id = execute(
+        """
+        INSERT INTO student_papers
+        (student_id, title, syllabus_code, paper_number, maximum_marks,
+         source_type, status, latest_version_number, created_at, updated_at)
+        VALUES (?, 'Context paper', '0606', '13', 5, 'official',
+                'completed', 1, ?, ?)
+        """,
+        (student_id, now(), now()),
+    )
+    version_id = execute(
+        """
+        INSERT INTO paper_analysis_versions
+        (paper_id, version_number, question_paper_path, answer_script_path,
+         status, current_stage, assessment_mode, created_at, updated_at)
+        VALUES (?, 1, '', 'work.pdf', 'completed', 'completed', 'detailed', ?, ?)
+        """,
+        (paper_id, now(), now()),
+    )
+    for label, text, latex, earned, available in [
+        (
+            "Q12(a)",
+            "In the expansion of (2 + x)^59, write down the coefficient.",
+            r"In the expansion of \((2+x)^{59}\), write down the coefficient.",
+            1,
+            1,
+        ),
+        (
+            "Q12(b)",
+            "For this expansion, find r.",
+            r"For this expansion, find \(r\).",
+            1,
+            4,
+        ),
+    ]:
+        execute(
+            """
+            INSERT INTO analysis_question_results
+            (analysis_version_id, question_label, question_text,
+             question_latex, maximum_marks, topic, skill, ai_mark,
+             ai_confidence, ai_rationale, assessment_status, awarded_mark,
+             created_at)
+            VALUES (?, ?, ?, ?, ?, 'Sequences and series',
+                    'binomial theorem', ?, 0.9, 'Check the coefficient.',
+                    'graded', ?, ?)
+            """,
+            (
+                version_id,
+                label,
+                text,
+                latex,
+                available,
+                earned,
+                earned,
+                now(),
+            ),
+        )
+    book = mistake_book(student_id)
+    assert book["counts"]["total"] == 1
+    question = book["items"][0]["complete_question_text"]
+    assert "Q12(a)" in question
+    assert r"\((2+x)^{59}\)" in question
+    assert "Q12(b)" in question
+
+
+def test_analysis_links_only_one_complete_approved_parent_question():
+    pack_id = execute(
+        """
+        INSERT INTO paper_packs
+        (syllabus_code, year, examination_session, component, paper_number,
+         calculator_policy, ingestion_status, created_at, updated_at)
+        VALUES ('0606', 2023, 'February/March', '12', '1',
+                'non-calculator', 'ready', ?, ?)
+        """,
+        (now(), now()),
+    )
+    question_id = execute(
+        """
+        INSERT INTO paper_questions
+        (paper_pack_id, question_number, prompt_text, maximum_marks,
+         topic, skills, calculator_policy, question_demand,
+         parsing_confidence, answer_text, source_key, question_asset_path,
+         dependency_group, review_status, order_index)
+        VALUES (?, '1', 'Complete parent question.', 4, 'Algebra',
+                '["equations"]', 'non-calculator', 'standard', 1,
+                'Answer', '0606_m23_12_q1', 'complete-q1.pdf',
+                '0606_m23_12_q1', 'ready', 1)
+        """,
+        (pack_id,),
+    )
+    matched = _match_question_bank_parent(
+        {
+            "syllabus_code": "0606",
+            "paper_reference": "0606/12/F/M/23",
+            "paper_title": "Additional Mathematics",
+        },
+        {"label": "Q1(a)"},
+    )
+    assert matched == question_id
+    assert (
+        _match_question_bank_parent(
+            {
+                "syllabus_code": "0606",
+                "paper_reference": "unknown paper",
+                "paper_title": "Additional Mathematics",
+            },
+            {"label": "Q1(a)"},
+        )
+        is None
+    )
 
 
 def _pdf(pages):

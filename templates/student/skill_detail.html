@@ -58,7 +58,7 @@
       <summary class="cursor-pointer text-sm font-medium">{{ tr('View contributing questions', '查看相关题目') }}</summary>
       <div class="mt-3 divide-y divide-slate-100">
         {% for question in paper.questions %}
-        <div class="py-3 text-sm"><div class="flex justify-between gap-3"><p class="font-medium">{{ question.label }} · {{ question.question_text|truncate(100) }}</p><p>{{ question.earned }}/{{ question.available }}</p></div><p class="text-slate-500 mt-1">{{ question.rationale_zh if lang == 'zh' and question.rationale_zh else question.rationale }}</p></div>
+        <div class="py-3 text-sm"><div class="flex justify-between gap-3"><p class="math-copy font-medium">{{ question.label }} · {{ question.question_text|truncate(100) }}</p><p>{{ question.earned }}/{{ question.available }}</p></div><p class="text-slate-500 mt-1">{{ question.rationale_zh if lang == 'zh' and question.rationale_zh else question.rationale }}</p></div>
         {% endfor %}
       </div>
     </details>

@@ -4,20 +4,20 @@
 {% if notice %}<div class="form-message form-message-success mb-6" role="status">{{ notice }}</div>{% endif %}
 
 {% if not direct.papers %}
-<section class="surface max-w-4xl mx-auto overflow-hidden">
+<section class="surface welcome-surface max-w-4xl mx-auto overflow-hidden">
   <div class="grid md:grid-cols-[1.2fr_0.8fr] gap-8 items-center py-4 md:py-8">
     <div>
-      <p class="eyebrow">{{ tr('Welcome', '欢迎') }}，{{ user.name }}</p>
+      <p class="eyebrow">{{ tr('Welcome', '欢迎') }}{{ ',' if lang == 'en' else '，' }} {{ user.name }}</p>
       <h1 class="text-3xl md:text-4xl font-bold tracking-tight mt-3">{{ tr('Start with one completed paper.', '从一份已完成的试卷开始。') }}</h1>
       <p class="text-slate-600 mt-4 leading-7">{{ tr('Upload your completed work. A mark scheme is optional and unlocks detailed marking.', '上传你已完成的答卷；评分标准为选填，上传后可获得详细批改。') }}</p>
       <a href="/student/analyse" class="button button-primary mt-6">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
     </div>
-    <ol class="space-y-3" aria-label="{{ tr('Files needed', '所需文件') }}">
+    <ol class="welcome-steps" aria-label="{{ tr('Files needed', '所需文件') }}">
       {% for title, copy in [
         (tr('Completed work','已完成的答卷'),tr('Required: your complete handwritten or typed paper','必填：完整的手写或电子答卷')),
         (tr('Mark scheme','评分标准'),tr('Optional: add it for exact question-by-question marking','选填：上传后可获得逐题详细批改'))
       ] %}
-      <li class="flex gap-3 rounded-xl border border-slate-200 p-4 bg-slate-50/70">
+      <li>
         <span class="upload-number mb-0 shrink-0">{{ loop.index }}</span>
         <div><p class="font-semibold">{{ title }}</p><p class="text-sm text-slate-500 mt-0.5">{{ copy }}</p></div>
       </li>
@@ -26,82 +26,102 @@
   </div>
 </section>
 {% else %}
-<div class="page-header">
+<div class="dashboard-intro">
   <div>
-    <p class="eyebrow">{{ tr('Your progress', '你的学习进展') }}</p>
-    <h1>{{ tr('Welcome back', '欢迎回来') }}，{{ user.name }}</h1>
-    <p>{{ tr('Pick up where you left off or analyse another paper.', '继续之前的学习，或分析另一份试卷。') }}</p>
+    <p class="eyebrow">{{ tr('Your learning space', '你的学习空间') }}</p>
+    <h1>{{ tr('Welcome back', '欢迎回来') }}{{ ',' if lang == 'en' else '，' }} {{ user.name }}</h1>
+    <p>{{ tr('Review what matters, then keep moving.', '复习真正重要的内容，然后继续进步。') }}</p>
   </div>
   <a href="/student/analyse" class="button button-primary">{{ tr('Analyse a paper', '分析试卷') }}</a>
 </div>
 
-<section class="surface mb-6">
-  <div class="flex flex-wrap items-start justify-between gap-6">
-    <div>
-      <p class="text-sm text-slate-500">{{ tr('Latest paper', '最近试卷') }}</p>
-      <h2 class="text-xl font-semibold mt-1">{{ direct.papers[0].title }}</h2>
-      <p class="text-sm text-slate-500 mt-2">{{ direct.papers[0].updated_at[:10] }} · {{ tr('Analysis', '分析') }} v{{ direct.papers[0].latest_version_number }}</p>
-      <a href="/student/papers/{{ direct.papers[0].id }}" class="inline-block text-sm font-semibold text-indigo-600 mt-4">{{ tr('View paper analysis', '查看试卷分析') }}</a>
-    </div>
-    <div class="flex gap-8">
-      <div><p class="text-xs text-slate-500">{{ tr('Latest score', '最近成绩') }}</p><p class="text-3xl font-bold tracking-tight mt-1">{% if direct.latest_percentage is not none %}{{ direct.latest_percentage }}%{% else %}—{% endif %}</p></div>
-      <div><p class="text-xs text-slate-500">{{ tr('Average', '平均成绩') }}</p><p class="text-3xl font-bold tracking-tight mt-1">{% if direct.average_percentage is not none %}{{ direct.average_percentage }}%{% else %}—{% endif %}</p></div>
-    </div>
+<section class="result-overview mb-6">
+  <div class="result-paper">
+    <p class="section-kicker">{{ tr('Latest paper', '最近试卷') }}</p>
+    <h2>{{ direct.papers[0].title }}</h2>
+    <p>{{ direct.papers[0].updated_at[:10] }} · {{ tr('Analysis', '分析') }} v{{ direct.papers[0].latest_version_number }}</p>
+    <a href="/student/papers/{{ direct.papers[0].id }}">{{ tr('Open analysis', '查看分析') }} <span aria-hidden="true">→</span></a>
+  </div>
+  <div class="result-score">
+    <p>{{ tr('Latest score', '最近成绩') }}</p>
+    <strong>{% if direct.latest_percentage is not none %}{{ direct.latest_percentage }}%{% else %}—{% endif %}</strong>
+  </div>
+  <div class="result-score result-score-muted">
+    <p>{{ tr('Your average', '你的平均成绩') }}</p>
+    <strong>{% if direct.average_percentage is not none %}{{ direct.average_percentage }}%{% else %}—{% endif %}</strong>
   </div>
 </section>
 
-<div class="grid lg:grid-cols-[1.3fr_0.7fr] gap-6">
-  <div class="space-y-6">
-    <section class="surface">
-      <div class="flex justify-between items-center gap-4">
-        <div><h2 class="text-lg font-semibold">{{ tr('Recent papers', '最近试卷') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr(count_label(direct.papers|length, 'paper') ~ ' saved', '已保存 ' ~ direct.papers|length ~ ' 份试卷') }}</p></div>
-        <a href="/student/papers" class="text-sm font-semibold text-indigo-600">{{ tr('View all', '查看全部') }}</a>
+<div class="learning-tool-grid mb-8">
+  <a href="/student/mistakes" class="learning-tool learning-tool-mistakes">
+    <span class="tool-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 4.5h8M8 9h8M8 13.5h5M6 2.5h12a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2Z"/></svg>
+    </span>
+    <span class="tool-copy">
+      <span class="section-kicker">{{ tr('Learn from errors', '从错误中学习') }}</span>
+      <strong>{{ tr('Mistake Book', '错题本') }}</strong>
+      <span>{{ learning_book.counts.total }} {{ tr('questions ready to review', '道错题等待复习') }}</span>
+    </span>
+    <span class="tool-arrow" aria-hidden="true">→</span>
+  </a>
+  <a href="/student/practice" class="learning-tool learning-tool-practice">
+    <span class="tool-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="m13.5 3-8 11h6l-1 7 8-11h-6l1-7Z"/></svg>
+    </span>
+    <span class="tool-copy">
+      <span class="section-kicker">{{ tr('Build momentum', '保持进步') }}</span>
+      <strong>{{ tr('Targeted practice', '针对练习') }}</strong>
+      <span>{% if learning_sets %}{{ learning_sets|length }} {{ tr('worksheets created', '份练习册已生成') }}{% else %}{{ tr('Create a 10–50 question worksheet', '生成 10–50 道题的练习册') }}{% endif %}</span>
+    </span>
+    <span class="tool-arrow" aria-hidden="true">→</span>
+  </a>
+</div>
+
+<div class="dashboard-columns">
+  <div class="dashboard-main">
+    <section class="list-section">
+      <div class="section-heading">
+        <div><h2>{{ tr('Recent papers', '最近试卷') }}</h2><p>{{ tr(count_label(direct.papers|length, 'paper') ~ ' saved', '已保存 ' ~ direct.papers|length ~ ' 份试卷') }}</p></div>
+        <a href="/student/papers">{{ tr('View all', '查看全部') }}</a>
       </div>
-      <div class="divide-y divide-slate-100 mt-4">
+      <div class="paper-list">
         {% for item in direct.papers[:4] %}
-        <a href="{% if item.analysis_status == 'review' %}/student/analysis/{{ item.latest_version_id }}/review{% elif item.analysis_status in ['queued','processing'] %}/student/analysis/{{ item.latest_version_id }}/processing{% else %}/student/papers/{{ item.id }}{% endif %}" class="flex justify-between items-center gap-4 py-4 group">
-          <div><p class="font-medium group-hover:text-indigo-700">{{ item.title }}</p><p class="text-xs text-slate-500 mt-1">{{ item.syllabus_code }} · {{ item.updated_at[:10] }}</p></div>
-          <div class="text-right"><span class="badge badge-{{ item.analysis_status or item.status }}">{{ (item.analysis_status or item.status).replace('_', ' ')|capitalize }}</span>{% if item.provisional_score is not none %}<p class="font-semibold mt-1">{{ item.provisional_score }}/{{ item.maximum_marks }}</p>{% endif %}</div>
+        <a href="{% if item.analysis_status == 'review' %}/student/analysis/{{ item.latest_version_id }}/review{% elif item.analysis_status in ['queued','processing'] %}/student/analysis/{{ item.latest_version_id }}/processing{% else %}/student/papers/{{ item.id }}{% endif %}" class="paper-row">
+          <div><p>{{ item.title }}</p><span>{{ item.syllabus_code }} · {{ item.updated_at[:10] }}</span></div>
+          <div class="paper-row-result"><span class="badge badge-{{ item.analysis_status or item.status }}">{{ (item.analysis_status or item.status).replace('_', ' ')|capitalize }}</span>{% if item.provisional_score is not none %}<strong>{{ item.provisional_score }}/{{ item.maximum_marks }}</strong>{% endif %}</div>
         </a>
         {% endfor %}
       </div>
     </section>
 
-    <section class="surface">
-      <div class="flex justify-between gap-4">
-        <div><h2 class="text-lg font-semibold">{{ tr('What’s going well', '表现较好的方面') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Based on repeated evidence across your papers.', '基于多份试卷中的重复证据。') }}</p></div>
-        <a href="/student/skills" class="text-sm font-semibold text-indigo-600">{{ tr('Full profile', '完整学习画像') }}</a>
+    <section class="list-section">
+      <div class="section-heading">
+        <div><h2>{{ tr('Skills taking shape', '正在形成的技能') }}</h2><p>{{ tr('Open a skill to see its paper-by-paper trend.', '打开技能，查看每份试卷中的变化趋势。') }}</p></div>
+        <a href="/student/skills">{{ tr('Full profile', '完整学习画像') }}</a>
       </div>
-      <div class="grid md:grid-cols-2 gap-3 mt-4">
+      <div class="skill-list">
         {% for item in skill_profile.strengths[:4] %}
-        <a href="{{ skill_url(item.skill) }}" class="rounded-xl border border-slate-200 p-4 hover:border-indigo-400 group"><div class="flex justify-between gap-3"><p class="font-medium group-hover:text-indigo-700">{{ skill_label(item.skill) }}</p><span class="badge badge-completed">{{ skill_status_label(item.status) }}</span></div><p class="text-xs text-slate-500 mt-2">{{ item.evidence_count }} {{ tr('observations', '次记录') }} · {{ item.distinct_papers }} {{ tr('papers', '份试卷') }}</p></a>
-        {% else %}<p class="md:col-span-2 text-sm text-slate-500">{{ tr('Complete more papers to build a reliable picture of your strengths.', '完成更多试卷后，系统才能更可靠地判断你的强项。') }}</p>{% endfor %}
+        <a href="{{ skill_url(item.skill) }}" class="skill-row">
+          <div><p>{{ skill_label(item.skill) }}</p><span>{{ item.evidence_count }} {{ tr('observations', '次记录') }} · {{ item.distinct_papers }} {{ tr('papers', '份试卷') }}</span></div>
+          <span class="skill-state">{{ skill_status_label(item.status) }}</span>
+        </a>
+        {% else %}<p class="empty-row">{{ tr('Complete more papers to build a reliable picture of your strengths.', '完成更多试卷后，系统才能更可靠地判断你的强项。') }}</p>{% endfor %}
       </div>
     </section>
   </div>
 
-  <aside class="space-y-6">
-    <section class="surface">
-      <p class="eyebrow">{{ tr('Focus next', '下一步重点') }}</p>
-      {% if skill_profile.concerns %}
-      {% set concern = skill_profile.concerns[0] %}
-      <h2 class="text-xl font-semibold mt-2">{{ skill_label(concern.skill) }}</h2>
-      <p class="text-sm text-slate-500 mt-2">{{ concern.distinct_papers }} {{ tr('papers provide supporting evidence.', '份试卷提供了相关证据。') }}</p>
-      <a href="{{ skill_url(concern.skill) }}" class="inline-block text-sm font-semibold text-indigo-600 mt-4">{{ tr('See supporting evidence', '查看相关证据') }}</a>
-      {% else %}
-      <h2 class="text-lg font-semibold mt-2">{{ tr('Keep building evidence', '继续积累学习证据') }}</h2>
-      <p class="text-sm text-slate-500 mt-2">{{ tr('No recurring concern is clear yet.', '目前还没有明确的重复性问题。') }}</p>
-      {% endif %}
-    </section>
-    <section class="surface">
-      <h2 class="font-semibold">{{ tr('Useful next steps', '建议的下一步') }}</h2>
-      <div class="mt-4 space-y-3 text-sm">
-        <a class="block text-indigo-600 font-medium" href="/student/compare">{{ tr('Compare completed papers', '对比已完成的试卷') }}</a>
-        <a class="block text-indigo-600 font-medium" href="/student/mistakes">{{ tr('Review your Mistake Book', '复习错题本') }}</a>
-        <a class="block text-indigo-600 font-medium" href="/student/practice">{{ tr('Create targeted practice', '生成针对练习') }}</a>
-        <a class="block text-indigo-600 font-medium" href="/student/report">{{ tr('Download progress report', '下载学习进展报告') }}</a>
-      </div>
-    </section>
+  <aside class="focus-panel">
+    <p class="section-kicker">{{ tr('Focus next', '下一步重点') }}</p>
+    {% if skill_profile.concerns %}
+    {% set concern = skill_profile.concerns[0] %}
+    <h2>{{ skill_label(concern.skill) }}</h2>
+    <p>{{ concern.distinct_papers }} {{ tr('papers provide supporting evidence. Review the pattern before practising it.', '份试卷提供了相关证据。练习前先查看问题规律。') }}</p>
+    <a href="{{ skill_url(concern.skill) }}">{{ tr('See supporting evidence', '查看相关证据') }} <span aria-hidden="true">→</span></a>
+    {% else %}
+    <h2>{{ tr('Keep building evidence', '继续积累学习证据') }}</h2>
+    <p>{{ tr('No recurring concern is clear yet. Another paper will make your profile more useful.', '目前还没有明确的重复性问题。再分析一份试卷会让学习画像更有参考价值。') }}</p>
+    <a href="/student/analyse">{{ tr('Analyse another paper', '再分析一份试卷') }} <span aria-hidden="true">→</span></a>
+    {% endif %}
   </aside>
 </div>
 {% endif %}

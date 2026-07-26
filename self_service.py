@@ -16,7 +16,7 @@ import fitz
 
 import config
 from db import execute, query_all, query_one
-from document_assessment import assess_documents
+from document_assessment import ASSESSMENT_PROMPT_VERSION, assess_documents
 from grading import grade_question
 from ocr import cxsee_vl_ocr_detailed
 from pdf_utils import get_page_image_base64, is_valid_pdf, save_upload
@@ -63,6 +63,52 @@ def parse_json(value, fallback):
         return parsed
     except (TypeError, json.JSONDecodeError):
         return fallback
+
+
+def _match_question_bank_parent(
+    assessment: dict,
+    question: dict,
+) -> int | None:
+    """Link a result only when one complete approved source question is clear."""
+    syllabus_match = re.search(
+        r"\b(\d{4})\b",
+        str(assessment.get("syllabus_code") or ""),
+    )
+    question_match = re.search(r"\d+", str(question.get("label") or ""))
+    if not syllabus_match or not question_match:
+        return None
+    reference = " ".join(
+        (
+            str(assessment.get("paper_reference") or ""),
+            str(assessment.get("paper_title") or ""),
+        )
+    )
+    component_candidates = [
+        value
+        for value in re.findall(r"(?<!\d)([12][1-3])(?!\d)", reference)
+    ]
+    if not component_candidates:
+        return None
+    component = component_candidates[0]
+    rows = query_all(
+        """
+        SELECT pq.id
+        FROM paper_questions pq
+        JOIN paper_packs pp ON pp.id = pq.paper_pack_id
+        WHERE pp.syllabus_code = ? AND pp.component = ?
+          AND pq.question_number = ? AND pq.parent_question_id IS NULL
+          AND pq.review_status = 'ready'
+          AND pq.question_asset_path IS NOT NULL
+        ORDER BY pp.year DESC, pq.id DESC
+        LIMIT 2
+        """,
+        (
+            syllabus_match.group(1),
+            component,
+            question_match.group(0),
+        ),
+    )
+    return int(rows[0]["id"]) if len(rows) == 1 else None
 
 
 def pdf_text(path: str, max_pages: int | None = None) -> str:
@@ -458,7 +504,7 @@ def create_student_paper_draft(
             "",
             config.WHOLE_DOCUMENT_MODEL,
             config.WHOLE_DOCUMENT_MODEL,
-            "whole-document-assessment-v1",
+            ASSESSMENT_PROMPT_VERSION,
             config.OCR_RENDER_DPI,
             json_text(
                 []
@@ -535,7 +581,7 @@ def create_rerun_draft(
             "",
             config.WHOLE_DOCUMENT_MODEL,
             config.WHOLE_DOCUMENT_MODEL,
-            "whole-document-assessment-v1",
+            ASSESSMENT_PROMPT_VERSION,
             config.OCR_RENDER_DPI,
             json_text(
                 []
@@ -887,7 +933,7 @@ def _run_legacy_self_service_analysis(version_id: int) -> dict:
             result_id = execute(
                 """
                 INSERT INTO analysis_question_results
-                (analysis_version_id, question_label, question_text,
+                (analysis_version_id, question_label, question_text, question_latex,
                  mark_scheme_text, structured_criteria, maximum_marks, topic,
                  subtopic, skill, answer_page, response_text,
                  mapping_confidence, ai_mark, ai_confidence, ai_rationale,
@@ -1116,7 +1162,7 @@ def run_self_service_analysis(version_id: int) -> dict:
                 provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
                 provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
                 provider_metadata.get("prompt_version")
-                or "whole-document-assessment-v1",
+                or ASSESSMENT_PROMPT_VERSION,
                 now_iso(),
                 version_id,
             ),
@@ -1165,24 +1211,28 @@ def run_self_service_analysis(version_id: int) -> dict:
                 risk_flags.append(f"assessment_{status}")
             if mode == "estimate":
                 risk_flags.append("estimated_without_mark_scheme")
+            paper_question_id = _match_question_bank_parent(assessment, item)
             result_id = execute(
                 """
                 INSERT INTO analysis_question_results
                 (analysis_version_id, question_label, question_text,
-                 mark_scheme_text, structured_criteria, maximum_marks, topic,
+                 question_latex, mark_scheme_text, structured_criteria,
+                 maximum_marks, topic,
                  subtopic, skill, answer_page, response_text,
                  mapping_confidence, ai_mark, ai_confidence, ai_rationale,
                  ai_rationale_zh, cited_evidence, error_category, error_mechanism,
                  error_mechanism_zh,
                  deterministic_check, risk_flags, model, prompt_version,
-                 assessment_status, awarded_mark, evidence_pages, created_at)
+                 assessment_status, awarded_mark, evidence_pages,
+                 paper_question_id, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     version_id,
                     item["label"],
                     item.get("question_text") or "",
+                    item.get("question_latex") or item.get("question_text") or "",
                     "Official mark scheme supplied as a complete document."
                     if scheme_path
                     else "No mark scheme supplied; this is an estimate.",
@@ -1227,10 +1277,11 @@ def run_self_service_analysis(version_id: int) -> dict:
                     json_text(risk_flags),
                     provider_metadata.get("model") or config.WHOLE_DOCUMENT_MODEL,
                     provider_metadata.get("prompt_version")
-                    or "whole-document-assessment-v1",
+                    or ASSESSMENT_PROMPT_VERSION,
                     status,
                     float(mark) if mark is not None else None,
                     json_text(pages),
+                    paper_question_id,
                     now_iso(),
                 ),
             )
@@ -1448,47 +1499,3 @@ def direct_summary(student_id: int) -> dict:
         if percentages
         else None,
     }
-
-
-def compare_direct_papers(student_id: int, paper_ids: list[int]) -> dict:
-    papers = []
-    for paper_id in paper_ids:
-        result = analysis_result(student_id, paper_id)
-        if not result or result["version"]["status"] != "completed":
-            continue
-        paper = dict(result["paper"])
-        version = result["version"]
-        maximum = float(paper["maximum_marks"] or 0)
-        provisional = float(version["provisional_score"] or 0)
-        lost_by_topic = {}
-        for question in result["questions"]:
-            lost = max(
-                0.0,
-                float(question["maximum_marks"] or 0)
-                - float(question["ai_mark"] or 0),
-            )
-            topic = question["topic"] or "Unclassified"
-            lost_by_topic[topic] = round(lost_by_topic.get(topic, 0) + lost, 2)
-        papers.append(
-            {
-                **paper,
-                "version_id": version["id"],
-                "version_number": version["version_number"],
-                "earned": provisional,
-                "possible": maximum,
-                "percentage": round(100 * provisional / maximum, 1)
-                if maximum
-                else 0,
-                "confirmed_min": version["confirmed_min_score"],
-                "possible_max": version["possible_max_score"],
-                "marks_lost": lost_by_topic,
-            }
-        )
-    warnings = []
-    if len(papers) < 2:
-        warnings.append("Select at least two completed papers for a useful comparison.")
-    if len({paper["possible"] for paper in papers}) > 1:
-        warnings.append("Maximum marks differ; compare percentages as well as raw marks.")
-    if len({paper["calculator_policy"] for paper in papers}) > 1:
-        warnings.append("Calculator policies differ between the selected papers.")
-    return {"papers": papers, "warnings": warnings}

@@ -115,6 +115,26 @@ Updated: 26 July 2026
 - A real 0606 question-paper/mark-scheme pair imported into an isolated
   database as 12 ready questions totalling 80 marks.
 
+## Student refinement - 2026-07-26
+
+- The dashboard now gives Mistake Book and Targeted Practice two prominent,
+  restrained feature cards; paper comparison and the generic next-steps card
+  are no longer present in student navigation.
+- Recent papers and skill evidence use lighter list layouts so cards are
+  reserved for genuinely actionable destinations.
+- Whole-document assessment v2 requests a complete standalone question stem
+  plus TeX-delimited mathematical content for every result.
+- Mistake Book entries recombine available sibling subquestions so a weak
+  subpart is not presented without its parent context.
+- Worksheet selection is limited to top-level approved question groups and
+  deduplicates dependency groups.
+- Printable worksheets, answers and Mistake Books use a compact A4 compositor:
+  original PDF crops remain vector content and multiple short questions flow
+  onto one page.
+- Full automated suite: 38 tests passed. Desktop/mobile, English/Chinese and
+  browser-console checks passed. Sample Mistake Book question and answer PDFs
+  were rendered to PNG and visually inspected.
+
 ## Intentionally retained legacy identifiers
 
 These are not shown to students or researchers:
@@ -149,6 +169,9 @@ These are not shown to students or researchers:
 - Shared rate limiting, malware scanning, MFA and durable worker cancellation
   are not implemented.
 - Provider student-data terms/retention and PyMuPDF licensing require review.
+- Existing analyses created before whole-document assessment v2 retain their
+  earlier plain-text question transcriptions. Re-running those papers is
+  required to obtain newly generated complete TeX question text.
 
 ## Exact verification commands
 

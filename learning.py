@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import textwrap
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,7 +47,8 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
         """
         SELECT aso.*, sp.title AS paper_title, sp.id AS source_id,
                sp.updated_at AS paper_date, pav.assessment_mode,
-               aqr.question_label, aqr.question_text, aqr.ai_rationale,
+               aqr.question_label, aqr.question_text, aqr.question_latex,
+               aqr.ai_rationale,
                aqr.ai_rationale_zh, aqr.assessment_status,
                aqr.paper_question_id
         FROM analysis_skill_observations aso
@@ -64,6 +66,7 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
         SELECT so.*, a.title AS paper_title, s.id AS source_id,
                s.uploaded_at AS paper_date, 'detailed' AS assessment_mode,
                q.label AS question_label, q.question_text,
+               '' AS question_latex,
                gd.ai_notes AS ai_rationale, '' AS ai_rationale_zh,
                'graded' AS assessment_status, NULL AS paper_question_id
         FROM skill_observations so
@@ -123,7 +126,7 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
         record["questions"].append(
             {
                 "label": row["question_label"],
-                "question_text": row["question_text"],
+                "question_text": row["question_latex"] or row["question_text"],
                 "earned": earned,
                 "available": available,
                 "outcome": outcome,
@@ -239,7 +242,8 @@ def mistake_book(
     sync_mistake_book(student_id)
     rows = query_all(
         """
-        SELECT mbe.*, aqr.question_label, aqr.question_text,
+        SELECT mbe.*, aqr.analysis_version_id, aqr.question_label,
+               aqr.question_text, aqr.question_latex,
                aqr.maximum_marks, aqr.awarded_mark, aqr.ai_mark,
                aqr.ai_rationale, aqr.ai_rationale_zh,
                aqr.mark_scheme_text, aqr.topic, aqr.skill,
@@ -260,6 +264,26 @@ def mistake_book(
         """,
         (student_id,),
     )
+    sibling_rows = query_all(
+        """
+        SELECT aqr.analysis_version_id, aqr.question_label,
+               aqr.question_text, aqr.question_latex
+        FROM analysis_question_results aqr
+        JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        WHERE sp.student_id = ?
+        ORDER BY aqr.analysis_version_id, aqr.id
+        """,
+        (student_id,),
+    )
+    sibling_groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    for sibling in sibling_rows:
+        label = str(sibling["question_label"] or "")
+        match = re.search(r"\d+", label)
+        parent_label = match.group(0) if match else label.lower()
+        sibling_groups[(sibling["analysis_version_id"], parent_label)].append(
+            dict(sibling)
+        )
     items = []
     topics = set()
     for raw in rows:
@@ -281,6 +305,35 @@ def mistake_book(
             if float(mark or 0) < maximum
             else "correct"
         )
+        match = re.search(r"\d+", str(item["question_label"] or ""))
+        parent_label = match.group(0) if match else str(item["question_label"]).lower()
+        siblings = sibling_groups.get(
+            (item["analysis_version_id"], parent_label),
+            [],
+        )
+        complete_parts = []
+        for sibling in siblings:
+            sibling_text = (
+                sibling.get("question_latex")
+                or sibling.get("question_text")
+                or ""
+            ).strip()
+            if not sibling_text:
+                continue
+            label = str(sibling.get("question_label") or "").strip()
+            complete_parts.append(
+                sibling_text
+                if sibling_text.lower().startswith(label.lower())
+                else f"{label}  {sibling_text}"
+            )
+        item["complete_question_text"] = (
+            "\n\n".join(complete_parts)
+            if len(complete_parts) > 1
+            else item.get("question_latex")
+            or item.get("question_text")
+            or ""
+        )
+        item["has_parent_context"] = len(complete_parts) > 1
         items.append(item)
     return {
         "items": items,
@@ -347,6 +400,7 @@ def _bank_candidates() -> list[dict]:
         FROM paper_questions pq
         JOIN paper_packs pp ON pp.id = pq.paper_pack_id
         WHERE pq.review_status = 'ready'
+          AND pq.parent_question_id IS NULL
           AND (pq.question_asset_path IS NOT NULL OR pq.prompt_text != '')
         ORDER BY pp.year DESC, pp.component, pq.order_index
         """
@@ -460,7 +514,20 @@ def create_practice_set(
         scored.append((score, item["id"], item, reason))
 
     scored.sort(key=lambda value: (-value[0], value[1]))
-    selected = scored[:count]
+    selected = []
+    selected_groups: set[str] = set()
+    for score, item_id, item, reason in scored:
+        group = str(
+            item.get("dependency_group")
+            or item.get("source_key")
+            or f"question:{item_id}"
+        )
+        if group in selected_groups:
+            continue
+        selected_groups.add(group)
+        selected.append((score, item_id, item, reason))
+        if len(selected) >= count:
+            break
     now = _now()
     title_en = {
         "weaknesses": "Targeted weakness practice",
@@ -573,49 +640,255 @@ def _font_name(page: fitz.Page, lang: str) -> str:
     return font_name
 
 
-def _text_page(
-    document: fitz.Document,
-    *,
-    title: str,
-    body: str,
-    lang: str,
-    footer: str = "Sumkora",
-) -> None:
-    page = document.new_page(width=fitz.paper_rect("a4").width, height=fitz.paper_rect("a4").height)
-    font = _font_name(page, lang)
-    page.insert_textbox(
-        fitz.Rect(54, 48, page.rect.width - 54, 94),
-        title,
-        fontname=font,
-        fontsize=17,
-        color=(0.12, 0.11, 0.29),
-    )
-    page.insert_textbox(
-        fitz.Rect(54, 108, page.rect.width - 54, page.rect.height - 58),
-        body,
-        fontname=font,
-        fontsize=10.5,
-        lineheight=1.35,
-        color=(0.15, 0.18, 0.25),
-    )
-    page.insert_text(
-        (54, page.rect.height - 28),
-        footer,
-        fontname=font,
-        fontsize=8,
-        color=(0.4, 0.45, 0.55),
-    )
+_SUPERSCRIPTS = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
 
 
-def _append_asset(target: fitz.Document, path: str | None) -> bool:
-    if not path or not os.path.isfile(path):
-        return False
-    try:
-        with fitz.open(path) as source:
-            target.insert_pdf(source)
-        return True
-    except (fitz.FileDataError, RuntimeError):
-        return False
+def _plain_math(value: str) -> str:
+    """Make TeX-like fallback text readable when no source PDF is available."""
+    text = str(value or "")
+    text = text.replace(r"\(", "").replace(r"\)", "")
+    text = text.replace(r"\[", "").replace(r"\]", "")
+    for _ in range(3):
+        text = re.sub(
+            r"\\frac\{([^{}]+)\}\{([^{}]+)\}",
+            r"(\1)/(\2)",
+            text,
+        )
+    replacements = {
+        r"\leq": "≤",
+        r"\le": "≤",
+        r"\geq": "≥",
+        r"\ge": "≥",
+        r"\neq": "≠",
+        r"\times": "×",
+        r"\div": "÷",
+        r"\pm": "±",
+        r"\infty": "∞",
+        r"\theta": "θ",
+        r"\pi": "π",
+        r"\sqrt": "√",
+        r"\sum": "Σ",
+        r"\therefore": "∴",
+        r"\in": "∈",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = re.sub(r"\\text\{([^{}]*)\}", r"\1", text)
+    text = re.sub(
+        r"\^\{([0-9+\-=()]+)\}",
+        lambda match: match.group(1).translate(_SUPERSCRIPTS),
+        text,
+    )
+    text = re.sub(
+        r"\^([0-9])",
+        lambda match: match.group(1).translate(_SUPERSCRIPTS),
+        text,
+    )
+    text = text.replace("{", "").replace("}", "")
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+class _PdfFlow:
+    """Compact, vector-preserving A4 compositor for printable learning packs."""
+
+    def __init__(self, *, title: str, subtitle: str, lang: str):
+        self.document = fitz.open()
+        self.title = title
+        self.subtitle = subtitle
+        self.lang = lang
+        self.margin_x = 42
+        self.bottom = fitz.paper_rect("a4").height - 42
+        self.page: fitz.Page | None = None
+        self.font = "helv"
+        self.y = 0.0
+        self._new_page(first=True)
+
+    def _new_page(self, *, first: bool = False) -> None:
+        self.page = self.document.new_page(
+            width=fitz.paper_rect("a4").width,
+            height=fitz.paper_rect("a4").height,
+        )
+        self.font = _font_name(self.page, self.lang)
+        if first:
+            self.page.insert_text(
+                (self.margin_x, 48),
+                self.title,
+                fontname=self.font,
+                fontsize=17,
+                color=(0.08, 0.10, 0.17),
+            )
+            self.page.insert_textbox(
+                fitz.Rect(
+                    self.margin_x,
+                    60,
+                    self.page.rect.width - self.margin_x,
+                    88,
+                ),
+                self.subtitle,
+                fontname=self.font,
+                fontsize=8.8,
+                color=(0.38, 0.42, 0.50),
+            )
+            self.page.draw_line(
+                (self.margin_x, 94),
+                (self.page.rect.width - self.margin_x, 94),
+                color=(0.88, 0.89, 0.92),
+                width=0.7,
+            )
+            self.y = 112
+        else:
+            self.y = 42
+
+    def _ensure(self, height: float) -> None:
+        if self.y + height > self.bottom and self.y > 60:
+            self._new_page()
+
+    def add_asset(
+        self,
+        path: str | None,
+        *,
+        label: str,
+        source_label: str,
+    ) -> bool:
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            source = fitz.open(path)
+        except (fitz.FileDataError, RuntimeError):
+            return False
+        try:
+            for source_index, source_page in enumerate(source):
+                available_width = self.page.rect.width - 2 * self.margin_x
+                header_height = 24
+                scale = min(available_width / source_page.rect.width, 1.0)
+                rendered_height = source_page.rect.height * scale
+                needed = header_height + rendered_height + 16
+                self._ensure(needed)
+                remaining = self.bottom - self.y - header_height - 10
+                if rendered_height > remaining:
+                    scale = min(scale, remaining / source_page.rect.height)
+                    rendered_height = source_page.rect.height * scale
+                continuation = (
+                    f" ({'continued' if self.lang == 'en' else '续'})"
+                    if source_index
+                    else ""
+                )
+                self.page.insert_text(
+                    (self.margin_x, self.y + 10),
+                    f"{label}{continuation}",
+                    fontname=self.font,
+                    fontsize=10.2,
+                    color=(0.10, 0.12, 0.20),
+                )
+                source_width = fitz.get_text_length(
+                    source_label,
+                    fontname=self.font,
+                    fontsize=7.5,
+                )
+                self.page.insert_text(
+                    (
+                        max(
+                            self.margin_x + 120,
+                            self.page.rect.width - self.margin_x - source_width,
+                        ),
+                        self.y + 10,
+                    ),
+                    source_label,
+                    fontname=self.font,
+                    fontsize=7.5,
+                    color=(0.46, 0.49, 0.56),
+                )
+                top = self.y + header_height
+                target = fitz.Rect(
+                    self.margin_x,
+                    top,
+                    self.margin_x + source_page.rect.width * scale,
+                    top + rendered_height,
+                )
+                self.page.show_pdf_page(target, source, source_index)
+                self.y = target.y1 + 16
+            return True
+        finally:
+            source.close()
+
+    def add_text(
+        self,
+        *,
+        label: str,
+        body: str,
+        source_label: str,
+    ) -> None:
+        readable = _plain_math(body)
+        wrapped: list[str] = []
+        for paragraph in readable.splitlines() or [""]:
+            wrapped.extend(
+                textwrap.wrap(
+                    paragraph,
+                    width=84 if self.lang == "en" else 45,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+                or [""]
+            )
+        continuation = False
+        while wrapped:
+            available_lines = max(int((self.bottom - self.y - 38) / 14), 1)
+            if available_lines < 3:
+                self._new_page()
+                available_lines = max(int((self.bottom - self.y - 38) / 14), 1)
+            chunk = wrapped[:available_lines]
+            wrapped = wrapped[available_lines:]
+            heading = (
+                f"{label} ({'continued' if self.lang == 'en' else '续'})"
+                if continuation
+                else label
+            )
+            self.page.insert_text(
+                (self.margin_x, self.y + 10),
+                heading,
+                fontname=self.font,
+                fontsize=10.2,
+                color=(0.10, 0.12, 0.20),
+            )
+            self.page.insert_textbox(
+                fitz.Rect(
+                    self.margin_x,
+                    self.y + 23,
+                    self.page.rect.width - self.margin_x,
+                    self.y + 25 + len(chunk) * 14,
+                ),
+                "\n".join(chunk),
+                fontname=self.font,
+                fontsize=10,
+                lineheight=1.3,
+                color=(0.15, 0.17, 0.23),
+            )
+            self.y += 29 + len(chunk) * 14
+            if not wrapped:
+                self.page.insert_text(
+                    (self.margin_x, self.y),
+                    source_label,
+                    fontname=self.font,
+                    fontsize=7.5,
+                    color=(0.46, 0.49, 0.56),
+                )
+                self.y += 18
+            continuation = True
+
+    def finish(self) -> bytes:
+        for page_number, page in enumerate(self.document, start=1):
+            font = _font_name(page, self.lang)
+            footer = f"Sumkora  ·  {page_number}"
+            page.insert_text(
+                (self.margin_x, page.rect.height - 20),
+                footer,
+                fontname=font,
+                fontsize=7.5,
+                color=(0.48, 0.51, 0.58),
+            )
+        payload = self.document.tobytes(garbage=3, deflate=True)
+        self.document.close()
+        return payload
 
 
 def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | None:
@@ -623,78 +896,68 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
     if not detail or kind not in {"questions", "answers"}:
         return None
     practice = detail["set"]
-    target = fitz.open()
     if lang == "zh":
-        cover_title = "Sumkora 练习题" if kind == "questions" else "Sumkora 答案册"
-        cover_body = (
-            f"{practice['title']}\n\n共 {practice['actual_count']} 道题\n"
-            f"难度：{practice['difficulty']}\n"
-            f"计算器：{practice['calculator_policy']}\n\n"
-            + (
-                "请写出完整过程。答案请查看单独的答案册。"
-                if kind == "questions"
-                else "每道题均列出来源和评分要点。"
-            )
+        title = "Sumkora 练习题" if kind == "questions" else "Sumkora 答案册"
+        subtitle = (
+            f"{practice['title']}  ·  共 {practice['actual_count']} 道题  ·  "
+            f"难度：{practice['difficulty']}  ·  计算器：{practice['calculator_policy']}"
         )
     else:
-        cover_title = "Sumkora worksheet" if kind == "questions" else "Sumkora answer booklet"
-        cover_body = (
-            f"{practice['title']}\n\n{practice['actual_count']} questions\n"
-            f"Difficulty: {practice['difficulty']}\n"
-            f"Calculator: {practice['calculator_policy']}\n\n"
-            + (
-                "Show complete working. Answers are provided in the separate answer booklet."
-                if kind == "questions"
-                else "Each item includes its source and marking guidance."
-            )
+        title = "Sumkora worksheet" if kind == "questions" else "Sumkora answer booklet"
+        subtitle = (
+            f"{practice['title']}  ·  {practice['actual_count']} questions  ·  "
+            f"{practice['difficulty']}  ·  {practice['calculator_policy']}"
         )
-    _text_page(target, title=cover_title, body=cover_body, lang=lang)
+    flow = _PdfFlow(title=title, subtitle=subtitle, lang=lang)
     for item in detail["items"]:
         source = (
             f"{item['syllabus_code']} {item['examination_session']} "
             f"{item['year']} / {item['component']} / {item['question_number']}"
         )
+        label = f"{item['order_index']}. Q{item['question_number']}"
         if kind == "questions":
-            if _append_asset(target, item["question_asset_path"]):
+            if flow.add_asset(
+                item["question_asset_path"],
+                label=label,
+                source_label=source,
+            ):
                 continue
-            body = f"{item['prompt_text']}\n\n\n\n\n\n\n\n\n\nSource: {source}"
-            _text_page(
-                target,
-                title=f"{item['order_index']}. {item['question_number']}",
-                body=body,
-                lang=lang,
+            flow.add_text(
+                label=label,
+                body=item["prompt_latex"] or item["prompt_text"],
+                source_label=source,
             )
         else:
-            if _append_asset(target, item["answer_asset_path"]):
+            if flow.add_asset(
+                item["answer_asset_path"],
+                label=label,
+                source_label=source,
+            ):
                 continue
             answer = item["answer_text"] or item["raw_source_text"] or (
                 "Answer unavailable." if lang == "en" else "暂无答案。"
             )
-            _text_page(
-                target,
-                title=f"{item['order_index']}. {item['question_number']}",
+            flow.add_text(
+                label=label,
                 body=f"{answer}\n\nSource: {source}",
-                lang=lang,
+                source_label=source,
             )
-    payload = target.tobytes(garbage=3, deflate=True)
-    target.close()
-    return payload
+    return flow.finish()
 
 
 def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
     data = mistake_book(student_id)
-    target = fitz.open()
     is_questions = kind == "questions"
     if lang == "zh":
         title = "Sumkora 错题本" if is_questions else "Sumkora 错题答案"
-        intro = (
+        subtitle = (
             "本册包含尚未完全掌握的题目。请重新作答，并写出完整过程。"
             if is_questions
             else "本册包含对应的答案、评分依据和改进建议。"
         )
     else:
         title = "Sumkora Mistake Book" if is_questions else "Sumkora Mistake Book Answers"
-        intro = (
+        subtitle = (
             "Retry these questions and show complete working."
             if is_questions
             else "Answers, marking evidence, and improvement guidance."
@@ -704,19 +967,25 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
         if lang == "zh"
         else f"{len(data['items'])} questions"
     )
-    _text_page(target, title=title, body=f"{intro}\n\n{count_text}", lang=lang)
+    flow = _PdfFlow(title=title, subtitle=f"{count_text}  ·  {subtitle}", lang=lang)
     for index, item in enumerate(data["items"], start=1):
-        if is_questions and _append_asset(target, item["question_asset_path"]):
-            continue
-        if not is_questions and _append_asset(target, item["answer_asset_path"]):
-            continue
         heading = f"{index}. {item['paper_title']} - {item['question_label']}"
+        source = f"{item['paper_title']}  ·  {item['paper_date'][:10]}"
+        if is_questions and flow.add_asset(
+            item["question_asset_path"],
+            label=heading,
+            source_label=source,
+        ):
+            continue
+        if not is_questions and flow.add_asset(
+            item["answer_asset_path"],
+            label=heading,
+            source_label=source,
+        ):
+            continue
         if is_questions:
             unavailable = "暂无题目文本。" if lang == "zh" else "Question text unavailable."
-            body = (
-                f"{item['question_text'] or unavailable}"
-                "\n\n\n\n\n\n\n\n\n\n"
-            )
+            body = item["complete_question_text"] or unavailable
         else:
             rationale = (
                 item["error_mechanism_zh"] or item["ai_rationale_zh"]
@@ -729,7 +998,5 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
                 f"{answer or rationale}\n\n"
                 f"{'反馈' if lang == 'zh' else 'Feedback'}: {rationale}"
             )
-        _text_page(target, title=heading, body=body, lang=lang)
-    payload = target.tobytes(garbage=3, deflate=True)
-    target.close()
-    return payload
+        flow.add_text(label=heading, body=body, source_label=source)
+    return flow.finish()

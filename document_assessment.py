@@ -20,7 +20,7 @@ import config
 from ocr import api_post_json, cxsee_api_base
 
 
-ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v1"
+ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v2"
 VALID_STATUSES = {"graded", "estimated", "uncertain", "ungraded"}
 CONTRADICTION_PHRASES = (
     "blank",
@@ -51,6 +51,7 @@ def assessment_schema() -> dict[str, Any]:
         "required": [
             "label",
             "question_text",
+            "question_latex",
             "maximum_marks",
             "awarded_mark",
             "status",
@@ -65,6 +66,7 @@ def assessment_schema() -> dict[str, Any]:
         "properties": {
             "label": {"type": "string"},
             "question_text": {"type": "string"},
+            "question_latex": {"type": "string"},
             "maximum_marks": nullable_number,
             "awarded_mark": nullable_number,
             "status": {
@@ -199,7 +201,7 @@ the evidence is genuinely insufficient.
             + "\n- ".join(repair_errors[:12])
             + "\nReturn a fully corrected assessment of the documents.\n"
         )
-    return f"""
+    return rf"""
 You are Sumkora's senior Cambridge IGCSE mathematics assessor. Assess the
 documents as a whole. Work question by question internally, but do not rely on
 an external OCR mapper or assume one answer page per question.
@@ -211,6 +213,16 @@ Rules:
   PDF, starting at 1.
 - Preserve labels such as Q1, Q2(a), and Q2(b) when separable. Do not invent
   questions or omit visible answered questions.
+- question_text must contain the complete readable question, not a summary of
+  the task. When an item is a subquestion, repeat the parent stem, definitions,
+  sequence notation, diagram description, table context, and any earlier
+  results needed to understand that subquestion independently.
+- question_latex must contain the same complete question as question_text, but
+  place every mathematical expression inside valid TeX delimiters \( ... \)
+  or \[ ... \]. Use proper TeX such as \frac, \sqrt, superscripts, subscripts,
+  inequalities, vectors, matrices, and set notation. Do not leave display
+  mathematics as plain text such as x^2 or sqrt(x). Keep ordinary prose outside
+  TeX delimiters. If no mathematics is present, return the question text.
 - A positive mark requires visible supporting student evidence.
 - A blank, unrelated, wrong, or unreadable region must never receive a
   positive mark.
@@ -352,6 +364,9 @@ def validate_assessment(
                 "confidence": confidence,
                 "evidence_pages": normalized_pages,
                 "question_text": str(item.get("question_text") or "").strip(),
+                "question_latex": str(
+                    item.get("question_latex") or item.get("question_text") or ""
+                ).strip(),
                 "evidence_quote": evidence.strip(),
                 "rationale": rationale.strip(),
                 "rationale_zh": str(item.get("rationale_zh") or "").strip(),

@@ -806,6 +806,7 @@ def init_db():
         "assessment_status": "TEXT NOT NULL DEFAULT 'graded'",
         "awarded_mark": "REAL",
         "evidence_pages": "TEXT NOT NULL DEFAULT '[]'",
+        "question_latex": "TEXT NOT NULL DEFAULT ''",
     }
     for column, definition in analysis_result_column_defs.items():
         if column not in analysis_result_columns:

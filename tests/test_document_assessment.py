@@ -22,6 +22,7 @@ def valid_assessment(mode="detailed"):
             {
                 "label": "Q1",
                 "question_text": "Differentiate.",
+                "question_latex": r"Differentiate \(x^2\).",
                 "maximum_marks": 3,
                 "awarded_mark": 2,
                 "status": status,
@@ -57,6 +58,16 @@ def test_validator_rejects_wrong_page_and_positive_mark_for_blank_evidence():
     message = str(exc.value)
     assert "invalid completed-work page" in message
     assert "awards marks while describing missing or wrong evidence" in message
+
+
+def test_assessment_contract_requires_complete_latex_question_context():
+    schema = document_assessment.assessment_schema()
+    question_schema = schema["properties"]["questions"]["items"]
+    assert "question_latex" in question_schema["required"]
+    prompt = document_assessment._prompt("detailed")
+    assert "complete readable question" in prompt
+    assert "repeat the parent stem" in prompt
+    assert r"\frac" in prompt
 
 
 def test_validator_preserves_ungraded_as_null_instead_of_zero():

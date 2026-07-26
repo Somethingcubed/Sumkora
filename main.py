@@ -105,7 +105,6 @@ from question_bank import (
 from self_service import (
     SELF_SERVICE_STAGES,
     analysis_result,
-    compare_direct_papers,
     confirm_version,
     create_rerun_draft,
     create_student_paper_draft,
@@ -1858,6 +1857,8 @@ def student_dashboard(request: Request):
             "attempts": attempts,
             "skill_profile": skill_profile,
             "direct": direct,
+            "learning_book": mistake_book(user["id"]),
+            "learning_sets": practice_sets(user["id"]),
             "notice": (
                 "Your password has been reset."
                 if request.query_params.get("recovered")
@@ -2213,33 +2214,11 @@ def student_history(request: Request):
 
 
 @app.get("/student/compare", response_class=HTMLResponse)
-def student_compare(request: Request, ids: str = ""):
+def retired_student_compare(request: Request):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    selected = []
-    raw_values = request.query_params.getlist("ids") or ids.split(",")
-    for value in raw_values:
-        if value.strip().isdigit():
-            selected.append(int(value.strip()))
-    attempts = [
-        row
-        for row in student_owned_papers(user["id"])
-        if row["analysis_status"] == "completed"
-    ]
-    if not selected:
-        selected = [row["id"] for row in attempts[:2]]
-    comparison = compare_direct_papers(user["id"], selected)
-    return render(
-        request,
-        "student/compare.html",
-        {
-            "user": user,
-            "attempts": attempts,
-            "selected_ids": selected,
-            "comparison": comparison,
-        },
-    )
+    return RedirectResponse("/student/papers", status_code=303)
 
 
 @app.get("/student/skills", response_class=HTMLResponse)
