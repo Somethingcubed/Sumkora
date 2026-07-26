@@ -117,6 +117,33 @@ from self_service import (
 from topics import TOPICS
 
 init_db()
+_restart_time = datetime.now().isoformat()
+execute(
+    """
+    UPDATE paper_analysis_versions
+    SET status = 'failed', current_stage = 'interrupted',
+        failure_message = ?, updated_at = ?, finished_at = ?
+    WHERE status IN ('queued', 'processing')
+    """,
+    (
+        "Analysis was interrupted by an application restart. Please rerun it; "
+        "the uploaded files are still available.",
+        _restart_time,
+        _restart_time,
+    ),
+)
+execute(
+    """
+    UPDATE student_papers
+    SET status = 'failed', updated_at = ?
+    WHERE id IN (
+        SELECT paper_id
+        FROM paper_analysis_versions
+        WHERE status = 'failed' AND current_stage = 'interrupted'
+    )
+    """,
+    (_restart_time,),
+)
 seed_if_empty()
 for warning in getattr(config, "CONFIG_WARNINGS", []):
     print(f"CONFIG WARNING: {warning}")

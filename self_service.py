@@ -9,6 +9,7 @@ import os
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -680,6 +681,60 @@ def _diagnosis(mark: float, maximum: float, confidence: float, flags: list[str])
     return "procedural execution", "method was only partially completed"
 
 
+def _extract_analysis_page(
+    *,
+    path: str,
+    page_number: int,
+    native: str,
+    force_vision: bool,
+    image_resolution: int,
+    configured_ocr_model: str,
+) -> dict:
+    started = time.monotonic()
+    raw = None
+    warnings = []
+    model = "native-pdf-text"
+    provider = "native"
+    confidence = 0.98 if native else 0.0
+    text = native
+    should_use_vision = bool(
+        config.OCR_ENABLED and (force_vision or len(native) < 80)
+    )
+    if should_use_vision:
+        image_b64 = get_page_image_base64(
+            path,
+            page_number,
+            dpi=image_resolution,
+        )
+        vision_text, vision_confidence, raw = cxsee_vl_ocr_detailed(image_b64)
+        if vision_text and vision_text.strip():
+            text = vision_text
+            confidence = vision_confidence or 0.0
+            provider = "cxsee"
+            meta = (
+                raw.get("_sumkora", raw.get("_numera", {}))
+                if isinstance(raw, dict)
+                else {}
+            )
+            model = meta.get("used_model", configured_ocr_model)
+            if meta.get("warning"):
+                warnings.append(meta["warning"])
+        elif native:
+            warnings.append("Vision OCR was empty; native PDF text was used.")
+    elif not native:
+        warnings.append("OCR disabled; no native text was available.")
+    return {
+        "page_number": page_number,
+        "text": text,
+        "confidence": confidence or 0.0,
+        "provider": provider,
+        "model": model,
+        "warnings": warnings,
+        "raw": raw,
+        "duration": int((time.monotonic() - started) * 1000),
+    }
+
+
 def _extract_analysis_document(
     version,
     document_type: str,
@@ -700,44 +755,35 @@ def _extract_analysis_document(
         page_count = len(document)
         if page_count > 80:
             raise RuntimeError(f"{document_type.replace('_', ' ').title()} exceeds the 80-page limit.")
-        for page_number in range(1, page_count + 1):
-            started = time.monotonic()
-            native = document[page_number - 1].get_text("text").strip()
-            raw = None
-            warnings = []
-            model = "native-pdf-text"
-            provider = "native"
-            confidence = 0.98 if native else 0.0
-            text = native
-            should_use_vision = bool(
-                config.OCR_ENABLED and (force_vision or len(native) < 80)
+        native_pages = [
+            document[page_number - 1].get_text("text").strip()
+            for page_number in range(1, page_count + 1)
+        ]
+
+    worker_count = min(config.OCR_PAGE_CONCURRENCY, max(1, page_count))
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="sumkora-ocr",
+    ) as executor:
+        futures = [
+            executor.submit(
+                _extract_analysis_page,
+                path=path,
+                page_number=page_number,
+                native=native_pages[page_number - 1],
+                force_vision=force_vision,
+                image_resolution=version["image_resolution"],
+                configured_ocr_model=version["ocr_model"],
             )
-            if should_use_vision:
-                image_b64 = get_page_image_base64(
-                    path,
-                    page_number,
-                    dpi=version["image_resolution"],
-                )
-                vision_text, vision_confidence, raw = cxsee_vl_ocr_detailed(image_b64)
-                if vision_text and vision_text.strip():
-                    text = vision_text
-                    confidence = vision_confidence or 0.0
-                    provider = "cxsee"
-                    meta = (
-                        raw.get("_sumkora", raw.get("_numera", {}))
-                        if isinstance(raw, dict)
-                        else {}
-                    )
-                    model = meta.get("used_model", version["ocr_model"])
-                    if meta.get("warning"):
-                        warnings.append(meta["warning"])
-                elif native:
-                    warnings.append("Vision OCR was empty; native PDF text was used.")
-            elif not native:
-                warnings.append("OCR disabled; no native text was available.")
-            duration = int((time.monotonic() - started) * 1000)
+            for page_number in range(1, page_count + 1)
+        ]
+        completed_pages = 0
+        for future in as_completed(futures):
+            result = future.result()
+            page_number = result["page_number"]
+            text = result["text"]
             page_texts[page_number] = text
-            page_confidences[page_number] = confidence or 0.0
+            page_confidences[page_number] = result["confidence"]
             execute(
                 """
                 INSERT INTO analysis_ocr_pages
@@ -750,17 +796,25 @@ def _extract_analysis_document(
                     version["id"],
                     document_type,
                     page_number,
-                    provider,
-                    model,
+                    result["provider"],
+                    result["model"],
                     version["ocr_prompt_version"],
                     text,
                     re.sub(r"\s+", " ", text).strip(),
-                    confidence,
-                    json_text(warnings),
-                    json_text(raw) if raw else None,
-                    duration,
+                    result["confidence"],
+                    json_text(result["warnings"]),
+                    json_text(result["raw"]) if result["raw"] else None,
+                    result["duration"],
                     now_iso(),
                 ),
+            )
+            completed_pages += 1
+            logger.info(
+                "Analysis %s OCR %s: %s/%s pages complete",
+                version["id"],
+                document_type,
+                completed_pages,
+                page_count,
             )
     return page_texts, page_confidences
 

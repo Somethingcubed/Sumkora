@@ -43,6 +43,7 @@ OCR_ENABLED = env_bool("OCR_ENABLED", True)
 OCR_PROVIDER = env("OCR_PROVIDER", "cxsee_vl")  # cxsee_vl | google_vision | mathpix
 OCR_RENDER_DPI = int(env("OCR_RENDER_DPI", "200"))
 OCR_PROMPT_VERSION = env("OCR_PROMPT_VERSION", "ocr-math-v2")
+OCR_PAGE_CONCURRENCY = max(1, min(8, int(env("OCR_PAGE_CONCURRENCY", "4"))))
 
 CXSEE_API_KEY = env("CXSEE_API_KEY")
 CXSEE_BASE_URL = env("CXSEE_BASE_URL", "https://api.cxsee.com")

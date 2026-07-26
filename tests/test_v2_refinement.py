@@ -1,6 +1,8 @@
 import base64
 import json
 import os
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from fastapi.testclient import TestClient
 from db import execute, hash_password, query_all, query_one
 from main import app
 from pdf_utils import get_page_image_base64
+import self_service
 
 
 client = TestClient(app)
@@ -37,6 +40,61 @@ def test_metadata_rotated_scans_render_upright(tmp_path):
         base64.b64decode(get_page_image_base64(str(path), 1, 90))
     )
     assert rendered.height > rendered.width
+
+
+def test_analysis_ocr_processes_pages_concurrently_and_preserves_order(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "long-scan.pdf"
+    document = fitz.open()
+    for page_number in range(1, 9):
+        page = document.new_page()
+        page.insert_text((72, 72), f"Page {page_number}")
+    document.save(path)
+    document.close()
+
+    state = {"active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake_ocr(_image):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.08)
+        with lock:
+            state["active"] -= 1
+        return "OCR text", 0.95, {
+            "_sumkora": {"used_model": "test-ocr"}
+        }
+
+    monkeypatch.setattr(self_service.config, "OCR_ENABLED", True)
+    monkeypatch.setattr(self_service.config, "OCR_PAGE_CONCURRENCY", 4)
+    monkeypatch.setattr(
+        self_service,
+        "get_page_image_base64",
+        lambda *_args, **_kwargs: "image",
+    )
+    monkeypatch.setattr(self_service, "cxsee_vl_ocr_detailed", fake_ocr)
+    monkeypatch.setattr(self_service, "execute", lambda *_args, **_kwargs: 1)
+
+    started = time.monotonic()
+    pages, confidences = self_service._extract_analysis_document(
+        {
+            "id": 999,
+            "image_resolution": 200,
+            "ocr_model": "test-ocr",
+            "ocr_prompt_version": "test-prompt",
+        },
+        "answer_script",
+        str(path),
+        force_vision=True,
+    )
+    duration = time.monotonic() - started
+
+    assert list(sorted(pages)) == list(range(1, 9))
+    assert list(sorted(confidences)) == list(range(1, 9))
+    assert 2 <= state["peak"] <= 4
+    assert duration < 0.45
 
 
 def create_user(email: str, role: str):
