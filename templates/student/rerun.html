@@ -7,10 +7,37 @@
   </div>
   {% if error %}<div class="form-message form-message-error mb-5" role="alert">{{ error }}</div>{% endif %}
   <form method="post" enctype="multipart/form-data" class="surface space-y-5" data-rerun-form>
-    <label class="form-label">{{ tr('Completed work', '已完成的答卷') }} <span>{{ tr('PDF or image', 'PDF 或图片') }}</span><input class="mt-2 block text-sm" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*"></label>
-    <label class="form-label">{{ tr('Mark scheme', '评分标准') }} <span>{{ tr('Optional PDF', '选填 PDF') }}</span><input class="mt-2 block text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf"></label>
+    <div
+      class="upload-tile"
+      data-multi-page-uploader
+      data-max-pages="{{ max_answer_pages }}"
+      data-max-bytes="{{ max_upload_bytes }}"
+      data-empty="{{ tr('Keep the current completed work', '保留当前答卷') }}"
+      data-one-pdf="{{ tr('One replacement PDF selected', '已选择一个替换 PDF') }}"
+      data-pages="{{ tr('replacement pages selected', '张替换页面已选择') }}"
+      data-mixed="{{ tr('Choose one PDF or multiple images, not both.', '请选择一个 PDF，或选择多张图片；请勿混合上传。') }}"
+      data-too-many="{{ tr('You can select up to 30 images.', '最多可选择 30 张图片。') }}"
+      data-unsupported="{{ tr('Use PDF, PNG, JPEG, or WebP files.', '请使用 PDF、PNG、JPEG 或 WebP 文件。') }}"
+      data-too-large="{{ tr('The prepared pages exceed the 25 MB upload limit.', '处理后的页面超过 25 MB 上传限制。') }}"
+      data-preparing="{{ tr('Preparing page', '正在处理第') }}"
+      data-preparing-suffix="{{ tr('of', '页，共') }}"
+      data-prepare-error="{{ tr('One of the images could not be prepared.', '其中一张图片无法处理。') }}"
+      data-remove="{{ tr('Remove page', '删除页面') }}"
+      data-rotate="{{ tr('Rotate page', '旋转页面') }}"
+      data-move-earlier="{{ tr('Move page earlier', '前移页面') }}"
+      data-move-later="{{ tr('Move page later', '后移页面') }}"
+    >
+      <span class="font-semibold">{{ tr('Replacement completed work', '替换已完成的答卷') }} <span class="text-xs font-normal text-slate-500">{{ tr('Optional', '选填') }}</span></span>
+      <span class="text-sm text-slate-500 mt-1">{{ tr('Choose one PDF or select up to 30 page photos from your gallery.', '请选择一个 PDF，或从相册中选择最多 30 张答卷照片。') }}</span>
+      <input id="answer_script" type="file" name="answer_script" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp" multiple data-multi-page-input>
+      <span class="text-xs text-slate-500 mt-2" data-file-status>{{ tr('Keep the current completed work', '保留当前答卷') }}</span>
+      <p class="multi-upload-error" data-upload-error hidden></p>
+      <div class="multi-page-preview" data-page-preview hidden></div>
+    </div>
+    <label class="form-label">{{ tr('Mark scheme', '评分标准') }} <span>{{ tr('Optional PDF', '选填 PDF') }}</span><input class="mt-2 block text-sm" type="file" name="mark_scheme" accept=".pdf,application/pdf" data-file-input><span class="text-xs text-slate-500 mt-2 block" data-file-status data-empty="{{ tr('Keep the current mark scheme', '保留当前评分标准') }}">{{ tr('Keep the current mark scheme', '保留当前评分标准') }}</span></label>
     <label class="form-label max-w-xs" for="rerun-maximum-marks">{{ tr('Maximum marks on the paper', '试卷总分') }} <span>{{ tr('Optional coverage check', '选填，用于完整性检查') }}</span><input class="field" id="rerun-maximum-marks" name="maximum_marks" type="number" min="1" max="500" step="1" value="{{ maximum_marks or '' }}" placeholder="{{ tr('For example, 80', '例如：80') }}"></label>
-    <div class="pt-5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3"><p class="text-xs text-slate-500">{{ tr('This will create analysis', '将创建分析') }} v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="button button-primary" type="submit">{{ tr('Start new analysis', '开始新分析') }}</button></div>
+    <div class="pt-5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3"><p class="text-xs text-slate-500">{{ tr('This will create analysis', '将创建分析') }} v{{ (versions[0].version_number if versions else 0) + 1 }}.</p><button class="button button-primary" type="submit" data-submit-button>{{ tr('Start new analysis', '开始新分析') }}</button></div>
   </form>
 </div>
+<script src="/static/multi-page-upload.js?v=20260727-1" defer></script>
 {% endblock %}

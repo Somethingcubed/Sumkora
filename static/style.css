@@ -1043,6 +1043,94 @@ textarea.field {
   font-weight: 650;
 }
 
+.multi-page-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  width: 100%;
+  margin-top: 1rem;
+  gap: 0.7rem;
+}
+
+.multi-page-card {
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.multi-page-visual {
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border-radius: 0.5rem;
+  background: #f2f4f7;
+}
+
+.multi-page-visual img {
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+  transition: transform 140ms ease;
+}
+
+.multi-page-pdf {
+  color: #4f46e5;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.multi-page-label {
+  overflow: hidden;
+  margin: 0.45rem 0 0;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-page-controls {
+  display: flex;
+  margin-top: 0.45rem;
+  gap: 0.3rem;
+}
+
+.multi-page-control {
+  display: grid;
+  min-width: 2rem;
+  min-height: 2rem;
+  flex: 1;
+  place-items: center;
+  padding: 0;
+  color: #475467;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: white;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.multi-page-control:hover:not(:disabled) {
+  color: var(--brand-dark);
+  border-color: #a5b4fc;
+  background: #eef2ff;
+}
+
+.multi-page-control:disabled {
+  opacity: 0.3;
+}
+
+.multi-upload-error {
+  margin: 0.55rem 0 0;
+  color: #b42318;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
 .metric-card {
   padding: 1.1rem;
   border: 1px solid var(--line);

@@ -25,6 +25,8 @@ from pdf_utils import get_page_image_base64, is_valid_pdf, save_upload
 
 logger = logging.getLogger(__name__)
 
+MAX_ANSWER_IMAGE_PAGES = 30
+
 
 SELF_SERVICE_STAGES = [
     "validation",
@@ -208,10 +210,43 @@ def normalize_answer_upload(filename: str, content: bytes) -> tuple[str, bytes]:
         return Path(filename or "answer-script.pdf").name, content
     if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise ValueError("Answer script must be a PDF, PNG, JPEG, or WebP image.")
-    image_doc = fitz.open(stream=content, filetype=suffix.lstrip("."))
-    pdf_bytes = image_doc.convert_to_pdf()
-    image_doc.close()
+    try:
+        image_doc = fitz.open(stream=content, filetype=suffix.lstrip("."))
+        pdf_bytes = image_doc.convert_to_pdf()
+        image_doc.close()
+    except (fitz.FileDataError, RuntimeError, ValueError) as exc:
+        raise ValueError("One of the completed-work images is unreadable.") from exc
     return f"{Path(filename).stem}.pdf", pdf_bytes
+
+
+def normalize_answer_uploads(
+    uploads: list[tuple[str, bytes]],
+) -> tuple[str, bytes]:
+    """Create one ordered PDF from either a PDF or a gallery image sequence."""
+    files = [(name, content) for name, content in uploads if name and content]
+    if not files:
+        raise ValueError("Completed work is required.")
+    if len(files) > MAX_ANSWER_IMAGE_PAGES:
+        raise ValueError(
+            f"Choose no more than {MAX_ANSWER_IMAGE_PAGES} completed-work images."
+        )
+    if len(files) == 1:
+        return normalize_answer_upload(*files[0])
+    if any(is_valid_pdf(content) for _, content in files):
+        raise ValueError("Choose one PDF or multiple images, not both.")
+
+    output = fitz.open()
+    try:
+        for filename, content in files:
+            _, page_pdf = normalize_answer_upload(filename, content)
+            with fitz.open(stream=page_pdf, filetype="pdf") as page_document:
+                output.insert_pdf(page_document)
+        if len(output) != len(files):
+            raise ValueError("Not every completed-work image could be prepared.")
+        payload = output.tobytes(garbage=3, deflate=True)
+    finally:
+        output.close()
+    return "completed-work-pages.pdf", payload
 
 
 def save_document(prefix: str, filename: str, content: bytes) -> str:

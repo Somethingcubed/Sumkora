@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from db import execute, hash_password, query_all, query_one
@@ -25,6 +26,78 @@ def pdf_bytes(text: str) -> bytes:
     payload = document.tobytes()
     document.close()
     return payload
+
+
+def image_bytes(width: int, height: int, text: str) -> bytes:
+    document = fitz.open()
+    page = document.new_page(width=width, height=height)
+    page.insert_text((24, 40), text)
+    payload = page.get_pixmap(alpha=False).tobytes("png")
+    document.close()
+    return payload
+
+
+def test_ordered_gallery_images_become_one_pdf():
+    uploads = [
+        ("page-1.png", image_bytes(300, 500, "First page")),
+        ("page-2.png", image_bytes(500, 300, "Second page")),
+        ("page-3.png", image_bytes(320, 520, "Third page")),
+    ]
+    filename, payload = self_service.normalize_answer_uploads(uploads)
+    assert filename == "completed-work-pages.pdf"
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        assert len(document) == 3
+        assert document[0].rect.height > document[0].rect.width
+        assert document[1].rect.width > document[1].rect.height
+        assert document[2].rect.height > document[2].rect.width
+
+    with pytest.raises(ValueError, match="not both"):
+        self_service.normalize_answer_uploads(
+            [("paper.pdf", pdf_bytes("PDF")), uploads[0]]
+        )
+    with pytest.raises(ValueError, match="no more than"):
+        self_service.normalize_answer_uploads([uploads[0]] * 31)
+
+
+def test_student_can_upload_multiple_gallery_pages():
+    create_user("gallery@student.local", "student")
+    login("gallery@student.local")
+    page = client.get("/student/analyse")
+    assert 'name="answer_script"' in page.text
+    assert "multiple" in page.text
+    assert "capture=" not in page.text
+    assert "/static/multi-page-upload.js" in page.text
+    assert "img-src 'self' data: blob:" in page.headers["content-security-policy"]
+
+    response = client.post(
+        "/student/analyse",
+        files=[
+            (
+                "answer_script",
+                ("page-1.png", image_bytes(300, 500, "Page one"), "image/png"),
+            ),
+            (
+                "answer_script",
+                ("page-2.png", image_bytes(500, 300, "Page two"), "image/png"),
+            ),
+            (
+                "answer_script",
+                ("page-3.png", image_bytes(320, 520, "Page three"), "image/png"),
+            ),
+        ],
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    version = query_one(
+        """
+        SELECT * FROM paper_analysis_versions
+        ORDER BY id DESC LIMIT 1
+        """
+    )
+    with fitz.open(version["answer_script_path"]) as document:
+        assert len(document) == 3
+        assert document[0].rect.height > document[0].rect.width
+        assert document[1].rect.width > document[1].rect.height
 
 
 def test_metadata_rotated_scans_render_upright(tmp_path):

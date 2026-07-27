@@ -14,18 +14,49 @@
 
   <form method="post" action="/student/analyse" enctype="multipart/form-data" class="surface" data-upload-form>
     <div class="grid md:grid-cols-2 gap-4">
-      {% for number, title, copy, name, accept, required in [
-        (1,tr('Completed work','已完成的答卷'),tr('Required. Upload the complete worked paper as a PDF or clear image.','必填。上传完整作答的 PDF 或清晰图片。'),'answer_script','.pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*',true),
-        (2,tr('Mark scheme','评分标准'),tr('Optional. Add it for exact, question-by-question marking.','选填。上传后可获得逐题详细批改。'),'mark_scheme','.pdf,application/pdf',false)
-      ] %}
-      <label class="upload-tile" for="{{ name }}">
-        <span class="upload-number">{{ number }}</span>
-        <span class="font-semibold">{{ title }}{% if not required %} <span class="text-xs font-normal text-slate-500">{{ tr('Optional', '选填') }}</span>{% endif %}</span>
-        <span class="text-sm text-slate-500 mt-1">{{ copy }}</span>
-        <input id="{{ name }}" type="file" name="{{ name }}" accept="{{ accept }}" {% if required %}required{% endif %} data-file-input>
+      <div
+        class="upload-tile"
+        data-multi-page-uploader
+        data-max-pages="{{ max_answer_pages }}"
+        data-max-bytes="{{ max_upload_bytes }}"
+        data-empty="{{ tr('No file selected', '尚未选择文件') }}"
+        data-one-pdf="{{ tr('One PDF selected', '已选择一个 PDF') }}"
+        data-pages="{{ tr('pages selected', '页已选择') }}"
+        data-mixed="{{ tr('Choose one PDF or multiple images, not both.', '请选择一个 PDF，或选择多张图片；请勿混合上传。') }}"
+        data-too-many="{{ tr('You can select up to 30 images.', '最多可选择 30 张图片。') }}"
+        data-unsupported="{{ tr('Use PDF, PNG, JPEG, or WebP files.', '请使用 PDF、PNG、JPEG 或 WebP 文件。') }}"
+        data-too-large="{{ tr('The prepared pages exceed the 25 MB upload limit.', '处理后的页面超过 25 MB 上传限制。') }}"
+        data-preparing="{{ tr('Preparing page', '正在处理第') }}"
+        data-preparing-suffix="{{ tr('of', '页，共') }}"
+        data-prepare-error="{{ tr('One of the images could not be prepared.', '其中一张图片无法处理。') }}"
+        data-remove="{{ tr('Remove page', '删除页面') }}"
+        data-rotate="{{ tr('Rotate page', '旋转页面') }}"
+        data-move-earlier="{{ tr('Move page earlier', '前移页面') }}"
+        data-move-later="{{ tr('Move page later', '后移页面') }}"
+      >
+        <span class="upload-number">1</span>
+        <span class="font-semibold">{{ tr('Completed work', '已完成的答卷') }}</span>
+        <span class="text-sm text-slate-500 mt-1">{{ tr('Choose one PDF or select up to 30 page photos from your gallery.', '请选择一个 PDF，或从相册中选择最多 30 张答卷照片。') }}</span>
+        <input
+          id="answer_script"
+          type="file"
+          name="answer_script"
+          accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+          multiple
+          required
+          data-multi-page-input
+        >
+        <span class="text-xs text-slate-500 mt-2" data-file-status data-empty="{{ tr('No file selected', '尚未选择文件') }}">{{ tr('No file selected', '尚未选择文件') }}</span>
+        <p class="multi-upload-error" data-upload-error hidden></p>
+        <div class="multi-page-preview" data-page-preview hidden></div>
+      </div>
+      <label class="upload-tile" for="mark_scheme">
+        <span class="upload-number">2</span>
+        <span class="font-semibold">{{ tr('Mark scheme', '评分标准') }} <span class="text-xs font-normal text-slate-500">{{ tr('Optional', '选填') }}</span></span>
+        <span class="text-sm text-slate-500 mt-1">{{ tr('Optional. Add it for exact, question-by-question marking.', '选填。上传后可获得逐题详细批改。') }}</span>
+        <input id="mark_scheme" type="file" name="mark_scheme" accept=".pdf,application/pdf" data-file-input>
         <span class="text-xs text-slate-500 mt-2" data-file-status>{{ tr('No file selected', '尚未选择文件') }}</span>
       </label>
-      {% endfor %}
     </div>
 
     <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -61,26 +92,11 @@
 
     <div class="mt-6 pt-5 border-t border-slate-200">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">{{ tr('No question paper is required. Maximum file size: 25 MB each.', '无需上传试题卷。每份文件最大 25 MB。') }}</p>
+        <p class="text-xs text-slate-500">{{ tr('No question paper is required. Completed-work uploads are limited to 25 MB after preparation.', '无需上传试题卷。作答文件处理后的总大小上限为 25 MB。') }}</p>
         <button type="submit" class="button button-primary" data-submit-button>{{ tr('Start analysis', '开始分析') }}</button>
       </div>
     </div>
   </form>
 </div>
-<script>
-  document.querySelectorAll("[data-file-input]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const status = input.parentElement.querySelector("[data-file-status]");
-      status.textContent = input.files.length ? input.files[0].name : {{ tr('No file selected', '尚未选择文件')|tojson }};
-      status.classList.toggle("text-emerald-700", input.files.length > 0);
-    });
-  });
-  document.querySelector("[data-upload-form]").addEventListener("submit", (event) => {
-    if (!event.currentTarget.checkValidity()) return;
-    const button = event.currentTarget.querySelector("[data-submit-button]");
-    button.disabled = true;
-    button.textContent = {{ tr('Preparing your paper…', '正在准备试卷…')|tojson }};
-    event.currentTarget.setAttribute("aria-busy", "true");
-  });
-</script>
+<script src="/static/multi-page-upload.js?v=20260727-1" defer></script>
 {% endblock %}

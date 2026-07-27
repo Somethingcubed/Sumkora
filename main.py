@@ -103,12 +103,14 @@ from question_bank import (
     update_question_review,
 )
 from self_service import (
+    MAX_ANSWER_IMAGE_PAGES,
     SELF_SERVICE_STAGES,
     analysis_result,
     confirm_version,
     create_rerun_draft,
     create_student_paper_draft,
     direct_summary,
+    normalize_answer_uploads,
     paper_with_versions,
     parse_json,
     run_self_service_analysis,
@@ -229,7 +231,7 @@ async def security_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
     )
@@ -694,6 +696,51 @@ def _parse_expected_maximum_marks(raw_value: str) -> int | None:
     return int(number)
 
 
+async def _prepare_completed_work(
+    uploads: list[UploadFile] | None,
+) -> tuple[str, bytes]:
+    selected = [upload for upload in uploads or [] if upload.filename]
+    if not selected:
+        raise ValueError("Completed work is required.")
+    if len(selected) > MAX_ANSWER_IMAGE_PAGES:
+        raise ValueError(
+            f"Choose no more than {MAX_ANSWER_IMAGE_PAGES} completed-work images."
+        )
+    files: list[tuple[str, bytes]] = []
+    total_size = 0
+    for upload in selected:
+        content = await upload.read()
+        total_size += len(content)
+        if not content or total_size > config.MAX_UPLOAD_BYTES:
+            raise ValueError(
+                "The completed-work files exceed the combined upload limit."
+            )
+        files.append((upload.filename or "completed-work", content))
+    filename, payload = normalize_answer_uploads(files)
+    if len(payload) > config.MAX_UPLOAD_BYTES:
+        raise ValueError(
+            "The prepared completed-work PDF exceeds the upload limit."
+        )
+    return filename, payload
+
+
+def _localized_upload_error(request: Request, message: str) -> str:
+    if get_lang(request) != "zh":
+        return message
+    if message.startswith("Choose no more than"):
+        return f"最多可选择 {MAX_ANSWER_IMAGE_PAGES} 张答卷图片。"
+    translations = {
+        "Completed work is required.": "请上传已完成的答卷。",
+        "Choose one PDF or multiple images, not both.": "请选择一个 PDF，或选择多张图片；请勿混合上传。",
+        "Answer script must be a PDF, PNG, JPEG, or WebP image.": "答卷必须是 PDF、PNG、JPEG 或 WebP 文件。",
+        "One of the completed-work images is unreadable.": "其中一张答卷图片无法读取。",
+        "Not every completed-work image could be prepared.": "部分答卷图片无法转换。",
+        "The completed-work files exceed the combined upload limit.": "答卷文件总大小超过上传限制。",
+        "The prepared completed-work PDF exceeds the upload limit.": "合并后的答卷 PDF 超过上传限制。",
+    }
+    return translations.get(message, message)
+
+
 @app.get("/student/analyse", response_class=HTMLResponse)
 def student_analyse_page(request: Request):
     user = require_role(request, "student")
@@ -702,7 +749,13 @@ def student_analyse_page(request: Request):
     return render(
         request,
         "student/analyse.html",
-        {"user": user, "error": None, "maximum_marks": ""},
+        {
+            "user": user,
+            "error": None,
+            "maximum_marks": "",
+            "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+            "max_upload_bytes": config.MAX_UPLOAD_BYTES,
+        },
     )
 
 
@@ -710,7 +763,7 @@ def student_analyse_page(request: Request):
 async def student_analyse_upload(
     request: Request,
     background_tasks: BackgroundTasks,
-    answer_script: UploadFile = File(...),
+    answer_script: list[UploadFile] = File(...),
     mark_scheme: UploadFile = File(None),
     maximum_marks: str = Form(""),
 ):
@@ -727,40 +780,57 @@ async def student_analyse_upload(
                 "user": user,
                 "error": str(exc),
                 "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
             },
             status_code=400,
         )
-    answer_content = await answer_script.read()
     scheme_content = (
         await mark_scheme.read()
         if mark_scheme and mark_scheme.filename
         else None
     )
-    if (
-        len(answer_content) <= 0
-        or len(answer_content) > config.MAX_UPLOAD_BYTES
-        or (
-            scheme_content is not None
-            and (
-                len(scheme_content) <= 0
-                or len(scheme_content) > config.MAX_UPLOAD_BYTES
-            )
+    try:
+        answer_filename, answer_content = await _prepare_completed_work(
+            answer_script
         )
+    except ValueError as exc:
+        return render(
+            request,
+            "student/analyse.html",
+            {
+                "user": user,
+                "error": _localized_upload_error(request, str(exc)),
+                "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
+            },
+            status_code=400,
+        )
+    if scheme_content is not None and (
+        len(scheme_content) <= 0
+        or len(scheme_content) > config.MAX_UPLOAD_BYTES
     ):
         return render(
             request,
             "student/analyse.html",
             {
                 "user": user,
-                "error": "Completed work is required. Each file must be within the upload limit.",
+                "error": (
+                    "评分标准 PDF 超过上传限制。"
+                    if get_lang(request) == "zh"
+                    else "The mark-scheme PDF exceeds the upload limit."
+                ),
                 "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
             },
             status_code=400,
         )
     try:
         paper_id, version_id = create_student_paper_draft(
             user["id"],
-            answer_script.filename or "answer-script.pdf",
+            answer_filename,
             answer_content,
             mark_scheme.filename if mark_scheme and mark_scheme.filename else None,
             scheme_content,
@@ -772,8 +842,10 @@ async def student_analyse_upload(
             "student/analyse.html",
             {
                 "user": user,
-                "error": str(exc),
+                "error": _localized_upload_error(request, str(exc)),
                 "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
             },
             status_code=400,
         )
@@ -1001,6 +1073,8 @@ def student_paper_rerun_page(request: Request, paper_id: int):
             "maximum_marks": (
                 versions[0]["expected_maximum_marks"] if versions else ""
             ),
+            "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+            "max_upload_bytes": config.MAX_UPLOAD_BYTES,
         },
     )
 
@@ -1010,7 +1084,7 @@ async def student_paper_rerun(
     request: Request,
     paper_id: int,
     background_tasks: BackgroundTasks,
-    answer_script: UploadFile = File(None),
+    answer_script: list[UploadFile] | None = File(None),
     mark_scheme: UploadFile = File(None),
     maximum_marks: str = Form(""),
 ):
@@ -1030,6 +1104,8 @@ async def student_paper_rerun(
                 "versions": versions,
                 "error": str(exc),
                 "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
             },
             status_code=400,
         )
@@ -1043,10 +1119,15 @@ async def student_paper_rerun(
         return upload.filename, content
 
     try:
+        replacement_answers = (
+            await _prepare_completed_work(answer_script)
+            if any(upload.filename for upload in answer_script or [])
+            else None
+        )
         version_id = create_rerun_draft(
             user["id"],
             paper_id,
-            await optional_file(answer_script),
+            replacement_answers,
             await optional_file(mark_scheme),
             expected_maximum_marks=expected_maximum_marks,
         )
@@ -1059,8 +1140,10 @@ async def student_paper_rerun(
                 "user": user,
                 "paper": paper,
                 "versions": versions,
-                "error": str(exc),
+                "error": _localized_upload_error(request, str(exc)),
                 "maximum_marks": maximum_marks,
+                "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
+                "max_upload_bytes": config.MAX_UPLOAD_BYTES,
             },
             status_code=400,
         )
