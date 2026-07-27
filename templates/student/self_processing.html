@@ -12,15 +12,36 @@
 } %}
 <div class="max-w-4xl mx-auto">
   <div class="page-header">
-    <div><p class="eyebrow">{{ tr('Paper analysis', '试卷分析') }} · v{{ version.version_number }}</p><h1>{{ version.paper_title }}</h1><p>{{ tr('You can leave this page and return later.', '你可以离开此页面，稍后再回来查看。') }}</p></div>
+    <div><p class="eyebrow">{{ tr('Paper analysis', '试卷分析') }} · v{{ version.version_number }}</p><h1>{{ version.paper_title }}</h1><p>{{ tr('This page now reports a real server heartbeat. You can leave and return later without stopping the analysis.', '此页面会显示真实的服务器心跳。你可以离开并稍后返回，分析不会停止。') }}</p></div>
     <span id="job-status" class="badge badge-{{ version.status }}" role="status" aria-live="polite">{{ tr(version.status.replace('_', ' ')|capitalize, '处理中' if version.status in ['queued','processing'] else '已完成' if version.status == 'completed' else '失败') }}</span>
   </div>
-  <section class="card">
-    <div class="h-2 rounded-full bg-slate-100 overflow-hidden mb-6"><div id="overall-progress" class="h-full bg-indigo-600 transition-all" style="width:0%"></div></div>
-    <ol class="grid md:grid-cols-2 gap-3" id="pipeline">
+  <section class="surface processing-surface">
+    <div class="flex flex-wrap justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="connection-dot" class="connection-dot connection-dot-working" aria-hidden="true"></span>
+          <p id="connection-label" class="text-sm font-semibold">{{ tr('Connecting to the analysis worker…', '正在连接分析任务……') }}</p>
+        </div>
+        <h2 id="progress-message" class="text-xl font-semibold mt-3">{{ tr('Checking your files', '检查上传文件') }}</h2>
+        <p id="progress-detail" class="text-sm text-slate-500 mt-1"></p>
+      </div>
+      <dl class="processing-timing">
+        <div><dt>{{ tr('Elapsed', '已用时间') }}</dt><dd id="elapsed-time">0:00</dd></div>
+        <div><dt>{{ tr('Last heartbeat', '最近心跳') }}</dt><dd id="heartbeat-time">—</dd></div>
+      </dl>
+    </div>
+
+    <div class="mt-6">
+      <div class="flex justify-between gap-3 text-xs text-slate-500 mb-2"><span>{{ tr('Overall progress', '整体进度') }}</span><span id="progress-value">0%</span></div>
+      <div class="processing-progress-track" id="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="overall-progress" class="processing-progress-fill" style="width:0%"></div></div>
+    </div>
+
+    <div id="slow-notice" class="hidden mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"></div>
+
+    <ol class="processing-pipeline mt-7" id="pipeline">
       {% for stage in pipeline_stages %}
-      <li data-stage="{{ stage }}" class="flex items-center gap-3 rounded-xl border p-4">
-        <span class="stage-dot h-3 w-3 rounded-full bg-slate-300"></span>
+      <li data-stage="{{ stage }}">
+        <span class="stage-dot"></span>
         <div><p class="font-medium">{{ stage_labels.get(stage, stage.replace('_', ' ')|capitalize) }}</p><p class="stage-note text-xs text-slate-500">{{ tr('Waiting', '等待中') }}</p></div>
       </li>
       {% endfor %}
@@ -33,33 +54,137 @@
 <script>
 (() => {
   const stages = {{ pipeline_stages|tojson }};
-  async function refresh() {
-    const response = await fetch("/student/analysis/{{ version.id }}/status", {credentials:"same-origin"});
-    if (!response.ok) return;
-    const job = await response.json();
-    const statusLabels = {{ {
-      'queued': tr('Queued', '等待中'),
-      'processing': tr('Processing', '分析中'),
-      'completed': tr('Completed', '已完成'),
-      'failed': tr('Failed', '失败')
-    }|tojson }};
-    document.getElementById("job-status").textContent = statusLabels[job.status] || job.status;
-    const current = job.current_stage === "completed" ? stages.length : Math.max(0, Number(job.stage_index || 0));
-    document.getElementById("overall-progress").style.width = `${Math.round(100 * current / stages.length)}%`;
-    document.querySelectorAll("[data-stage]").forEach((node,index) => {
-      const dot=node.querySelector(".stage-dot"), note=node.querySelector(".stage-note");
-      if (index < current || job.status === "completed") { dot.className="stage-dot h-3 w-3 rounded-full bg-emerald-500"; note.textContent={{ tr('Completed', '已完成')|tojson }}; }
-      else if (index === current && job.status === "processing") { dot.className="stage-dot h-3 w-3 rounded-full bg-indigo-500 animate-pulse"; note.textContent={{ tr('In progress', '进行中')|tojson }}; }
-    });
-    if (job.status === "completed") { document.getElementById("overall-progress").style.width="100%"; document.getElementById("result-link").classList.remove("hidden"); return; }
-    if (job.status === "failed") {
-      const el=document.getElementById("failure");
-      el.textContent=job.failure_message || {{ tr('We could not complete this analysis. No zero marks were recorded. Try again; your files and previous results are safe.', '无法完成此次分析。系统未记录任何零分。请重试；你的文件和之前的结果仍然安全。')|tojson }};
-      el.classList.remove("hidden");
-      document.getElementById("retry-link").classList.remove("hidden");
-      return;
+  const copy = {{ {
+    'completed': tr('Completed', '已完成'),
+    'waiting': tr('Waiting', '等待中'),
+    'in_progress': tr('In progress', '进行中'),
+    'heartbeat_now': tr('just now', '刚刚'),
+    'seconds_ago': tr('seconds ago', '秒前'),
+    'working': tr('Connected — the analysis worker is active', '连接正常——分析任务正在运行'),
+    'slow': tr('Still connected — this is taking longer than usual', '连接仍然正常——本次分析比平时更慢'),
+    'stalled': tr('No recent heartbeat — this task may be stalled', '最近没有心跳——此任务可能已停滞'),
+    'queued': tr('Waiting for the analysis worker', '正在等待分析任务'),
+    'interrupted': tr('The server restarted during this analysis', '分析期间服务器发生重启'),
+    'failed': tr('The analysis stopped after a confirmed error', '分析因确认的错误而停止'),
+    'done': tr('Analysis complete', '分析完成'),
+    'slow_notice': tr('The worker is still responding, so the website is not frozen. The current model call is slower than expected; you may leave this page and return later.', '分析任务仍在响应，因此网站并未卡死。当前模型调用比预期慢；你可以离开此页面并稍后返回。'),
+    'stalled_notice': tr('The server has not reported a heartbeat for over 30 seconds. Keep this page open briefly; if the heartbeat does not return, use Try again. Your uploaded files are safe.', '服务器已超过 30 秒未报告心跳。请暂时保持此页面打开；如果心跳仍未恢复，请点击“重试”。你上传的文件是安全的。'),
+    'connection_lost': tr('This page cannot currently reach the server. It will keep trying automatically.', '此页面暂时无法连接服务器，系统将自动继续尝试。')
+  }|tojson }};
+  const statusLabels = {{ {
+    'queued': tr('Queued', '等待中'),
+    'processing': tr('Processing', '分析中'),
+    'completed': tr('Completed', '已完成'),
+    'failed': tr('Failed', '失败')
+  }|tojson }};
+  let requestFailures = 0;
+  let stopped = false;
+
+  function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Number(totalSeconds || 0));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = Math.floor(seconds % 60);
+    return hours
+      ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+      : `${minutes}:${String(remainder).padStart(2, "0")}`;
+  }
+
+  function setConnection(state, heartbeatAge) {
+    const label = document.getElementById("connection-label");
+    const dot = document.getElementById("connection-dot");
+    const notice = document.getElementById("slow-notice");
+    const labels = {
+      working: copy.working,
+      slow: copy.slow,
+      stalled: copy.stalled,
+      queued: copy.queued,
+      interrupted: copy.interrupted,
+      failed: copy.failed,
+      completed: copy.done
+    };
+    label.textContent = labels[state] || labels.working;
+    dot.className = `connection-dot connection-dot-${state}`;
+    notice.classList.add("hidden");
+    if (state === "slow" || state === "stalled") {
+      notice.textContent = state === "slow" ? copy.slow_notice : copy.stalled_notice;
+      notice.classList.remove("hidden");
     }
-    window.setTimeout(refresh,1500);
+    document.getElementById("heartbeat-time").textContent =
+      heartbeatAge === null || heartbeatAge === undefined
+        ? "—"
+        : heartbeatAge < 2
+        ? copy.heartbeat_now
+        : `${heartbeatAge} ${copy.seconds_ago}`;
+  }
+
+  function render(job) {
+    document.getElementById("job-status").textContent = statusLabels[job.status] || job.status;
+    document.getElementById("progress-message").textContent =
+      job.progress_message || statusLabels[job.status] || "";
+    document.getElementById("progress-detail").textContent = job.progress_detail || "";
+    document.getElementById("elapsed-time").textContent = formatDuration(job.elapsed_seconds);
+    setConnection(job.connection_state, job.heartbeat_age_seconds);
+
+    const current = job.current_stage === "completed"
+      ? stages.length
+      : Math.max(0, Number(job.stage_index || 0));
+    const fallbackProgress = Math.round(100 * current / stages.length);
+    const percent = Math.max(
+      0,
+      Math.min(100, Number(job.progress_percent ?? fallbackProgress))
+    );
+    document.getElementById("overall-progress").style.width = `${percent}%`;
+    document.getElementById("progress-value").textContent = `${Math.round(percent)}%`;
+    document.getElementById("progress-track").setAttribute("aria-valuenow", String(Math.round(percent)));
+
+    document.querySelectorAll("[data-stage]").forEach((node, index) => {
+      const note = node.querySelector(".stage-note");
+      node.classList.remove("is-complete", "is-current");
+      if (index < current || job.status === "completed") {
+        node.classList.add("is-complete");
+        note.textContent = copy.completed;
+      } else if (index === current && ["queued", "processing"].includes(job.status)) {
+        node.classList.add("is-current");
+        note.textContent = job.progress_message || copy.in_progress;
+      } else {
+        note.textContent = copy.waiting;
+      }
+    });
+
+    if (job.status === "completed") {
+      document.getElementById("overall-progress").style.width = "100%";
+      document.getElementById("progress-value").textContent = "100%";
+      document.getElementById("result-link").classList.remove("hidden");
+      stopped = true;
+    } else if (job.status === "failed") {
+      const failure = document.getElementById("failure");
+      failure.textContent = job.failure_message || {{ tr('We could not complete this analysis. No zero marks were recorded. Try again; your files and previous results are safe.', '无法完成此次分析。系统未记录任何零分。请重试；你的文件和之前的结果仍然安全。')|tojson }};
+      failure.classList.remove("hidden");
+      document.getElementById("retry-link").classList.remove("hidden");
+      stopped = true;
+    } else if (job.connection_state === "stalled") {
+      document.getElementById("retry-link").classList.remove("hidden");
+    }
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch("/student/analysis/{{ version.id }}/status", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      requestFailures = 0;
+      render(await response.json());
+    } catch (_error) {
+      requestFailures += 1;
+      if (requestFailures >= 2) {
+        document.getElementById("connection-label").textContent = copy.connection_lost;
+        document.getElementById("connection-dot").className = "connection-dot connection-dot-stalled";
+      }
+    }
+    if (!stopped) window.setTimeout(refresh, 2000);
   }
   refresh();
 })();

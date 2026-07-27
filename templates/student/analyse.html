@@ -13,6 +13,23 @@
   {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
 
   <form method="post" action="/student/analyse" enctype="multipart/form-data" class="surface" data-upload-form>
+    <div class="mb-6">
+      <label class="form-label max-w-xl" for="paper-name">
+        {{ tr('Paper name', '试卷名称') }}
+        <span>{{ tr('Optional', '选填') }}</span>
+        <input
+          class="field"
+          id="paper-name"
+          name="paper_name"
+          type="text"
+          maxlength="160"
+          value="{{ paper_name or '' }}"
+          placeholder="{{ tr('For example, October mock paper', '例如：十月模拟试卷') }}"
+        >
+      </label>
+      <p class="text-xs text-slate-500 mt-2">{{ tr('Give this analysis a name you will recognise later. If left blank, Sumkora uses the uploaded filename.', '填写一个便于日后识别的名称；留空时，Sumkora 将使用上传文件名。') }}</p>
+    </div>
+
     <div class="grid md:grid-cols-2 gap-4">
       <div
         class="upload-tile"
@@ -73,10 +90,10 @@
           step="1"
           inputmode="numeric"
           value="{{ maximum_marks or '' }}"
-          placeholder="{{ tr('For example, 80', '例如：80') }}"
+          placeholder="{{ tr('For example, 80, 100 or 120', '例如：80、100 或 120') }}"
         >
       </label>
-      <p class="text-xs text-slate-500 mt-2">{{ tr('Helpful when no mark scheme is available. Sumkora will use this to check that every question was found, but it will not use it to invent marks.', '没有评分标准时尤其有用。Sumkora 会用总分检查是否识别了全部题目，但不会据此编造分数。') }}</p>
+      <p class="text-xs text-slate-500 mt-2">{{ tr('Every paper can have a different total. When supplied, Sumkora checks the AI result against this value but never uses it to invent marks.', '每份试卷的总分都可能不同。填写后，Sumkora 会用此数值核对 AI 结果，但绝不会据此编造分数。') }}</p>
     </div>
 
     <div class="mt-5 grid md:grid-cols-2 gap-3 text-sm">

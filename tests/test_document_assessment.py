@@ -165,6 +165,19 @@ def test_student_maximum_marks_detects_incomplete_question_coverage():
     assert "80 marks" in prompt
 
 
+def test_student_maximum_marks_checks_detailed_mode_too():
+    result = valid_assessment("detailed")
+    with pytest.raises(AssessmentValidationError) as exc:
+        validate_assessment(
+            result,
+            mode="detailed",
+            completed_work_pages=2,
+            expected_maximum_marks=4,
+        )
+    assert "question maximums total 3" in str(exc.value)
+    assert "student supplied 4" in str(exc.value)
+
+
 def test_validator_derives_detailed_range_from_uncertain_questions():
     result = valid_assessment()
     result["questions"][0]["status"] = "uncertain"

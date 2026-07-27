@@ -13,7 +13,7 @@ import json
 import math
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import fitz
 
@@ -34,6 +34,7 @@ CONTRADICTION_PHRASES = (
     "no student work",
     "no answer shown",
 )
+ProgressCallback = Callable[[str, str], None]
 
 
 class AssessmentValidationError(ValueError):
@@ -42,6 +43,21 @@ class AssessmentValidationError(ValueError):
     def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__("; ".join(errors))
+
+
+def _notify_progress(
+    callback: ProgressCallback | None,
+    substage: str,
+    detail: str = "",
+) -> None:
+    if not callback:
+        return
+    try:
+        callback(substage, detail)
+    except Exception:
+        # Progress reporting is diagnostic only. A transient database/UI issue
+        # must never discard a valid assessment.
+        return
 
 
 def assessment_schema() -> dict[str, Any]:
@@ -486,7 +502,13 @@ def _call_structured_document_model(
     document_paths: list[str],
     reasoning_effort: str,
     document_texts: list[tuple[str, str]] | None = None,
+    timeout_seconds: int | None = None,
+    retries: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    request_timeout = timeout_seconds or config.WHOLE_DOCUMENT_TIMEOUT_SECONDS
+    request_retries = (
+        config.CXSEE_MAX_RETRIES if retries is None else max(0, retries)
+    )
     schema_instruction = (
         "\n\nYou must follow this exact JSON Schema yourself. Return every "
         "required field with the exact property names and enum values. "
@@ -527,8 +549,8 @@ def _call_structured_document_model(
                 "response_format": {"type": "json_object"},
             },
             headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-            timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-            retries=config.CXSEE_MAX_RETRIES,
+            timeout=request_timeout,
+            retries=request_retries,
         )
         choices = result.get("choices") or []
         message = (
@@ -589,8 +611,8 @@ def _call_structured_document_model(
                 },
             },
             headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-            timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-            retries=config.CXSEE_MAX_RETRIES,
+            timeout=request_timeout,
+            retries=request_retries,
         )
         return _strip_json_fence(_extract_gemini_text(result)), {
             "provider": "cxsee_gemini_native",
@@ -635,8 +657,8 @@ def _call_structured_document_model(
             "store": False,
         },
         headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-        timeout=config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-        retries=1,
+        timeout=request_timeout,
+        retries=1 if retries is None else max(0, retries),
     )
     return _strip_json_fence(_extract_response_text(result)), {
         "provider": "cxsee_responses",
@@ -762,7 +784,7 @@ def validate_assessment(
             graded_marks += mark
 
     total_maximum = _as_number(assessment.get("total_max_marks"))
-    if mode == "estimate" and expected_maximum_marks is not None:
+    if expected_maximum_marks is not None:
         total_maximum = float(expected_maximum_marks)
         if known_maximum and abs(total_maximum - known_maximum) > 0.51:
             errors.append(
@@ -991,6 +1013,7 @@ def _enrich_document_context(
     *,
     model: str,
     document_paths: list[str],
+    timeout_seconds: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     targets = _context_targets(assessment)
     if not targets:
@@ -1002,6 +1025,8 @@ def _enrich_document_context(
         schema=document_context_schema(),
         document_paths=document_paths,
         reasoning_effort="low",
+        timeout_seconds=timeout_seconds,
+        retries=0,
     )
     parsed = _parse_provider_json(response_text)
     enriched = _apply_document_context(assessment, parsed)
@@ -1113,6 +1138,7 @@ def _enrich_feedback(
     assessment: dict[str, Any],
     *,
     model: str,
+    timeout_seconds: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     started = time.monotonic()
     response_text, response_metadata = _call_structured_document_model(
@@ -1121,6 +1147,8 @@ def _enrich_feedback(
         schema=feedback_schema(),
         document_paths=[],
         reasoning_effort="low",
+        timeout_seconds=timeout_seconds,
+        retries=0,
     )
     parsed = _parse_provider_json(response_text)
     enriched = _apply_feedback(assessment, parsed)
@@ -1368,13 +1396,12 @@ def assess_documents(
     expected_maximum_marks: float | None = None,
     completed_work_text: str | None = None,
     mark_scheme_text: str | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not config.CXSEE_API_KEY:
         raise RuntimeError("The assessment API key is not configured.")
     mode = "detailed" if mark_scheme_path else "estimate"
-    if mode == "detailed":
-        expected_maximum_marks = None
-    elif expected_maximum_marks is not None:
+    if expected_maximum_marks is not None:
         expected_maximum_marks = float(expected_maximum_marks)
         if not math.isfinite(expected_maximum_marks) or not (
             1 <= expected_maximum_marks <= 500
@@ -1397,6 +1424,14 @@ def assess_documents(
     repair_errors: list[str] | None = None
     last_validation_error: AssessmentValidationError | None = None
     started = time.monotonic()
+    target_seconds = max(
+        60,
+        int(getattr(config, "WHOLE_DOCUMENT_TARGET_SECONDS", 480)),
+    )
+
+    def remaining_seconds() -> float:
+        return max(0.0, target_seconds - (time.monotonic() - started))
+
     attempts = 2 if allow_repair else 1
     for attempt in range(attempts):
         document_paths = [completed_work_path]
@@ -1411,6 +1446,27 @@ def assess_documents(
                 document_texts.append(
                     ("OFFICIAL MARK SCHEME — OCR TRANSCRIPT", mark_scheme_text)
                 )
+        _notify_progress(
+            progress_callback,
+            "primary_request",
+            (
+                f"Assessment attempt {attempt + 1} of {attempts}; "
+                f"{pages} completed-work pages"
+            ),
+        )
+        remaining = remaining_seconds()
+        if remaining < 45:
+            raise TimeoutError(
+                "The assessment exceeded its processing time budget."
+            )
+        primary_retries = 1
+        primary_timeout = max(
+            45,
+            min(
+                config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+                int((remaining - 15) / (primary_retries + 1)),
+            ),
+        )
         response_text, response_metadata = _call_structured_document_model(
             model=selected_model,
             prompt=_prompt(
@@ -1422,6 +1478,13 @@ def assess_documents(
             document_paths=document_paths,
             reasoning_effort=effort,
             document_texts=document_texts,
+            timeout_seconds=primary_timeout,
+            retries=primary_retries,
+        )
+        _notify_progress(
+            progress_callback,
+            "primary_response",
+            "The assessor responded; checking question coverage and totals",
         )
         try:
             parsed = _parse_provider_json(response_text)
@@ -1443,12 +1506,19 @@ def assess_documents(
                 "model_version": response_metadata["model_version"],
                 "render_dpi": response_metadata.get("render_dpi"),
                 "expected_maximum_marks": expected_maximum_marks,
+                "target_seconds": target_seconds,
+                "primary_timeout_seconds": primary_timeout,
             }
             if (
                 mode == "detailed"
                 and config.WHOLE_DOCUMENT_AUDIT_ENABLED
                 and mark_scheme_path
             ):
+                _notify_progress(
+                    progress_callback,
+                    "audit",
+                    "Cross-checking every detailed mark",
+                )
                 validated, audit_metadata = _audit_detailed_assessment(
                     validated,
                     completed_work_path,
@@ -1461,47 +1531,121 @@ def assess_documents(
                 )
             validated = _ensure_question_display_fields(validated)
             if config.WHOLE_DOCUMENT_CONTEXT_ENABLED:
-                try:
-                    validated, context_metadata = _enrich_document_context(
-                        validated,
-                        model=selected_model,
-                        document_paths=document_paths,
-                    )
-                    provider_metadata["document_context"] = context_metadata
-                except Exception as exc:
+                context_remaining = remaining_seconds()
+                if context_remaining < 35:
                     provider_metadata["document_context"] = {
-                        "status": "unavailable",
-                        "error_type": type(exc).__name__,
+                        "status": "skipped_time_budget",
+                        "duration_ms": 0,
                     }
                     validated["warnings"] = list(
                         validated.get("warnings") or []
                     ) + [
-                        "Complete question transcription could not be generated "
-                        "for this run; the validated marks are unaffected."
+                        "Complete question transcription was skipped to keep "
+                        "this run within its processing time target; the "
+                        "validated marks are unaffected."
                     ]
+                else:
+                    try:
+                        _notify_progress(
+                            progress_callback,
+                            "document_context",
+                            (
+                                f"Preparing complete text for "
+                                f"{len(_context_targets(validated))} missed questions"
+                            ),
+                        )
+                        context_timeout = max(
+                            20,
+                            min(
+                                int(
+                                    getattr(
+                                        config,
+                                        "WHOLE_DOCUMENT_OPTIONAL_TIMEOUT_SECONDS",
+                                        120,
+                                    )
+                                ),
+                                int(context_remaining - 15),
+                            ),
+                        )
+                        validated, context_metadata = _enrich_document_context(
+                            validated,
+                            model=selected_model,
+                            document_paths=[completed_work_path],
+                            timeout_seconds=context_timeout,
+                        )
+                        provider_metadata["document_context"] = context_metadata
+                    except Exception as exc:
+                        provider_metadata["document_context"] = {
+                            "status": "unavailable",
+                            "error_type": type(exc).__name__,
+                        }
+                        validated["warnings"] = list(
+                            validated.get("warnings") or []
+                        ) + [
+                            "Complete question transcription could not be generated "
+                            "for this run; the validated marks are unaffected."
+                        ]
             if config.WHOLE_DOCUMENT_FEEDBACK_ENABLED:
-                try:
-                    validated, feedback_metadata = _enrich_feedback(
-                        validated,
-                        model=selected_model,
-                    )
-                    provider_metadata["feedback"] = feedback_metadata
-                except Exception as exc:
-                    # A translation/coaching outage must not discard validated
-                    # marks. The English marking rationale remains available.
+                feedback_remaining = remaining_seconds()
+                if feedback_remaining < 30:
                     provider_metadata["feedback"] = {
-                        "status": "unavailable",
-                        "error_type": type(exc).__name__,
+                        "status": "skipped_time_budget",
+                        "duration_ms": 0,
                     }
                     validated["warnings"] = list(
                         validated.get("warnings") or []
                     ) + [
-                        "Bilingual coaching could not be generated for this "
-                        "run; the validated marks are unaffected."
+                        "Bilingual coaching was skipped to keep this run "
+                        "within its processing time target; the validated "
+                        "English marks and rationales are unaffected."
                     ]
+                else:
+                    try:
+                        _notify_progress(
+                            progress_callback,
+                            "feedback",
+                            "Writing concise English and Chinese learning feedback",
+                        )
+                        feedback_timeout = max(
+                            20,
+                            min(
+                                int(
+                                    getattr(
+                                        config,
+                                        "WHOLE_DOCUMENT_OPTIONAL_TIMEOUT_SECONDS",
+                                        120,
+                                    )
+                                ),
+                                int(feedback_remaining - 10),
+                            ),
+                        )
+                        validated, feedback_metadata = _enrich_feedback(
+                            validated,
+                            model=selected_model,
+                            timeout_seconds=feedback_timeout,
+                        )
+                        provider_metadata["feedback"] = feedback_metadata
+                    except Exception as exc:
+                        # A translation/coaching outage must not discard validated
+                        # marks. The English marking rationale remains available.
+                        provider_metadata["feedback"] = {
+                            "status": "unavailable",
+                            "error_type": type(exc).__name__,
+                        }
+                        validated["warnings"] = list(
+                            validated.get("warnings") or []
+                        ) + [
+                            "Bilingual coaching could not be generated for this "
+                            "run; the validated marks are unaffected."
+                        ]
                 provider_metadata["duration_ms"] = int(
                     (time.monotonic() - started) * 1000
                 )
+            _notify_progress(
+                progress_callback,
+                "reasoning_complete",
+                f"{len(validated['questions'])} question results validated",
+            )
             return validated, provider_metadata
         except (json.JSONDecodeError, AssessmentValidationError) as exc:
             if isinstance(exc, AssessmentValidationError):
@@ -1510,4 +1654,13 @@ def assess_documents(
             else:
                 repair_errors = ["response was not valid JSON"]
                 last_validation_error = AssessmentValidationError(repair_errors)
+            if attempt + 1 < attempts:
+                _notify_progress(
+                    progress_callback,
+                    "validation_repair",
+                    (
+                        "The first response was incomplete; requesting one "
+                        "corrected result"
+                    ),
+                )
     raise last_validation_error or RuntimeError("Assessment response could not be validated.")

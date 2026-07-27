@@ -7,8 +7,10 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +39,27 @@ SELF_SERVICE_STAGES = [
     "profile_update",
     "report_generation",
 ]
+
+STAGE_PROGRESS = {
+    "validation": (4, "Checking your files"),
+    "document_extraction": (10, "Preparing the complete documents"),
+    "whole_document_reasoning": (18, "Sending the complete paper to the assessor"),
+    "result_validation": (84, "Checking every question and mark total"),
+    "diagnosis": (89, "Building your question-by-question feedback"),
+    "profile_update": (94, "Updating your strengths and weaknesses"),
+    "report_generation": (98, "Preparing your paper report"),
+    "completed": (100, "Analysis complete"),
+}
+
+REASONING_PROGRESS = {
+    "primary_request": (22, "Reading every page and applying the marking evidence"),
+    "primary_response": (56, "Checking the returned question inventory"),
+    "validation_repair": (44, "Correcting an incomplete question inventory"),
+    "audit": (62, "Cross-checking the detailed marks"),
+    "document_context": (68, "Preparing complete text for missed questions"),
+    "feedback": (78, "Writing your English and Chinese feedback"),
+    "reasoning_complete": (82, "Finalising the validated assessment"),
+}
 
 CORE_SKILLS = [
     ("Algebra and graphs", "algebraic manipulation"),
@@ -460,6 +483,13 @@ def detect_documents(question_path: str, mark_scheme_path: str, title_hint: str 
     return detect_document_texts(question_text, mark_text, title_hint)
 
 
+def clean_paper_name(value: str | None, fallback: str) -> str:
+    name = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(name) > 160:
+        raise ValueError("Paper name must be 160 characters or fewer.")
+    return name or fallback[:160] or "Mathematics paper"
+
+
 def create_student_paper_draft(
     student_id: int,
     answer_filename: str,
@@ -467,6 +497,7 @@ def create_student_paper_draft(
     mark_scheme_filename: str | None = None,
     mark_scheme_content: bytes | None = None,
     expected_maximum_marks: float | None = None,
+    paper_name: str | None = None,
 ) -> tuple[int, int]:
     answer_filename, answer_content = normalize_answer_upload(
         answer_filename, answer_content
@@ -489,7 +520,11 @@ def create_student_paper_draft(
         else None
     )
     metadata = {
-        "title": Path(answer_filename).stem[:160] or "Mathematics paper",
+        "title": clean_paper_name(
+            paper_name,
+            Path(answer_filename).stem,
+        ),
+        "title_source": "student" if str(paper_name or "").strip() else "filename",
         "syllabus_code": "Mathematics",
         "paper_number": "",
         "paper_year": None,
@@ -563,6 +598,7 @@ def create_rerun_draft(
     answer_file: tuple[str, bytes] | None,
     scheme_file: tuple[str, bytes] | None,
     expected_maximum_marks: float | None = None,
+    paper_name: str | None = None,
 ) -> int:
     paper = query_one(
         "SELECT * FROM student_papers WHERE id = ? AND student_id = ?",
@@ -587,8 +623,17 @@ def create_rerun_draft(
             raise ValueError("Replacement mark scheme must be a PDF.")
         scheme_path = save_document("scheme", *scheme_file)
     version_number = int(latest["version_number"]) + 1
+    title = clean_paper_name(paper_name, paper["title"])
     metadata = {
-        "title": paper["title"],
+        "title": title,
+        "title_source": (
+            "student"
+            if str(paper_name or "").strip()
+            else parse_json(latest["detected_metadata"], {}).get(
+                "title_source",
+                "filename",
+            )
+        ),
         "syllabus_code": paper["syllabus_code"],
         "paper_number": paper["paper_number"],
         "paper_year": paper["paper_year"],
@@ -635,8 +680,12 @@ def create_rerun_draft(
         ),
     )
     execute(
-        "UPDATE student_papers SET status = 'draft', updated_at = ? WHERE id = ?",
-        (now, paper_id),
+        """
+        UPDATE student_papers
+        SET title = ?, status = 'draft', updated_at = ?
+        WHERE id = ?
+        """,
+        (title, now, paper_id),
     )
     return version_id
 
@@ -694,16 +743,104 @@ def confirm_version(
     return version["paper_id"]
 
 
-def _update_version(version_id: int, stage: str, index: int, status: str = "processing"):
+def _update_version(
+    version_id: int,
+    stage: str,
+    index: int,
+    status: str = "processing",
+    *,
+    progress_percent: float | None = None,
+    progress_message: str | None = None,
+    progress_detail: str = "",
+):
+    default_percent, default_message = STAGE_PROGRESS.get(
+        stage,
+        (max(0, min(99, index * 100 / max(len(SELF_SERVICE_STAGES), 1))), ""),
+    )
+    percent = (
+        default_percent if progress_percent is None else progress_percent
+    )
+    message = default_message if progress_message is None else progress_message
+    timestamp = now_iso()
     execute(
         """
         UPDATE paper_analysis_versions
         SET status = ?, current_stage = ?, stage_index = ?,
-            started_at = COALESCE(started_at, ?), updated_at = ?
+            progress_percent = ?, progress_message = ?, progress_detail = ?,
+            heartbeat_at = ?, started_at = COALESCE(started_at, ?),
+            updated_at = ?
         WHERE id = ?
         """,
-        (status, stage, index, now_iso(), now_iso(), version_id),
+        (
+            status,
+            stage,
+            index,
+            max(0.0, min(100.0, float(percent))),
+            message,
+            progress_detail,
+            timestamp,
+            timestamp,
+            timestamp,
+            version_id,
+        ),
     )
+
+
+def _reasoning_progress_callback(version_id: int):
+    def update(substage: str, detail: str = "") -> None:
+        percent, message = REASONING_PROGRESS.get(
+            substage,
+            REASONING_PROGRESS["primary_request"],
+        )
+        _update_version(
+            version_id,
+            "whole_document_reasoning",
+            2,
+            progress_percent=percent,
+            progress_message=message,
+            progress_detail=detail,
+        )
+
+    return update
+
+
+@contextmanager
+def _analysis_heartbeat(version_id: int, interval_seconds: float = 5.0):
+    """Persist proof that the worker process is alive during provider calls."""
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(interval_seconds):
+            try:
+                execute(
+                    """
+                    UPDATE paper_analysis_versions
+                    SET heartbeat_at = ?
+                    WHERE id = ? AND status = 'processing'
+                    """,
+                    (now_iso(), version_id),
+                )
+            except Exception:
+                logger.exception(
+                    "Could not persist heartbeat for analysis version %s",
+                    version_id,
+                )
+
+    execute(
+        "UPDATE paper_analysis_versions SET heartbeat_at = ? WHERE id = ?",
+        (now_iso(), version_id),
+    )
+    thread = threading.Thread(
+        target=beat,
+        name=f"analysis-heartbeat-{version_id}",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=max(1.0, interval_seconds + 1.0))
 
 
 def _diagnosis(mark: float, maximum: float, confidence: float, flags: list[str]):
@@ -1224,21 +1361,53 @@ def run_self_service_analysis(version_id: int) -> dict:
 
         mode = "detailed" if scheme_path else "estimate"
         _update_version(version_id, "validation", 0)
-        _update_version(version_id, "document_extraction", 1)
+        with fitz.open(version["answer_script_path"]) as completed_document:
+            completed_pages = len(completed_document)
+        scheme_pages = 0
+        if scheme_path:
+            with fitz.open(scheme_path) as scheme_document:
+                scheme_pages = len(scheme_document)
+        page_detail = (
+            f"{completed_pages} completed-work pages"
+            + (
+                f" and {scheme_pages} mark-scheme pages"
+                if scheme_pages
+                else ""
+            )
+        )
+        _update_version(
+            version_id,
+            "document_extraction",
+            1,
+            progress_detail=page_detail,
+        )
         # The reasoning model receives the original complete PDFs. Do not
         # pre-OCR pages or map page fragments to questions: both operations
         # previously lost handwriting and created incorrect question matches.
-        _update_version(version_id, "whole_document_reasoning", 2)
-        assessment, provider_metadata = assess_documents(
-            version["answer_script_path"],
-            scheme_path,
-            expected_maximum_marks=version["expected_maximum_marks"],
+        _update_version(
+            version_id,
+            "whole_document_reasoning",
+            2,
+            progress_detail=page_detail,
         )
+        with _analysis_heartbeat(version_id):
+            assessment, provider_metadata = assess_documents(
+                version["answer_script_path"],
+                scheme_path,
+                expected_maximum_marks=version["expected_maximum_marks"],
+                progress_callback=_reasoning_progress_callback(version_id),
+            )
         _update_version(version_id, "result_validation", 3)
 
         questions = assessment["questions"]
+        draft_metadata = parse_json(version["detected_metadata"], {})
         metadata = {
-            "title": assessment.get("paper_title") or version["paper_title"],
+            "title": (
+                version["paper_title"]
+                if draft_metadata.get("title_source") == "student"
+                else assessment.get("paper_title") or version["paper_title"]
+            ),
+            "title_source": draft_metadata.get("title_source", "filename"),
             "syllabus_code": assessment.get("syllabus_code") or "Mathematics",
             "paper_number": assessment.get("paper_reference") or "",
             "paper_year": None,
@@ -1459,6 +1628,8 @@ def run_self_service_analysis(version_id: int) -> dict:
             SET status = 'completed', current_stage = 'completed',
                 stage_index = ?, confirmed_min_score = ?,
                 provisional_score = ?, possible_max_score = ?,
+                progress_percent = 100, progress_message = 'Analysis complete',
+                progress_detail = '', heartbeat_at = ?,
                 updated_at = ?, finished_at = ?
             WHERE id = ?
             """,
@@ -1467,6 +1638,7 @@ def run_self_service_analysis(version_id: int) -> dict:
                 assessment["estimated_score_min"],
                 assessment["estimated_score"],
                 assessment["estimated_score_max"],
+                now_iso(),
                 now_iso(),
                 now_iso(),
                 version_id,
@@ -1481,25 +1653,112 @@ def run_self_service_analysis(version_id: int) -> dict:
             (version["version_number"], now_iso(), version["student_paper_id"]),
         )
         return {"status": "completed", "paper_id": version["student_paper_id"]}
-    except Exception:
+    except Exception as exc:
         logger.exception("Whole-document analysis version %s failed", version_id)
         public_message = (
             "We could not complete this analysis. No zero marks were recorded. "
             "Try again; your files and previous results are safe."
         )
+        failed_at = now_iso()
+        current = query_one(
+            """
+            SELECT current_stage, progress_message, started_at
+            FROM paper_analysis_versions WHERE id = ?
+            """,
+            (version_id,),
+        )
+        elapsed_seconds = None
+        if current and current["started_at"]:
+            try:
+                elapsed_seconds = max(
+                    0,
+                    int(
+                        (
+                            datetime.now(timezone.utc)
+                            - datetime.fromisoformat(current["started_at"])
+                        ).total_seconds()
+                    ),
+                )
+            except (TypeError, ValueError):
+                elapsed_seconds = None
+        error_type = type(exc).__name__
+        failure_type = (
+            "assessment_validation"
+            if error_type == "AssessmentValidationError"
+            else "provider_or_transport_error"
+            if error_type in {
+                "HTTPError",
+                "URLError",
+                "TimeoutError",
+                "ConnectionResetError",
+                "RemoteDisconnected",
+            }
+            or "provider" in str(exc).lower()
+            else "analysis_pipeline_error"
+        )
+        failure_details = {
+            "error_type": error_type,
+            "message": str(exc)[:2000],
+            "stage": current["current_stage"] if current else "",
+            "substage": current["progress_message"] if current else "",
+            "elapsed_seconds": elapsed_seconds,
+            "model": config.WHOLE_DOCUMENT_MODEL,
+            "assessment_mode": (
+                "detailed" if version["mark_scheme_path"] else "estimate"
+            ),
+        }
         execute(
             """
             UPDATE paper_analysis_versions
-            SET status = 'failed', failure_message = ?, updated_at = ?,
-                finished_at = ?
+            SET status = 'failed', failure_message = ?, failure_details = ?,
+                progress_message = 'Analysis stopped before completion',
+                heartbeat_at = ?, updated_at = ?, finished_at = ?
             WHERE id = ?
             """,
-            (public_message, now_iso(), now_iso(), version_id),
+            (
+                public_message,
+                json_text(failure_details),
+                failed_at,
+                failed_at,
+                failed_at,
+                version_id,
+            ),
         )
         execute(
             "UPDATE student_papers SET status = 'failed', updated_at = ? WHERE id = ?",
-            (now_iso(), version["student_paper_id"]),
+            (failed_at, version["student_paper_id"]),
         )
+        existing_case = query_one(
+            """
+            SELECT id FROM research_failure_cases
+            WHERE analysis_version_id = ? AND failure_type = ?
+            LIMIT 1
+            """,
+            (version_id, failure_type),
+        )
+        if not existing_case:
+            execute(
+                """
+                INSERT INTO research_failure_cases
+                (analysis_version_id, failure_type, severity, tags, notes,
+                 created_at, updated_at)
+                VALUES (?, ?, 'high', ?, ?, ?, ?)
+                """,
+                (
+                    version_id,
+                    failure_type,
+                    json_text(
+                        [
+                            "whole_document",
+                            failure_details["stage"],
+                            error_type,
+                        ]
+                    ),
+                    json_text(failure_details),
+                    failed_at,
+                    failed_at,
+                ),
+            )
         return {"status": "failed", "error": public_message}
 
 
@@ -1509,6 +1768,8 @@ def student_owned_papers(student_id: int):
         SELECT sp.*, pav.id AS latest_version_id, pav.status AS analysis_status,
                pav.confirmed_min_score, pav.provisional_score,
                pav.possible_max_score, pav.created_at AS analysis_created_at,
+               pav.current_stage, pav.progress_percent, pav.progress_message,
+               pav.started_at, pav.finished_at, pav.failure_message,
                (SELECT COUNT(*) FROM paper_analysis_versions v
                 WHERE v.paper_id = sp.id) AS version_count
         FROM student_papers sp

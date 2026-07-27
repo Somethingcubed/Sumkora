@@ -8,10 +8,10 @@
 
 <div class="grid lg:grid-cols-2 gap-5">
   {% for item in papers %}
-  <section class="surface">
+  <section class="surface paper-library-card">
     <div class="flex justify-between gap-4">
       <div><p class="eyebrow">{{ item.syllabus_code }} · {{ item.paper_number or item.source_type }}</p><h2 class="text-lg font-semibold mt-2">{{ item.title }}</h2><p class="text-sm text-slate-500 mt-1">{{ item.updated_at[:10] }} · {{ tr(count_label(item.version_count, 'analysis version'), item.version_count ~ ' 个分析版本') }}</p></div>
-      <span class="badge badge-{{ item.analysis_status or item.status }}">{{ (item.analysis_status or item.status).replace('_', ' ')|capitalize }}</span>
+      <span class="badge badge-{{ item.analysis_status or item.status }}">{{ status_label(item.analysis_status or item.status) }}</span>
     </div>
     {% if item.analysis_status == 'completed' %}
     <div class="flex items-end justify-between gap-4 mt-6 pt-5 border-t border-slate-100">
@@ -21,7 +21,17 @@
     {% elif item.analysis_status == 'review' %}
     <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/review">{{ tr('Start analysis', '开始分析') }}</a>
     {% elif item.analysis_status in ['queued','processing'] %}
-    <a class="inline-block mt-5 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/processing">{{ tr('View progress', '查看进度') }}</a>
+    <div class="mt-6 pt-5 border-t border-slate-100">
+      <div class="flex justify-between gap-4 text-sm"><p class="font-medium">{{ tr(item.progress_message or 'Analysis in progress', '正在分析试卷') }}</p><span class="text-slate-500">{{ (item.progress_percent or 0)|round|int }}%</span></div>
+      <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden mt-3"><div class="h-full rounded-full bg-indigo-600" style="width:{{ item.progress_percent or 0 }}%"></div></div>
+      <a class="inline-block mt-4 text-indigo-600 text-sm font-semibold" href="/student/analysis/{{ item.latest_version_id }}/processing">{{ tr('View live progress', '查看实时进度') }} →</a>
+    </div>
+    {% elif item.analysis_status == 'failed' %}
+    <div class="mt-6 pt-5 border-t border-slate-100">
+      <p class="text-sm font-semibold text-red-700">{{ tr('Analysis stopped before completion', '分析未能完成') }}</p>
+      <p class="text-sm text-slate-500 mt-1">{% if item.current_stage == 'interrupted' %}{{ tr('The server restarted during this run. Your uploaded files are still safe.', '本次分析期间服务器发生重启。你上传的文件仍然安全。') }}{% else %}{{ tr('No zero marks were recorded. You can rerun this paper without uploading it again.', '系统未记录任何零分。你可以直接重新分析，无需再次上传。') }}{% endif %}</p>
+      <div class="flex flex-wrap gap-4 mt-4"><a class="text-indigo-600 text-sm font-semibold" href="/student/papers/{{ item.id }}/rerun">{{ tr('Try again', '重试') }} →</a>{% if item.version_count > 1 %}<a class="text-slate-600 text-sm" href="/student/papers/{{ item.id }}">{{ tr('View earlier versions', '查看之前的版本') }}</a>{% endif %}</div>
+    </div>
     {% endif %}
   </section>
   {% else %}

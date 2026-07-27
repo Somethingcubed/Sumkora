@@ -90,5 +90,40 @@
   <main id="main-content" class="page-shell">
     {% block content %}{% endblock %}
   </main>
+  {% if user and not is_researcher %}
+  <script>
+  (() => {
+    let activeSince = document.hidden ? null : performance.now();
+    const sendActiveTime = () => {
+      if (activeSince === null) return;
+      const now = performance.now();
+      const seconds = Math.min(90, Math.round((now - activeSince) / 1000));
+      activeSince = now;
+      if (seconds < 5) return;
+      const body = new FormData();
+      body.append("path", window.location.pathname);
+      body.append("active_seconds", String(seconds));
+      fetch("/student/activity", {
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        keepalive: true
+      }).catch(() => {});
+    };
+    window.setInterval(() => {
+      if (!document.hidden) sendActiveTime();
+    }, 60000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        sendActiveTime();
+        activeSince = null;
+      } else {
+        activeSince = performance.now();
+      }
+    });
+    window.addEventListener("pagehide", sendActiveTime);
+  })();
+  </script>
+  {% endif %}
 </body>
 </html>

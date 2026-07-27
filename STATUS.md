@@ -1,6 +1,6 @@
 # Sumkora release-candidate status
 
-Updated: 26 July 2026
+Updated: 27 July 2026
 
 ## Starting state and safety checkpoint
 
@@ -26,7 +26,7 @@ Updated: 26 July 2026
 - Completed work alone produces a calibrated estimated range, strengths,
   weaknesses and recommendations.
 - Completed work plus a mark scheme produces detailed question-level marks.
-- The complete PDFs are sent directly to GPT-5.6 Terra through CXSee; the old
+- The complete PDFs are sent directly to GPT-5.5 through CXSee; the old
   OCR/page-label mapper is not used for new analyses.
 - Detailed mode runs a second independent whole-document audit. Both passes
   use strict structured output, and every label must be covered by the audit.
@@ -135,6 +135,48 @@ Updated: 26 July 2026
   browser-console checks passed. Sample Mistake Book question and answer PDFs
   were rendered to PNG and visually inspected.
 
+## Reliability, progress and researcher visibility - 2026-07-27
+
+- Created the annotated Git checkpoint
+  `backup/pre-reliability-ui-20260727` at commit
+  `7d2d136446dd95e423a079ec70bfd35687f8588a`.
+- Created a verified full repository bundle at
+  `/Users/oscar/Desktop/Math /Sumkora backups/sumkora-pre-reliability-ui-20260727.bundle`
+  and a source ZIP at
+  `/Users/oscar/Desktop/Math /Sumkora backups/sumkora-source-7d2d136-20260727.zip`.
+- Added persisted processing stages, percentages and five-second heartbeats.
+  The processing page now distinguishes working, slow, stalled, interrupted
+  and failed runs, and shows elapsed time plus the age of the latest worker
+  heartbeat. The progress UI is based on server state rather than animation.
+- Added an eight-minute provider target and bounded optional enrichment work.
+  If optional full-question context or bilingual feedback cannot finish
+  inside the remaining budget, validated marking results are preserved.
+- Student paper names and maximum marks are optional. Maximum marks may be 80,
+  100, 120 or another paper-specific total, and are used as a coverage check
+  in both estimated and detailed modes.
+- Failed runs keep internal stage, substage, model and timing diagnostics for
+  researchers while students receive a concise retry message. Technical
+  failures never create a false zero mark.
+- The researcher overview now shows recent whole-document runs, score and
+  question coverage, total/context/feedback timings, model attempts and
+  structured failure causes.
+- Added privacy-conscious student activity tracking. Only time while a student
+  has a visible Sumkora tab is counted; background tabs are excluded. The
+  researcher overview shows today's and all-time active minutes, paper count,
+  download count and the recent download log.
+- Download events are recorded for paper reports, source documents, progress
+  reports, Mistake Book booklets and targeted-practice question/answer PDFs.
+- Real 0606/13 October/November 2025 benchmark:
+  - completed work plus official mark scheme: 57/80, all 20 question parts,
+    167 seconds;
+  - the same 15 pages submitted as ordinary gallery JPEGs plus mark scheme:
+    56/80, all 20 parts, 115 seconds;
+  - completed work only with an expected maximum of 80: estimated 54/80 with
+    a 48-60 range, all 20 parts, 141 seconds.
+- Full automated suite: 57 tests passed. Fresh-process browser verification
+  passed for the researcher dashboard and live processing states with no
+  console errors.
+
 ## Intentionally retained legacy identifiers
 
 These are not shown to students or researchers:
@@ -164,6 +206,8 @@ These are not shown to students or researchers:
 - The two-page OCR benchmark is evidence, not a general accuracy claim.
 - The grading gold set is synthetic and too small for examiner-level claims.
 - Processing is an in-process background task; a restart can interrupt it.
+- Active-time totals are approximate visible-tab heartbeats, not a claim that
+  the student was continuously studying or looking at the screen.
 - SQLite and local volume storage support only a small single-instance pilot.
 - Recovery codes have no email fallback; loss requires manual owner help.
 - Shared rate limiting, malware scanning, MFA and durable worker cancellation

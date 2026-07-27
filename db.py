@@ -404,6 +404,11 @@ def init_db():
             expected_maximum_marks REAL,
             assessment_summary TEXT NOT NULL DEFAULT '{}',
             provider_metadata TEXT NOT NULL DEFAULT '{}',
+            progress_percent REAL NOT NULL DEFAULT 0,
+            progress_message TEXT NOT NULL DEFAULT '',
+            progress_detail TEXT NOT NULL DEFAULT '',
+            heartbeat_at TEXT,
+            failure_details TEXT NOT NULL DEFAULT '{}',
             failure_message TEXT,
             created_at TEXT NOT NULL,
             started_at TEXT,
@@ -592,6 +597,18 @@ def init_db():
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS student_activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            path TEXT NOT NULL DEFAULT '',
+            entity_type TEXT NOT NULL DEFAULT '',
+            entity_id TEXT NOT NULL DEFAULT '',
+            active_seconds INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS taxonomy_versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version TEXT NOT NULL UNIQUE,
@@ -611,6 +628,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_analysis_ocr_version ON analysis_ocr_pages(analysis_version_id, page_number);
         CREATE INDEX IF NOT EXISTS idx_analysis_results_version ON analysis_question_results(analysis_version_id, question_label);
         CREATE INDEX IF NOT EXISTS idx_experiment_runs ON research_experiment_runs(experiment_id, run_number);
+        CREATE INDEX IF NOT EXISTS idx_student_activity_student_time
+        ON student_activity_events(student_id, created_at);
         """
     )
     columns = {
@@ -791,6 +810,11 @@ def init_db():
         "expected_maximum_marks": "REAL",
         "assessment_summary": "TEXT NOT NULL DEFAULT '{}'",
         "provider_metadata": "TEXT NOT NULL DEFAULT '{}'",
+        "progress_percent": "REAL NOT NULL DEFAULT 0",
+        "progress_message": "TEXT NOT NULL DEFAULT ''",
+        "progress_detail": "TEXT NOT NULL DEFAULT ''",
+        "heartbeat_at": "TEXT",
+        "failure_details": "TEXT NOT NULL DEFAULT '{}'",
     }
     for column, definition in analysis_version_column_defs.items():
         if column not in analysis_version_columns:

@@ -3,7 +3,7 @@ import json
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import fitz
@@ -98,6 +98,124 @@ def test_student_can_upload_multiple_gallery_pages():
         assert len(document) == 3
         assert document[0].rect.height > document[0].rect.width
         assert document[1].rect.width > document[1].rect.height
+
+
+def test_student_paper_name_is_preserved_and_maximum_is_paper_specific():
+    create_user("named-paper@student.local", "student")
+    login("named-paper@student.local")
+    response = client.post(
+        "/student/analyse",
+        data={
+            "paper_name": "October mock — Paper 1",
+            "maximum_marks": "120",
+        },
+        files={
+            "answer_script": (
+                "generic-scan-name.pdf",
+                pdf_bytes("Q1 visible working"),
+                "application/pdf",
+            )
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    version_id = int(response.headers["location"].split("/")[3])
+    version = query_one(
+        "SELECT * FROM paper_analysis_versions WHERE id = ?",
+        (version_id,),
+    )
+    paper = query_one(
+        "SELECT * FROM student_papers WHERE id = ?",
+        (version["paper_id"],),
+    )
+    assert paper["title"] == "October mock — Paper 1"
+    assert version["expected_maximum_marks"] == 120
+
+
+def test_processing_status_reports_real_heartbeat_and_elapsed_time():
+    create_user("heartbeat@student.local", "student")
+    paper, version, _ = upload_direct_paper("heartbeat@student.local")
+    timestamp = datetime.now().astimezone().isoformat()
+    execute(
+        """
+        UPDATE paper_analysis_versions
+        SET status = 'processing', current_stage = 'whole_document_reasoning',
+            stage_index = 2, progress_percent = 42,
+            progress_message = 'Reading every page and applying the marking evidence',
+            progress_detail = '1 completed-work pages',
+            heartbeat_at = ?, started_at = ?
+        WHERE id = ?
+        """,
+        (timestamp, timestamp, version["id"]),
+    )
+    response = client.get(f"/student/analysis/{version['id']}/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connection_state"] == "working"
+    assert payload["progress_percent"] == 42
+    assert payload["heartbeat_age_seconds"] <= 2
+    assert payload["elapsed_seconds"] <= 2
+    page = client.get(f"/student/analysis/{version['id']}/processing")
+    assert "real server heartbeat" in page.text
+    assert 'id="elapsed-time"' in page.text
+
+    old_heartbeat = (
+        datetime.now().astimezone() - timedelta(seconds=45)
+    ).isoformat()
+    execute(
+        "UPDATE paper_analysis_versions SET heartbeat_at = ? WHERE id = ?",
+        (old_heartbeat, version["id"]),
+    )
+    stalled = client.get(f"/student/analysis/{version['id']}/status").json()
+    assert stalled["connection_state"] == "stalled"
+    assert stalled["heartbeat_age_seconds"] >= 44
+
+
+def test_researcher_can_inspect_active_time_and_downloads():
+    create_user("tracked@student.local", "student")
+    paper, _, _ = upload_direct_paper("tracked@student.local")
+    ping = client.post(
+        "/student/activity",
+        data={"path": "/student/papers", "active_seconds": "61"},
+    )
+    assert ping.status_code == 200
+    report = client.get(f"/student/papers/{paper['id']}/report")
+    assert report.status_code == 200
+    events = query_all(
+        """
+        SELECT * FROM student_activity_events
+        WHERE student_id = (SELECT id FROM users WHERE email = ?)
+        ORDER BY id
+        """,
+        ("tracked@student.local",),
+    )
+    assert [event["event_type"] for event in events] == [
+        "active_time",
+        "download",
+    ]
+    assert events[0]["active_seconds"] == 61
+    assert events[1]["entity_type"] == "paper_report"
+
+    researcher_id = create_user("activity@research.local", "teacher")
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'researcher', ?)",
+        (researcher_id, datetime.now().isoformat()),
+    )
+    hybrid_researcher_id = create_user(
+        "hybrid-research@research.local",
+        "student",
+    )
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'researcher', ?)",
+        (hybrid_researcher_id, datetime.now().isoformat()),
+    )
+    login("activity@research.local")
+    dashboard = client.get("/research")
+    assert dashboard.status_code == 200
+    assert "Student activity" in dashboard.text
+    assert "tracked" in dashboard.text
+    assert "Paper report" in dashboard.text
+    assert "hybrid-research" not in dashboard.text
 
 
 def test_metadata_rotated_scans_render_upright(tmp_path):

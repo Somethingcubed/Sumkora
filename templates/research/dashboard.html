@@ -30,7 +30,7 @@
     </div>
   </section>
   <aside class="space-y-6">
-    <section class="card"><h2 class="font-semibold">Configured models</h2><dl class="mt-3 text-sm space-y-3"><div><dt class="text-slate-500">Primary OCR</dt><dd class="font-medium">{{ provider_health.configured_model or 'Not set' }}</dd></div><div><dt class="text-slate-500">Provider availability</dt><dd>{{ 'Available' if provider_health.configured_model_available else 'Using configured fallbacks' }}</dd></div></dl></section>
+    <section class="card"><h2 class="font-semibold">{{ tr('Current assessment engine', '当前批改引擎') }}</h2><dl class="mt-3 text-sm space-y-3"><div><dt class="text-slate-500">{{ tr('Whole-document assessor', '整卷批改模型') }}</dt><dd class="font-medium">{{ whole_document_model }}</dd></div><div><dt class="text-slate-500">{{ tr('Processing target', '处理时间目标') }}</dt><dd>{{ (whole_document_target_seconds / 60)|round(1) }} {{ tr('minutes', '分钟') }}</dd></div><div><dt class="text-slate-500">{{ tr('Legacy OCR model', '旧版 OCR 模型') }}</dt><dd>{{ provider_health.configured_model or tr('Not set', '未设置') }}</dd></div></dl></section>
     <section class="card"><h2 class="font-semibold">Dataset composition</h2><dl class="mt-3 text-sm space-y-2"><div class="flex justify-between"><dt>Student papers</dt><dd>{{ dataset.self_service_papers }}</dd></div><div class="flex justify-between"><dt>Earlier papers</dt><dd>{{ dataset.legacy_submissions }}</dd></div><div class="flex justify-between"><dt>OCR pages</dt><dd>{{ dataset.self_service_ocr_pages }}</dd></div><div class="flex justify-between"><dt>Human labels</dt><dd>{{ dataset.labelled_decisions }}</dd></div></dl></section>
   </aside>
 </div>
@@ -39,6 +39,52 @@
   <section class="card"><div class="flex justify-between"><h2 class="font-semibold">Recent experiments</h2><a href="/research/experiments" class="text-sm text-indigo-600">All experiments</a></div><div class="mt-3 space-y-2">{% for item in experiments[:6] %}<a href="/research/experiments/{{ item.id }}" class="flex justify-between rounded-lg border p-3 text-sm"><span>{{ item.title }}</span><span class="badge badge-{{ item.status }}">{{ item.status }}</span></a>{% else %}<p class="text-sm text-slate-500">No experiments yet.</p>{% endfor %}</div></section>
   <section class="card"><h2 class="font-semibold">Recent research activity</h2><div class="mt-3 space-y-2">{% for item in activity %}<div class="border-b pb-2 text-sm"><p class="font-medium">{{ item.action.replace('_',' ') }}</p><p class="text-xs text-slate-500">{{ item.entity_type }} · {{ item.created_at[:19] }}</p></div>{% else %}<p class="text-sm text-slate-500">No activity recorded.</p>{% endfor %}</div></section>
 </div>
+
+<section class="card mt-6">
+  <div class="flex flex-wrap justify-between items-end gap-3"><div><h2 class="font-semibold text-lg">{{ tr('Recent whole-document analysis runs', '近期整卷分析记录') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Current GPT assessment status, timing, question coverage, and optional enrichment costs.', '查看 GPT 批改状态、耗时、题目覆盖和可选补充步骤。') }}</p></div><a href="/research/failures" class="text-sm text-indigo-600">{{ tr('Open failures', '查看失败记录') }} →</a></div>
+  <div class="overflow-x-auto mt-4">
+    <table class="w-full text-sm">
+      <thead><tr class="text-left border-b text-slate-500"><th class="py-2 pr-4">{{ tr('Paper', '试卷') }}</th><th class="pr-4">{{ tr('Mode', '模式') }}</th><th class="pr-4">{{ tr('Status', '状态') }}</th><th class="pr-4">{{ tr('Score', '得分') }}</th><th class="pr-4">{{ tr('Questions', '题目数') }}</th><th class="pr-4">{{ tr('Total', '总耗时') }}</th><th class="pr-4">{{ tr('Context + feedback', '题干 + 反馈') }}</th><th>{{ tr('Model / attempts', '模型 / 尝试') }}</th></tr></thead>
+      <tbody>
+        {% for item in analysis_runs %}
+        <tr class="border-b border-slate-100"><td class="py-3 pr-4"><p class="font-medium">{{ item.paper_title }}</p><p class="text-xs text-slate-500">{{ item.student_name }} · v{{ item.version_number }}</p></td><td class="pr-4">{{ tr('Detailed', '详细') if item.assessment_mode == 'detailed' else tr('Estimated', '估分') }}</td><td class="pr-4"><span class="badge badge-{{ item.status }}">{{ status_label(item.status) }}</span>{% if item.failure_type %}<p class="text-xs text-red-600 mt-1">{{ item.failure_type }}</p>{% endif %}</td><td class="pr-4">{% if item.provisional_score is not none %}{{ item.provisional_score }}/{{ item.maximum_marks }}{% else %}—{% endif %}</td><td class="pr-4">{{ item.question_count }}</td><td class="pr-4">{{ item.duration_seconds ~ 's' if item.duration_seconds is not none else '—' }}</td><td class="pr-4">{{ item.context_seconds }}s + {{ item.feedback_seconds }}s</td><td><p>{{ item.provider_model }}</p><p class="text-xs text-slate-500">{{ item.provider_attempts or '—' }} {{ tr('attempt(s)', '次尝试') }} · {{ item.progress_percent|round|int }}%</p></td></tr>
+        {% else %}
+        <tr><td colspan="8" class="py-6 text-slate-500">{{ tr('No current whole-document runs are available.', '暂无整卷分析记录。') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card mt-6">
+  <div class="flex flex-wrap justify-between items-end gap-3">
+    <div><h2 class="font-semibold text-lg">{{ tr('Student activity', '学生活动') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Approximate active in-app time counts only visible-tab heartbeats. Background tabs are not counted as study time.', '活跃时间仅根据可见页面的心跳近似统计；后台标签页不会计入学习时间。') }}</p></div>
+    <span class="badge">{{ student_activity|length }} {{ tr('students', '名学生') }}</span>
+  </div>
+  <div class="overflow-x-auto mt-4">
+    <table class="w-full text-sm">
+      <thead><tr class="text-left border-b text-slate-500"><th class="py-2 pr-4">{{ tr('Student', '学生') }}</th><th class="pr-4">{{ tr('Today', '今天') }}</th><th class="pr-4">{{ tr('All active time', '累计活跃时间') }}</th><th class="pr-4">{{ tr('Downloads', '下载次数') }}</th><th class="pr-4">{{ tr('Papers', '试卷数') }}</th><th>{{ tr('Last activity', '最近活动') }}</th></tr></thead>
+      <tbody>
+        {% for item in student_activity %}
+        <tr class="border-b border-slate-100"><td class="py-3 pr-4"><p class="font-medium">{{ item.name }}</p><p class="text-xs text-slate-500">{{ item.username }}</p></td><td class="pr-4">{{ item.active_minutes_today }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.active_minutes }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.download_count }}</td><td class="pr-4">{{ item.paper_count }}</td><td class="text-xs text-slate-500">{{ item.last_active_at[:19] if item.last_active_at else tr('Not recorded yet', '尚未记录') }}</td></tr>
+        {% else %}
+        <tr><td colspan="6" class="py-6 text-slate-500">{{ tr('No student activity has been recorded.', '尚未记录学生活动。') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<details class="card mt-6">
+  <summary class="font-semibold cursor-pointer">{{ tr('Recent student downloads', '近期学生下载') }}</summary>
+  <div class="mt-4 divide-y divide-slate-100">
+    {% for item in recent_downloads %}
+    <div class="py-3 flex flex-wrap justify-between gap-3 text-sm"><div><p class="font-medium">{{ item.student_name }}</p><p class="text-xs text-slate-500">{{ item.entity_type.replace('_', ' ')|capitalize }}{% if item.entity_id %} · {{ item.entity_id }}{% endif %}</p></div><p class="text-xs text-slate-500">{{ item.created_at[:19] }}</p></div>
+    {% else %}
+    <p class="text-sm text-slate-500">{{ tr('No downloads have been recorded yet.', '尚未记录下载。') }}</p>
+    {% endfor %}
+  </div>
+</details>
 
 <details class="card mt-6"><summary class="font-semibold cursor-pointer">0606 paper-pack registry</summary><div class="mt-4 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b text-slate-500"><th class="py-2">Paper</th><th>Policy</th><th>Questions</th><th>Criteria</th><th>Status</th></tr></thead><tbody>{% for pack in paper_packs %}<tr class="border-b"><td class="py-2">{{ pack.examination_session }} {{ pack.year }}/{{ pack.component }}</td><td>{{ pack.calculator_policy }}</td><td>{{ pack.question_count }}</td><td>{{ pack.criterion_count }}</td><td>{{ pack.ingestion_status }}</td></tr>{% endfor %}</tbody></table></div><form method="post" action="/research/paper-packs/ingest" class="mt-4"><button class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">Reingest supplied packs</button></form></details>
 {% endblock %}

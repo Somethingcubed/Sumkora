@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import mimetypes
+import re
 import sqlite3
 import uuid
 import zipfile
@@ -124,12 +125,22 @@ execute(
     """
     UPDATE paper_analysis_versions
     SET status = 'failed', current_stage = 'interrupted',
-        failure_message = ?, updated_at = ?, finished_at = ?
+        progress_message = 'Analysis interrupted by a server restart',
+        failure_message = ?, failure_details = ?,
+        heartbeat_at = ?, updated_at = ?, finished_at = ?
     WHERE status IN ('queued', 'processing')
     """,
     (
         "Analysis was interrupted by an application restart. Please rerun it; "
         "the uploaded files are still available.",
+        json.dumps(
+            {
+                "error_type": "ApplicationRestart",
+                "stage": "interrupted",
+                "message": "The application restarted while this analysis was active.",
+            }
+        ),
+        _restart_time,
         _restart_time,
         _restart_time,
     ),
@@ -338,6 +349,61 @@ def pdf_response(content: bytes, filename: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def record_student_activity(
+    student_id: int,
+    event_type: str,
+    *,
+    path: str = "",
+    entity_type: str = "",
+    entity_id: str | int = "",
+    active_seconds: int = 0,
+    metadata: dict | None = None,
+) -> None:
+    safe_event = (
+        event_type
+        if event_type in {"active_time", "download"}
+        else "other"
+    )
+    execute(
+        """
+        INSERT INTO student_activity_events
+        (student_id, event_type, path, entity_type, entity_id,
+         active_seconds, metadata, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            student_id,
+            safe_event,
+            str(path or "")[:300],
+            str(entity_type or "")[:80],
+            str(entity_id or "")[:120],
+            max(0, min(90, int(active_seconds or 0))),
+            json.dumps(metadata or {}, ensure_ascii=False),
+            datetime.now().astimezone().isoformat(),
+        ),
+    )
+
+
+@app.post("/student/activity")
+def student_activity_ping(
+    request: Request,
+    path: str = Form(""),
+    active_seconds: int = Form(0),
+):
+    user = require_role(request, "student")
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    seconds = max(0, min(90, int(active_seconds or 0)))
+    if seconds:
+        record_student_activity(
+            user["id"],
+            "active_time",
+            path=path,
+            active_seconds=seconds,
+        )
+    return {"recorded": seconds}
 
 
 def set_session_cookie(response, user_id: int):
@@ -737,6 +803,7 @@ def _localized_upload_error(request: Request, message: str) -> str:
         "Not every completed-work image could be prepared.": "部分答卷图片无法转换。",
         "The completed-work files exceed the combined upload limit.": "答卷文件总大小超过上传限制。",
         "The prepared completed-work PDF exceeds the upload limit.": "合并后的答卷 PDF 超过上传限制。",
+        "Paper name must be 160 characters or fewer.": "试卷名称不得超过 160 个字符。",
     }
     return translations.get(message, message)
 
@@ -752,6 +819,7 @@ def student_analyse_page(request: Request):
         {
             "user": user,
             "error": None,
+            "paper_name": "",
             "maximum_marks": "",
             "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
             "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -765,6 +833,7 @@ async def student_analyse_upload(
     background_tasks: BackgroundTasks,
     answer_script: list[UploadFile] = File(...),
     mark_scheme: UploadFile = File(None),
+    paper_name: str = Form(""),
     maximum_marks: str = Form(""),
 ):
     user = require_role(request, "student")
@@ -779,6 +848,7 @@ async def student_analyse_upload(
             {
                 "user": user,
                 "error": str(exc),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -801,6 +871,7 @@ async def student_analyse_upload(
             {
                 "user": user,
                 "error": _localized_upload_error(request, str(exc)),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -821,6 +892,7 @@ async def student_analyse_upload(
                     if get_lang(request) == "zh"
                     else "The mark-scheme PDF exceeds the upload limit."
                 ),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -835,6 +907,7 @@ async def student_analyse_upload(
             mark_scheme.filename if mark_scheme and mark_scheme.filename else None,
             scheme_content,
             expected_maximum_marks=expected_maximum_marks,
+            paper_name=paper_name,
         )
     except ValueError as exc:
         return render(
@@ -843,6 +916,7 @@ async def student_analyse_upload(
             {
                 "user": user,
                 "error": _localized_upload_error(request, str(exc)),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -867,6 +941,7 @@ async def student_analyse_upload(
                 {
                     "analysis_version_id": version_id,
                     "expected_maximum_marks": expected_maximum_marks,
+                    "paper_name": paper_name.strip() or None,
                 }
             ),
             datetime.now().isoformat(),
@@ -969,10 +1044,120 @@ def student_self_service_status(request: Request, version_id: int):
                 "recorded. Try again; your files and previous results are safe."
             )
         )
+    now = datetime.now().astimezone()
+
+    def age_seconds(value: str | None) -> int | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            return max(0, int((now - parsed.astimezone()).total_seconds()))
+        except (TypeError, ValueError):
+            return None
+
+    heartbeat_age = age_seconds(version["heartbeat_at"])
+    elapsed = age_seconds(version["started_at"])
+    if version["status"] == "completed":
+        connection_state = "completed"
+    elif version["status"] == "failed":
+        connection_state = (
+            "interrupted"
+            if version["current_stage"] == "interrupted"
+            else "failed"
+        )
+    elif version["status"] == "queued":
+        connection_state = "queued"
+    elif heartbeat_age is None or heartbeat_age > 30:
+        connection_state = "stalled"
+    elif elapsed is not None and elapsed >= 360:
+        connection_state = "slow"
+    else:
+        connection_state = "working"
+
+    progress_message = version["progress_message"] or ""
+    progress_translations = {
+        "Checking your files": "检查上传文件",
+        "Preparing the complete documents": "准备完整文档",
+        "Sending the complete paper to the assessor": "将完整试卷发送给批改模型",
+        "Reading every page and applying the marking evidence": "逐页阅读并依据评分证据批改",
+        "Checking the returned question inventory": "核对返回的题目清单",
+        "Correcting an incomplete question inventory": "修正不完整的题目清单",
+        "Cross-checking the detailed marks": "交叉核对详细得分",
+        "Preparing complete text for missed questions": "整理失分题目的完整题干",
+        "Writing your English and Chinese feedback": "生成中英文学习反馈",
+        "Finalising the validated assessment": "完成已验证的分析结果",
+        "Checking every question and mark total": "核对每道题与总分",
+        "Building your question-by-question feedback": "整理逐题反馈",
+        "Updating your strengths and weaknesses": "更新强项与待提升项",
+        "Preparing your paper report": "生成试卷报告",
+        "Analysis complete": "分析完成",
+        "Analysis stopped before completion": "分析未能完成",
+        "Analysis interrupted by a server restart": "服务器重启导致分析中断",
+    }
+    if get_lang(request) == "zh":
+        progress_message = progress_translations.get(
+            progress_message,
+            progress_message,
+        )
+    progress_detail = version["progress_detail"] or ""
+    if get_lang(request) == "zh" and progress_detail:
+        detail_translations = {
+            "The assessor responded; checking question coverage and totals": "批改模型已返回结果；正在检查题目覆盖与总分",
+            "The first response was incomplete; requesting one corrected result": "第一次结果不完整；正在请求一次修正结果",
+            "Cross-checking every detailed mark": "正在交叉核对每项详细得分",
+            "Writing concise English and Chinese learning feedback": "正在生成简洁的中英文学习反馈",
+        }
+        attempt_match = re.fullmatch(
+            r"Assessment attempt (\d+) of (\d+); (\d+) completed-work pages",
+            progress_detail,
+        )
+        question_match = re.fullmatch(
+            r"(\d+) question results validated",
+            progress_detail,
+        )
+        context_match = re.fullmatch(
+            r"Preparing complete text for (\d+) missed questions",
+            progress_detail,
+        )
+        if attempt_match:
+            progress_detail = (
+                f"批改尝试 {attempt_match.group(1)}/{attempt_match.group(2)}；"
+                f"共 {attempt_match.group(3)} 页答卷"
+            )
+        elif question_match:
+            progress_detail = f"已验证 {question_match.group(1)} 项题目结果"
+        elif context_match:
+            progress_detail = (
+                f"正在整理 {context_match.group(1)} 道失分题目的完整题干"
+            )
+        elif progress_detail in detail_translations:
+            progress_detail = detail_translations[progress_detail]
+        else:
+            progress_detail = (
+                progress_detail.replace(
+                    " completed-work pages",
+                    " 页答卷",
+                ).replace(
+                    " and ",
+                    "，以及 ",
+                ).replace(
+                    " mark-scheme pages",
+                    " 页评分标准",
+                )
+            )
     return {
         "status": version["status"],
         "current_stage": version["current_stage"],
         "stage_index": version["stage_index"],
+        "progress_percent": version["progress_percent"],
+        "progress_message": progress_message,
+        "progress_detail": progress_detail,
+        "heartbeat_at": version["heartbeat_at"],
+        "heartbeat_age_seconds": heartbeat_age,
+        "elapsed_seconds": elapsed,
+        "connection_state": connection_state,
         "failure_message": failure_message,
         "paper_id": version["student_paper_id"],
         "version_number": version["version_number"],
@@ -1048,6 +1233,14 @@ def student_self_service_report(
     )
     if not content:
         return JSONResponse({"detail": "Report is not available."}, status_code=404)
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type="paper_report",
+        entity_id=paper_id,
+        metadata={"version": version},
+    )
     return pdf_response(
         content,
         f"sumkora-{safe_filename(paper['title'])}-paper-report.pdf",
@@ -1070,6 +1263,7 @@ def student_paper_rerun_page(request: Request, paper_id: int):
             "paper": paper,
             "versions": versions,
             "error": None,
+            "paper_name": paper["title"],
             "maximum_marks": (
                 versions[0]["expected_maximum_marks"] if versions else ""
             ),
@@ -1086,6 +1280,7 @@ async def student_paper_rerun(
     background_tasks: BackgroundTasks,
     answer_script: list[UploadFile] | None = File(None),
     mark_scheme: UploadFile = File(None),
+    paper_name: str = Form(""),
     maximum_marks: str = Form(""),
 ):
     user = require_role(request, "student")
@@ -1103,6 +1298,7 @@ async def student_paper_rerun(
                 "paper": paper,
                 "versions": versions,
                 "error": str(exc),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -1130,6 +1326,7 @@ async def student_paper_rerun(
             replacement_answers,
             await optional_file(mark_scheme),
             expected_maximum_marks=expected_maximum_marks,
+            paper_name=paper_name,
         )
     except ValueError as exc:
         paper, versions = paper_with_versions(user["id"], paper_id)
@@ -1141,6 +1338,7 @@ async def student_paper_rerun(
                 "paper": paper,
                 "versions": versions,
                 "error": _localized_upload_error(request, str(exc)),
+                "paper_name": paper_name,
                 "maximum_marks": maximum_marks,
                 "max_answer_pages": MAX_ANSWER_IMAGE_PAGES,
                 "max_upload_bytes": config.MAX_UPLOAD_BYTES,
@@ -1183,6 +1381,14 @@ def student_paper_document(
     path = result["version"][field] if field else None
     if not path or not os.path.isfile(path):
         return JSONResponse({"detail": "Not found."}, status_code=404)
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type=f"paper_source_{document_type}",
+        entity_id=paper_id,
+        metadata={"version": result["version"]["version_number"]},
+    )
     return FileResponse(
         path,
         media_type="application/pdf",
@@ -2135,6 +2341,12 @@ def student_profile_report(request: Request):
     if not user:
         return redirect_login()
     content = profile_report(user["id"], lang=get_lang(request), variant="student")
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type="progress_report",
+    )
     return pdf_response(
         content,
         f"sumkora-{safe_filename(user['name'])}-progress-report.pdf",
@@ -2380,6 +2592,13 @@ def student_assessment_report(request: Request, submission_id: int):
     if not submission:
         return RedirectResponse("/student", status_code=303)
     content = assessment_report(submission_id, lang=get_lang(request), variant="student")
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type="legacy_paper_report",
+        entity_id=submission_id,
+    )
     return pdf_response(
         content,
         (
@@ -2474,6 +2693,12 @@ def student_mistake_book_pdf(request: Request, kind: str):
         return JSONResponse({"detail": "Not found."}, status_code=404)
     content = mistake_book_pdf(user["id"], kind, get_lang(request))
     suffix = "questions" if kind == "questions" else "answers"
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type=f"mistake_book_{kind}",
+    )
     return pdf_response(content, f"sumkora-mistake-book-{suffix}.pdf")
 
 
@@ -2542,6 +2767,13 @@ def student_practice_pdf(request: Request, set_id: int, kind: str):
     content = practice_pdf(user["id"], set_id, kind, get_lang(request))
     if not content:
         return JSONResponse({"detail": "Not found."}, status_code=404)
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type=f"practice_{kind}",
+        entity_id=set_id,
+    )
     return pdf_response(
         content,
         f"sumkora-practice-{set_id}-{kind}.pdf",
@@ -2716,6 +2948,13 @@ def student_submission_file(request: Request, submission_id: int):
     )
     if not submission or not os.path.isfile(submission["file_path"]):
         return JSONResponse({"detail": "Not found."}, status_code=404)
+    record_student_activity(
+        user["id"],
+        "download",
+        path=request.url.path,
+        entity_type="legacy_submission",
+        entity_id=submission_id,
+    )
     return FileResponse(
         submission["file_path"],
         media_type="application/pdf",
@@ -2832,6 +3071,113 @@ def research_dashboard(request: Request):
           (SELECT COUNT(*) FROM analysis_human_corrections) AS labelled_decisions
         """
     )
+    today_started_at = (
+        datetime.now()
+        .astimezone()
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .isoformat()
+    )
+    student_activity = [
+        {
+            **dict(row),
+            "active_minutes": round(float(row["active_seconds"] or 0) / 60, 1),
+            "active_minutes_today": round(
+                float(row["active_seconds_today"] or 0) / 60,
+                1,
+            ),
+        }
+        for row in query_all(
+            """
+            SELECT u.id, u.name, COALESCE(u.username, u.email) AS username,
+                   COALESCE(SUM(sae.active_seconds), 0) AS active_seconds,
+                   COALESCE(SUM(
+                       CASE WHEN sae.created_at >= ?
+                            THEN sae.active_seconds ELSE 0 END
+                   ), 0) AS active_seconds_today,
+                   COALESCE(SUM(
+                       CASE WHEN sae.event_type = 'download' THEN 1 ELSE 0 END
+                   ), 0) AS download_count,
+                   MAX(sae.created_at) AS last_active_at,
+                   (SELECT COUNT(*) FROM student_papers sp
+                    WHERE sp.student_id = u.id) AS paper_count
+            FROM users u
+            LEFT JOIN student_activity_events sae ON sae.student_id = u.id
+            WHERE u.role = 'student'
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_roles ur
+                  WHERE ur.user_id = u.id
+                    AND ur.role IN ('researcher', 'owner')
+              )
+            GROUP BY u.id, u.name, u.username, u.email
+            ORDER BY last_active_at DESC, u.name
+            """,
+            (today_started_at,),
+        )
+    ]
+    recent_downloads = query_all(
+        """
+        SELECT sae.*, u.name AS student_name,
+               COALESCE(u.username, u.email) AS username
+        FROM student_activity_events sae
+        JOIN users u ON u.id = sae.student_id
+        WHERE sae.event_type = 'download'
+        ORDER BY sae.created_at DESC
+        LIMIT 20
+        """
+    )
+    analysis_runs = []
+    for row in query_all(
+        """
+        SELECT pav.*, sp.title AS paper_title, sp.maximum_marks,
+               u.name AS student_name,
+               (SELECT COUNT(*) FROM analysis_question_results aqr
+                WHERE aqr.analysis_version_id = pav.id) AS question_count
+        FROM paper_analysis_versions pav
+        JOIN student_papers sp ON sp.id = pav.paper_id
+        JOIN users u ON u.id = sp.student_id
+        WHERE pav.assessment_mode IN ('estimate', 'detailed')
+        ORDER BY pav.created_at DESC
+        LIMIT 20
+        """
+    ):
+        item = dict(row)
+        provider = parse_json(item.get("provider_metadata"), {})
+        failure = parse_json(item.get("failure_details"), {})
+        item.update(
+            {
+                "provider_model": provider.get("model")
+                or item.get("grading_model")
+                or config.WHOLE_DOCUMENT_MODEL,
+                "duration_seconds": (
+                    round(float(provider.get("duration_ms") or 0) / 1000, 1)
+                    if provider.get("duration_ms") is not None
+                    else None
+                ),
+                "provider_attempts": provider.get("attempts"),
+                "context_seconds": round(
+                    float(
+                        (provider.get("document_context") or {}).get(
+                            "duration_ms",
+                            0,
+                        )
+                    )
+                    / 1000,
+                    1,
+                ),
+                "feedback_seconds": round(
+                    float(
+                        (provider.get("feedback") or {}).get(
+                            "duration_ms",
+                            0,
+                        )
+                    )
+                    / 1000,
+                    1,
+                ),
+                "failure_type": failure.get("error_type"),
+            }
+        )
+        analysis_runs.append(item)
     return render(
         request,
         "research/dashboard.html",
@@ -2845,6 +3191,11 @@ def research_dashboard(request: Request):
             "experiments": experiments,
             "activity": activity,
             "dataset": dataset,
+            "student_activity": student_activity,
+            "recent_downloads": recent_downloads,
+            "analysis_runs": analysis_runs,
+            "whole_document_model": config.WHOLE_DOCUMENT_MODEL,
+            "whole_document_target_seconds": config.WHOLE_DOCUMENT_TARGET_SECONDS,
         },
     )
 
