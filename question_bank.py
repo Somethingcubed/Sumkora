@@ -27,10 +27,32 @@ QUESTION_START = re.compile(r"^\s*(\d{1,2})(?=\s|\(|$)")
 MARK_TOKEN = re.compile(r"\b(?:M|A|B|SC)(\d)\b", re.I)
 
 TOPIC_RULES = [
-    ("Calculus", ["differentiate", "derivative", "stationary", "integrate", "integration", "gradient function"]),
+    (
+        "Calculus",
+        [
+            "differentiate",
+            "derivative",
+            "stationary",
+            "integrate",
+            "integration",
+            "gradient function",
+            "rate of change",
+        ],
+    ),
     ("Trigonometry", ["sin ", "cos ", "tan ", "trigonometric", "radian", "bearing"]),
     ("Logarithmic and exponential functions", ["logarithm", "log ", "ln ", "exponential", "e^"]),
-    ("Quadratics and functions", ["quadratic", "discriminant", "function", "inverse function", "composite"]),
+    (
+        "Quadratics and functions",
+        [
+            "quadratic",
+            "discriminant",
+            "function",
+            "inverse function",
+            "composite",
+            "real roots",
+            "equal roots",
+        ],
+    ),
     ("Equations, inequalities and graphs", ["inequality", "inequalities", "sketch", "graph", "intersection"]),
     ("Coordinate geometry", ["coordinate", "straight line", "midpoint", "perpendicular", "parallel"]),
     ("Polynomials", ["polynomial", "remainder theorem", "factor theorem"]),
@@ -90,10 +112,13 @@ def _safe_extract_pdfs(payload: bytes, import_root: Path) -> list[Path]:
         for member in members:
             if not member.filename.lower().endswith(".pdf"):
                 continue
+            parts = Path(member.filename).parts
+            base = Path(member.filename).name
+            if "__MACOSX" in parts or base.startswith("._"):
+                continue
             total_size += member.file_size
             if total_size > 750 * 1024 * 1024:
                 raise ValueError("The extracted PDFs exceed the 750 MB import limit.")
-            base = Path(member.filename).name
             if not FILE_PATTERN.search(base):
                 continue
             target = import_root / base
@@ -137,7 +162,8 @@ def _pair_files(paths: list[Path]) -> tuple[list[dict], list[str]]:
 
 def _question_labels(question_paper: Path) -> list[str]:
     """Read top-level labels from the question paper, excluding cover pages."""
-    found: dict[str, tuple[int, float]] = {}
+    sequential: list[str] = []
+    expected = 1
     with fitz.open(question_paper) as document:
         for page_index, page in enumerate(document):
             if page_index < 2:
@@ -153,16 +179,9 @@ def _question_labels(question_paper: Path) -> list[str]:
                     continue
                 label = match.group(1)
                 number = int(label)
-                if 1 <= number <= 40 and label not in found:
-                    found[label] = (page_index, y0)
-    ordered = sorted(found, key=lambda value: found[value])
-    sequential = []
-    expected = 1
-    for label in ordered:
-        number = int(label)
-        if number == expected:
-            sequential.append(label)
-            expected += 1
+                if number == expected:
+                    sequential.append(label)
+                    expected += 1
     return sequential
 
 
@@ -172,28 +191,39 @@ def _find_starts(
     *,
     question_paper: bool = False,
 ) -> dict[str, tuple[int, float]]:
-    expected = set(labels)
     starts = {}
     with fitz.open(path) as document:
         scheme_start_page = 0
         if not question_paper:
             for page_index, page in enumerate(document):
-                if "Question Answer Marks Guidance" in " ".join(
-                    page.get_text("text").split()
+                page_text = " ".join(page.get_text("text").split())
+                if all(
+                    heading in page_text
+                    for heading in ("Question", "Answer", "Marks")
                 ):
                     scheme_start_page = page_index
                     break
+        next_label_index = 0
         for page_index, page in enumerate(document):
             if question_paper and page_index < 2:
                 continue
             if not question_paper and page_index < scheme_start_page:
                 continue
-            blocks = sorted(
-                page.get_text("blocks"), key=lambda value: (value[1], value[0])
-            )
-            for block in blocks:
-                x0, y0, _, _, text, *_ = block
-                maximum_x = 57 if question_paper else 150
+            if question_paper:
+                entries = [
+                    (block[0], block[1], block[4])
+                    for block in page.get_text("blocks")
+                ]
+            else:
+                # Mark schemes use a narrow first table column for question
+                # labels. Reading individual words prevents a numeric answer
+                # in the wider Answer column from becoming the next question.
+                entries = [
+                    (word[0], word[1], word[4])
+                    for word in page.get_text("words")
+                ]
+            for x0, y0, text in sorted(entries, key=lambda value: (value[1], value[0])):
+                maximum_x = 57 if question_paper else 90
                 bottom_margin = 90 if question_paper else 35
                 if x0 > maximum_x or y0 < 45 or y0 > page.rect.height - bottom_margin:
                     continue
@@ -202,8 +232,14 @@ def _find_starts(
                 if not match:
                     continue
                 label = match.group(1)
-                if label in expected and label not in starts:
+                next_label = (
+                    labels[next_label_index]
+                    if next_label_index < len(labels)
+                    else None
+                )
+                if label == next_label:
                     starts[label] = (page_index, max(y0 - 8, 0))
+                    next_label_index += 1
     return starts
 
 
@@ -270,12 +306,109 @@ def _clip_text(path: Path, clips: list[tuple[int, fitz.Rect]]) -> str:
     parts = []
     with fitz.open(path) as document:
         for page_index, clip in clips:
-            parts.append(document[page_index].get_text("text", clip=clip))
+            blocks = document[page_index].get_text("blocks", clip=clip)
+            parts.extend(
+                block[4].strip()
+                for block in sorted(blocks, key=lambda value: (value[1], value[0]))
+                if block[4].strip()
+            )
     return "\n".join(part.strip() for part in parts if part.strip())
 
 
 def _classify(text: str) -> tuple[str, list[str], float]:
     lowered = f" {' '.join(text.lower().split())} "
+    if any(
+        term in lowered
+        for term in (
+            "number of ways",
+            "how many different",
+            "how many 6-digit",
+            "how many 6-character",
+            "different teams",
+            "different committees",
+            "passcode",
+            "password",
+            "permutation",
+            "combination",
+        )
+    ):
+        return (
+            "Permutations and combinations",
+            ["counting methods"],
+            0.92,
+        )
+    if any(
+        term in lowered
+        for term in (
+            "in the expansion",
+            "term independent of",
+            "ascending powers",
+            "descending powers",
+            "binomial",
+        )
+    ):
+        return "Binomial theorem", ["binomial expansion"], 0.92
+    if any(
+        term in lowered
+        for term in (
+            "rate of change",
+            "rate of increase",
+            "is increasing at",
+            "normal to the curve",
+            "tangent to the curve",
+            "area of the shaded region",
+            " x y d d ",
+            " y x d d ",
+        )
+    ):
+        return "Calculus", ["differentiation and integration"], 0.88
+    if (
+        "sphere" in lowered
+        and any(term in lowered for term in ("rate", "increasing", "change"))
+    ):
+        return "Calculus", ["related rates"], 0.92
+    if (
+        "circle" in lowered
+        and any(term in lowered for term in ("equation", "tangent", "coordinate"))
+    ):
+        return "Coordinate geometry", ["equations of circles"], 0.9
+    if any(
+        term in lowered
+        for term in (
+            "no real roots",
+            "two equal roots",
+            "real and distinct",
+            "minimum value of y",
+            "has an inverse",
+            "range of values of c",
+        )
+    ):
+        return "Quadratics and functions", ["discriminant and functions"], 0.9
+    if any(
+        term in lowered
+        for term in (
+            "is a factor of",
+            "the remainder is",
+            "when divided by",
+            "remainder theorem",
+            "factor theorem",
+        )
+    ):
+        return "Polynomials", ["factor and remainder theorems"], 0.92
+    if (
+        "in terms of a and b" in lowered
+        or (
+            " oa " in lowered
+            and " ob " in lowered
+            and any(term in lowered for term in ("point", "line", "triangle"))
+        )
+    ):
+        return "Vectors", ["vector geometry"], 0.86
+    if "do not use a calculator" in lowered and any(
+        term in lowered
+        for term in ("in the form a b", "in the form p q", "write the expression")
+    ):
+        return "Algebraic manipulation", ["exact values and surds"], 0.82
     if "differentiate" in lowered or "integration" in lowered:
         skills = ["differentiation"]
         if " d" in lowered or "area" in lowered:
@@ -312,6 +445,8 @@ def _classify(text: str) -> tuple[str, list[str], float]:
             skills.append(skill)
     if not skills and topic != "Unclassified":
         skills = [topic.lower()]
+    if topic == "Unclassified" and len(lowered) > 60:
+        return "Algebra and functions", ["algebraic reasoning"], 0.45
     confidence = 0.82 if topic_score >= 2 else 0.68 if topic_score == 1 else 0.25
     return topic, skills, confidence
 

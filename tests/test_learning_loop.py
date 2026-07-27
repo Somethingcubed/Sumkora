@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from assessment import rebuild_student_profile
 from db import execute, hash_password, query_one
 from learning import (
+    _PdfFlow,
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
@@ -19,7 +20,7 @@ from learning import (
     skill_detail,
 )
 from main import app
-from question_bank import ingest_question_bank_zip
+from question_bank import _question_labels, ingest_question_bank_zip
 from self_service import _match_question_bank_parent
 
 
@@ -327,7 +328,8 @@ def _pdf(pages):
     for lines in pages:
         page = document.new_page()
         for index, line in enumerate(lines):
-            page.insert_text((50, 70 + index * 28), line, fontsize=11)
+            x, text = line if isinstance(line, tuple) else (50, line)
+            page.insert_text((x, 70 + index * 28), text, fontsize=11)
     payload = document.tobytes()
     document.close()
     return payload
@@ -345,13 +347,18 @@ def test_zip_import_pairs_extracts_and_totals_questions():
     mark_scheme = _pdf(
         [
             ["Cover"],
-            ["General principles"],
+            [
+                "General principles",
+                "1 Award marks positively.",
+                "2 Follow through where appropriate.",
+            ],
             ["Annotations"],
             ["Notes"],
             ["More notes"],
             [
-                "Question Answer Marks Guidance",
+                "Question Answer Marks Partial Marks",
                 "1 2x M1 A1",
+                (110, "2/7 <= x <= 6 A1"),
                 "2 x = 4 M1 A1",
             ],
         ]
@@ -360,6 +367,8 @@ def test_zip_import_pairs_extracts_and_totals_questions():
     with zipfile.ZipFile(archive, "w") as zipped:
         zipped.writestr("0606_s24_qp_11.pdf", question_paper)
         zipped.writestr("0606_s24_ms_11.pdf", mark_scheme)
+        zipped.writestr("__MACOSX/._0606_s24_qp_11.pdf", b"appledouble")
+        zipped.writestr("__MACOSX/._0606_s24_ms_11.pdf", b"appledouble")
     result = ingest_question_bank_zip(archive.getvalue(), "papers.zip")
     assert result["pair_count"] == 1
     assert result["papers"][0]["questions"] == 2
@@ -375,7 +384,18 @@ def test_zip_import_pairs_extracts_and_totals_questions():
     )
     assert first["question_asset_path"]
     assert first["answer_asset_path"]
+    assert "2x" in first["answer_text"]
+    assert "Award marks positively" not in first["answer_text"]
     assert json.loads(first["source_pages"]) == [3]
+    second = query_one(
+        """
+        SELECT * FROM paper_questions
+        WHERE paper_pack_id = ? ORDER BY order_index LIMIT 1 OFFSET 1
+        """,
+        (pack_id,),
+    )
+    assert "x = 4" in second["answer_text"]
+    assert "2/7" not in second["answer_text"]
 
     researcher_email = "question-bank@research.local"
     create_researcher(researcher_email)
@@ -384,3 +404,41 @@ def test_zip_import_pairs_extracts_and_totals_questions():
     assert page.status_code == 200
     assert "0606" in page.text
     assert "Question bank" in page.text
+
+
+def test_question_labels_ignore_body_numbers_that_appear_early(tmp_path):
+    paper = _pdf(
+        [
+            ["Cambridge IGCSE", "0606/11"],
+            ["Formula page"],
+            ["1 First question. [1]"],
+            ["2 Choose from the available characters. [1]", "7 different letters remain."],
+            ["3 Third question. [1]"],
+            ["4 Fourth question. [1]"],
+            ["5 Fifth question. [1]"],
+            ["6 Sixth question. [1]"],
+            ["7 Seventh question. [1]"],
+        ]
+    )
+    path = tmp_path / "0606_s24_qp_11.pdf"
+    path.write_bytes(paper)
+    assert _question_labels(path) == ["1", "2", "3", "4", "5", "6", "7"]
+
+
+def test_tall_question_asset_uses_the_worksheet_title_page(tmp_path):
+    source = fitz.open()
+    page = source.new_page(width=540, height=750)
+    page.insert_text((50, 70), "A complete tall question asset.", fontsize=12)
+    asset_path = tmp_path / "question.pdf"
+    source.save(asset_path)
+    source.close()
+
+    flow = _PdfFlow(title="Sumkora worksheet", subtitle="10 questions", lang="en")
+    assert flow.add_asset(
+        str(asset_path),
+        label="1. Q1",
+        source_label="0606 May/June 2025 / 11 / 1",
+    )
+    with fitz.open(stream=flow.finish(), filetype="pdf") as document:
+        assert "1. Q1" in document[0].get_text()
+        assert "A complete tall question asset." in document[0].get_text()

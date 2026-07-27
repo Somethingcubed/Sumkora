@@ -762,9 +762,11 @@ class _PdfFlow:
                 header_height = 24
                 scale = min(available_width / source_page.rect.width, 1.0)
                 rendered_height = source_page.rect.height * scale
-                needed = header_height + rendered_height + 16
-                self._ensure(needed)
                 remaining = self.bottom - self.y - header_height - 10
+                minimum_readable_height = min(260, rendered_height * 0.55)
+                if remaining < minimum_readable_height and self.y > 60:
+                    self._new_page()
+                    remaining = self.bottom - self.y - header_height - 10
                 if rendered_height > remaining:
                     scale = min(scale, remaining / source_page.rect.height)
                     rendered_height = source_page.rect.height * scale
