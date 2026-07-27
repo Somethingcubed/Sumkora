@@ -233,6 +233,106 @@ def sync_mistake_book(student_id: int) -> int:
     return added
 
 
+def _source_paper_identity(item: dict, cache: dict[int, tuple | None]):
+    """Resolve an official paper identity without touching assessment output."""
+    version_id = int(item["analysis_version_id"])
+    if version_id in cache:
+        return cache[version_id]
+
+    from question_bank import _paper_identity
+
+    summary = _json(item.get("assessment_summary"), {})
+    identity = _paper_identity(
+        " ".join(
+            [
+                str(item.get("paper_title") or ""),
+                str(item.get("paper_number") or ""),
+                str(summary.get("paper_reference") or ""),
+                str(summary.get("paper_title") or ""),
+            ]
+        )
+    )
+    if not identity:
+        for field in ("question_paper_path", "answer_script_path"):
+            path = str(item.get(field) or "")
+            if not path or not os.path.isfile(path):
+                continue
+            identity = _paper_identity(Path(path).name)
+            if identity:
+                break
+            try:
+                with fitz.open(path) as document:
+                    for page in document:
+                        identity = _paper_identity(page.get_text("text"))
+                        if identity:
+                            break
+            except (fitz.FileDataError, RuntimeError, OSError):
+                continue
+            if identity:
+                break
+    cache[version_id] = identity
+    return identity
+
+
+def _resolve_bank_question(item: dict, cache: dict[int, tuple | None]) -> dict | None:
+    if item.get("paper_question_id"):
+        return None
+    identity = _source_paper_identity(item, cache)
+    label_match = re.search(r"\d{1,2}", str(item.get("question_label") or ""))
+    if not identity or not label_match:
+        return None
+    syllabus, year, session, component = identity
+    question = query_one(
+        """
+        SELECT pq.id, pq.prompt_text AS bank_question_text,
+               pq.prompt_latex AS bank_question_latex,
+               pq.question_asset_path, pq.answer_asset_path,
+               pq.answer_text, pq.source_key
+        FROM paper_questions pq
+        JOIN paper_packs pp ON pp.id = pq.paper_pack_id
+        WHERE pp.syllabus_code = ? AND pp.year = ?
+          AND pp.examination_session = ? AND pp.component = ?
+          AND pq.question_number = ?
+        """,
+        (syllabus, year, session, component, label_match.group(0)),
+    )
+    if not question:
+        return None
+    execute(
+        "UPDATE analysis_question_results SET paper_question_id = ? WHERE id = ?",
+        (question["id"], item["question_result_id"]),
+    )
+    execute(
+        """
+        UPDATE mistake_book_entries
+        SET paper_question_id = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (question["id"], _now(), item["id"]),
+    )
+    return dict(question)
+
+
+def _is_substantive_question_text(label: str, text: str) -> bool:
+    cleaned = text.strip()
+    if label and cleaned.lower().startswith(label.lower()):
+        cleaned = cleaned[len(label):].strip(" :-—")
+    lowered = cleaned.lower()
+    has_instruction = bool(
+        re.search(
+            r"\b(?:calculate|determine|differentiate|expand|find|given|"
+            r"integrate|prove|show|sketch|solve|state|write)\b",
+            lowered,
+        )
+    )
+    has_mathematics = bool(
+        re.search(r"(?:\\frac|\\\(|[=<>≤≥]|\d)", cleaned)
+    )
+    return (has_instruction and len(cleaned) >= 12) or (
+        has_mathematics and len(cleaned) >= 20
+    ) or len(cleaned) >= 80
+
+
 def mistake_book(
     student_id: int,
     *,
@@ -242,7 +342,8 @@ def mistake_book(
     sync_mistake_book(student_id)
     rows = query_all(
         """
-        SELECT mbe.*, aqr.analysis_version_id, aqr.question_label,
+        SELECT mbe.*, aqr.id AS question_result_id,
+               aqr.analysis_version_id, aqr.question_label,
                aqr.question_text, aqr.question_latex,
                aqr.maximum_marks, aqr.awarded_mark, aqr.ai_mark,
                aqr.ai_rationale, aqr.ai_rationale_zh,
@@ -250,9 +351,14 @@ def mistake_book(
                aqr.error_category, aqr.error_mechanism,
                aqr.error_mechanism_zh, aqr.assessment_status,
                sp.id AS paper_id, sp.title AS paper_title,
+               sp.syllabus_code, sp.paper_number,
                sp.updated_at AS paper_date, pav.assessment_mode,
+               pav.assessment_summary, pav.question_paper_path,
+               pav.answer_script_path,
                pq.question_asset_path, pq.answer_asset_path,
-               pq.answer_text, pq.source_key
+               pq.answer_text, pq.source_key,
+               pq.prompt_text AS bank_question_text,
+               pq.prompt_latex AS bank_question_latex
         FROM mistake_book_entries mbe
         JOIN analysis_question_results aqr
           ON aqr.id = mbe.analysis_question_result_id
@@ -286,8 +392,13 @@ def mistake_book(
         )
     items = []
     topics = set()
+    identity_cache: dict[int, tuple | None] = {}
     for raw in rows:
         item = dict(raw)
+        resolved_question = _resolve_bank_question(item, identity_cache)
+        if resolved_question:
+            item["paper_question_id"] = resolved_question["id"]
+            item.update(resolved_question)
         topics.add(item["topic"] or "Unclassified")
         if topic and item["topic"] != topic:
             continue
@@ -312,6 +423,7 @@ def mistake_book(
             [],
         )
         complete_parts = []
+        incomplete_context = False
         for sibling in siblings:
             sibling_text = (
                 sibling.get("question_latex")
@@ -319,21 +431,39 @@ def mistake_book(
                 or ""
             ).strip()
             if not sibling_text:
+                incomplete_context = True
                 continue
             label = str(sibling.get("question_label") or "").strip()
+            if not _is_substantive_question_text(label, sibling_text):
+                incomplete_context = True
+                continue
             complete_parts.append(
                 sibling_text
                 if sibling_text.lower().startswith(label.lower())
                 else f"{label}  {sibling_text}"
             )
-        item["complete_question_text"] = (
-            "\n\n".join(complete_parts)
-            if len(complete_parts) > 1
-            else item.get("question_latex")
-            or item.get("question_text")
+        bank_question = (
+            item.get("bank_question_latex")
+            or item.get("bank_question_text")
             or ""
+        ).strip()
+        is_subpart = bool(
+            re.search(r"\([a-z]\)", str(item.get("question_label") or ""), re.I)
         )
-        item["has_parent_context"] = len(complete_parts) > 1
+        use_bank_parent = bool(
+            bank_question and (incomplete_context or is_subpart)
+        )
+        if use_bank_parent:
+            item["complete_question_text"] = bank_question
+        elif complete_parts:
+            item["complete_question_text"] = "\n\n".join(complete_parts)
+        else:
+            item["complete_question_text"] = (
+                item.get("question_latex")
+                or item.get("question_text")
+                or bank_question
+            )
+        item["has_parent_context"] = use_bank_parent or len(complete_parts) > 1
         items.append(item)
     return {
         "items": items,

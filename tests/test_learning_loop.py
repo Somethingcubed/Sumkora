@@ -276,6 +276,107 @@ def test_mistake_book_recombines_sibling_subquestions_for_context():
     assert "Q12(b)" in question
 
 
+def test_mistake_book_deduplicates_title_and_uses_full_bank_parent():
+    email = "complete-parent@student.local"
+    student_id = create_student(email)
+    pack_id = execute(
+        """
+        INSERT INTO paper_packs
+        (syllabus_code, year, examination_session, component, paper_number,
+         calculator_policy, ingestion_status, created_at, updated_at)
+        VALUES ('0606', 2025, 'October/November', '13', '1',
+                'non-calculator', 'ready', ?, ?)
+        """,
+        (now(), now()),
+    )
+    bank_question_id = execute(
+        """
+        INSERT INTO paper_questions
+        (paper_pack_id, question_number, prompt_text, maximum_marks,
+         topic, skills, calculator_policy, question_demand,
+         parsing_confidence, answer_text, source_key,
+         dependency_group, review_status, order_index)
+        VALUES (?, '9',
+                'Q9 Solve the following equations. (a) Full logarithmic equation. (b) Full exponential equation.',
+                11, 'Exponential equations', '["exponential equations"]',
+                'non-calculator', 'challenging', 1, 'Complete answer',
+                '0606_w25_13_q9', '0606_w25_13_q9', 'ready', 9)
+        """,
+        (pack_id,),
+    )
+    paper_id = execute(
+        """
+        INSERT INTO student_papers
+        (student_id, title, syllabus_code, paper_number, maximum_marks,
+         source_type, status, latest_version_number, created_at, updated_at)
+        VALUES (?, 'Paper', '0606', '13', 80, 'official',
+                'completed', 1, ?, ?)
+        """,
+        (student_id, now(), now()),
+    )
+    version_id = execute(
+        """
+        INSERT INTO paper_analysis_versions
+        (paper_id, version_number, question_paper_path, answer_script_path,
+         status, current_stage, assessment_mode, assessment_summary,
+         created_at, updated_at)
+        VALUES (?, 1, '', 'work.pdf', 'completed', 'completed', 'estimate',
+                '{"paper_reference":"0606/13/O/N/25"}', ?, ?)
+        """,
+        (paper_id, now(), now()),
+    )
+    for label, text, awarded, maximum in [
+        ("Q9(a)", "Logarithmic equations", 5, 5),
+        (
+            "Q9(b)",
+            r"Solve the equation \(e^{3y-7}+\frac{4}{e^3}=\frac{5}{e^{3y-1}}\).",
+            0,
+            6,
+        ),
+    ]:
+        execute(
+            """
+            INSERT INTO analysis_question_results
+            (analysis_version_id, question_label, question_text,
+             question_latex, maximum_marks, topic, skill, ai_mark,
+             ai_confidence, ai_rationale, assessment_status, awarded_mark,
+             created_at)
+            VALUES (?, ?, ?, ?, ?, 'Exponential equations',
+                    'Exponential equations', ?, 0.9, 'Check the method.',
+                    'graded', ?, ?)
+            """,
+            (
+                version_id,
+                label,
+                text,
+                text,
+                maximum,
+                awarded,
+                awarded,
+                now(),
+            ),
+        )
+
+    book = mistake_book(student_id)
+    assert len(book["items"]) == 1
+    item = book["items"][0]
+    assert "Full logarithmic equation" in item["complete_question_text"]
+    assert "Full exponential equation" in item["complete_question_text"]
+    assert item["has_parent_context"] is True
+    assert query_one(
+        """
+        SELECT paper_question_id FROM analysis_question_results
+        WHERE analysis_version_id = ? AND question_label = 'Q9(b)'
+        """,
+        (version_id,),
+    )["paper_question_id"] == bank_question_id
+
+    page = client.get("/student/mistakes", cookies=login(email))
+    assert page.status_code == 200
+    assert "Exponential equations · Exponential equations" not in page.text
+    assert "Full logarithmic equation" in page.text
+
+
 def test_analysis_links_only_one_complete_approved_parent_question():
     pack_id = execute(
         """
