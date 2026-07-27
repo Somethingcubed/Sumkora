@@ -234,8 +234,9 @@ pdftoppm -png -r 120 output/pdf/research-report.pdf tmp/pdfs/research-report
 
 ## Deployment status
 
-The release candidate was uploaded to Railway and deployment
-`3ba94d74-fcdd-4884-ad8c-61b20f7b0058` completed successfully in Singapore.
+The reliability and student-activity release from commit `3b5aeb7` was
+uploaded to Railway and deployment
+`2ae11f48-6e72-4bd5-b8d4-5ba7fb3c5ad4` completed successfully in Singapore.
 Post-deployment checks confirmed:
 
 - `https://sumkora.com/login` serves the Sumkora title, canonical URL, Open
@@ -247,4 +248,9 @@ Post-deployment checks confirmed:
   `sumkora-research-experiment-1-report.pdf` filename.
 - The persistent Railway volume remains attached and unchanged at
   `/app/data`; the application can read the existing data.
-- Recent production logs contain no warnings or errors.
+- The production database health check passes and the new activity/progress
+  schema migration completed during application startup.
+- The public OpenAPI document exposes the authenticated activity heartbeat and
+  live analysis-status routes.
+- Runtime logs contain only normal startup and successful health/login
+  requests; no traceback or application exception was recorded.
