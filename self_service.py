@@ -1777,6 +1777,7 @@ def student_owned_papers(student_id: int):
     return query_all(
         """
         SELECT sp.*, pav.id AS latest_version_id, pav.status AS analysis_status,
+               pav.assessment_mode,
                pav.confirmed_min_score, pav.provisional_score,
                pav.possible_max_score, pav.created_at AS analysis_created_at,
                pav.current_stage, pav.progress_percent, pav.progress_message,
@@ -1875,6 +1876,18 @@ def direct_summary(student_id: int) -> dict:
         percentages.append(
             100 * float(row["provisional_score"] or 0) / maximum if maximum else 0
         )
+    history = []
+    for row, percentage in zip(completed[:12], percentages[:12]):
+        history.append(
+            {
+                "title": row["title"],
+                "date": str(row["updated_at"] or "")[:10],
+                "percentage": round(percentage, 1),
+                "estimated": row["assessment_mode"] == "estimate",
+                "paper_id": row["id"],
+            }
+        )
+    history.reverse()
     return {
         "papers": papers,
         "completed_count": len(completed),
@@ -1882,4 +1895,5 @@ def direct_summary(student_id: int) -> dict:
         "average_percentage": round(sum(percentages) / len(percentages), 1)
         if percentages
         else None,
+        "performance_history": history,
     }

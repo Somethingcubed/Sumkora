@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('Worked solution', '详细解答') }} — Sumkora{% endblock %}
+{% block content %}
+<div class="page-header compact-header">
+  <div>
+    <p class="eyebrow">{{ question.topic }} · {{ question.skill }}</p>
+    <h1>{{ tr('Worked solution', '详细解答') }}</h1>
+    {% if question.duration_ms %}<p>{{ tr('Completed in', '完成用时') }} {{ (question.duration_ms / 1000)|round(1) }}s</p>{% endif %}
+  </div>
+  <a href="/student/solve" class="button button-secondary">{{ tr('Solve another', '再解一题') }}</a>
+</div>
+
+{% if question.status == 'completed' %}
+<div class="solve-result-grid">
+  <aside class="surface solve-source">
+    <img src="/student/solve/{{ question.id }}/image" alt="{{ tr('Uploaded mathematics question', '上传的数学题目') }}">
+    <h2>{{ tr('Question read from the image', '从图片读取的题目') }}</h2>
+    <div class="math-copy whitespace-pre-line">\[{{ question.question_latex }}\]</div>
+    <details><summary>{{ tr('Plain transcription', '纯文本识别结果') }}</summary><p class="whitespace-pre-line">{{ question.transcription }}</p></details>
+  </aside>
+  <section class="surface solve-answer">
+    <p class="section-kicker">{{ tr('Final answer', '最终答案') }}</p>
+    <div class="solve-final math-copy">{{ question.final_answer_zh if lang == 'zh' else question.final_answer }}</div>
+    <h2>{{ tr('Method', '解题过程') }}</h2>
+    <div class="math-copy whitespace-pre-line">{{ question.solution_zh if lang == 'zh' else question.solution_en }}</div>
+    <p class="context-note">{{ tr('This question is included in your Mistake Book and topic mastery as an unsolved question.', '这道题已作为未会题目加入错题本和知识点掌握度。') }}</p>
+  </section>
+</div>
+{% else %}
+<section class="surface text-center py-12">
+  <h2 class="text-xl font-semibold">{{ tr('The solver could not finish this question', '本次解答未能完成') }}</h2>
+  <p class="text-slate-500 mt-2">{{ tr('No mastery evidence was recorded. Try a clearer image with the complete question visible.', '本次没有记录掌握度数据。请上传包含完整题目且更清晰的图片后重试。') }}</p>
+  <a href="/student/solve" class="button button-primary mt-5">{{ tr('Try again', '重试') }}</a>
+</section>
+{% endif %}
+{% endblock %}

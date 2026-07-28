@@ -3,6 +3,27 @@
 {% block content %}
 {% if notice %}<div class="form-message form-message-success mb-6" role="status">{{ notice }}</div>{% endif %}
 
+<section class="dashboard-quick-actions" aria-label="{{ tr('Quick actions', '快捷操作') }}">
+  <a href="/student/solve" class="quick-action quick-action-solve">
+    <span class="quick-action-icon" aria-hidden="true">?</span>
+    <span><strong>{{ tr('Solve one question', '解答一道题') }}</strong><small>{{ tr('Photo to a bilingual solution in under a minute', '拍照后一分钟内获得双语解答') }}</small></span>
+    <span aria-hidden="true">→</span>
+  </a>
+  {% if user.exam_candidate and user.exam_date %}
+  <a href="/student/settings#exam-settings" class="quick-action quick-action-exam" data-exam-date="{{ user.exam_date }}">
+    <span class="quick-action-icon" aria-hidden="true">⌁</span>
+    <span><strong data-countdown>{{ tr('Exam countdown', '考试倒计时') }}</strong><small>{{ user.exam_session or tr('Your exam date', '你的考试日期') }} · {{ user.exam_date }}</small></span>
+    <span aria-hidden="true">→</span>
+  </a>
+  {% else %}
+  <a href="/student/settings#exam-settings" class="quick-action quick-action-exam">
+    <span class="quick-action-icon" aria-hidden="true">⌁</span>
+    <span><strong>{{ tr('Add your exam countdown', '添加考试倒计时') }}</strong><small>{{ tr('Keep your target date visible', '让目标日期始终清晰可见') }}</small></span>
+    <span aria-hidden="true">→</span>
+  </a>
+  {% endif %}
+</section>
+
 {% if not direct.papers %}
 <section class="surface welcome-surface max-w-4xl mx-auto overflow-hidden">
   <div class="grid md:grid-cols-[1.2fr_0.8fr] gap-8 items-center py-4 md:py-8">
@@ -52,6 +73,32 @@
   </div>
 </section>
 
+{% if direct.performance_history %}
+<section class="surface performance-panel mb-6">
+  <div class="section-heading">
+    <div><h2>{{ tr('Overall performance', '总体成绩趋势') }}</h2><p>{{ tr('Latest completed analysis for each paper.', '每份试卷最近一次完成的分析结果。') }}</p></div>
+    <span class="chart-legend"><i></i> {{ tr('Estimated scores use hollow points', '估分使用空心圆点') }}</span>
+  </div>
+  <div class="performance-chart" role="img" aria-label="{{ tr('Overall paper percentage over time', '试卷总得分率随时间变化图') }}">
+    {% set count = direct.performance_history|length %}
+    <svg viewBox="0 0 760 230" preserveAspectRatio="xMidYMid meet">
+      {% for tick in [0,25,50,75,100] %}
+      {% set y = 180 - tick * 1.45 %}
+      <line x1="54" y1="{{ y }}" x2="730" y2="{{ y }}" class="chart-grid"/>
+      <text x="44" y="{{ y + 4 }}" text-anchor="end" class="chart-label">{{ tick }}%</text>
+      {% endfor %}
+      <polyline class="chart-line" points="{% for point in direct.performance_history %}{% set x = 392 if count == 1 else 62 + loop.index0 * 660 / (count - 1) %}{% set y = 180 - point.percentage * 1.45 %}{{ x }},{{ y }} {% endfor %}"/>
+      {% for point in direct.performance_history %}
+      {% set x = 392 if count == 1 else 62 + loop.index0 * 660 / (count - 1) %}
+      {% set y = 180 - point.percentage * 1.45 %}
+      <a href="/student/papers/{{ point.paper_id }}"><circle cx="{{ x }}" cy="{{ y }}" r="6" class="{{ 'chart-point-estimate' if point.estimated else 'chart-point' }}"><title>{{ point.title }}: {{ point.percentage }}%</title></circle></a>
+      <text x="{{ x }}" y="207" text-anchor="middle" class="chart-label">{{ point.date[5:] }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</section>
+{% endif %}
+
 <div class="learning-tool-grid mb-8">
   <a href="/student/mistakes" class="learning-tool learning-tool-mistakes">
     <span class="tool-icon" aria-hidden="true">
@@ -77,7 +124,7 @@
   </a>
 </div>
 
-<div class="dashboard-columns">
+<div class="dashboard-columns dashboard-columns-single">
   <div class="dashboard-main">
     <section class="list-section">
       <div class="section-heading">
@@ -94,35 +141,19 @@
       </div>
     </section>
 
-    <section class="list-section">
-      <div class="section-heading">
-        <div><h2>{{ tr('Skills taking shape', '正在形成的技能') }}</h2><p>{{ tr('Open a skill to see its paper-by-paper trend.', '打开技能，查看每份试卷中的变化趋势。') }}</p></div>
-        <a href="/student/skills">{{ tr('Full profile', '完整学习画像') }}</a>
-      </div>
-      <div class="skill-list">
-        {% for item in skill_profile.strengths[:4] %}
-        <a href="{{ skill_url(item.skill) }}" class="skill-row">
-          <div><p>{{ skill_label(item.skill) }}</p><span>{{ item.evidence_count }} {{ tr('observations', '次记录') }} · {{ item.distinct_papers }} {{ tr('papers', '份试卷') }}</span></div>
-          <span class="skill-state">{{ skill_status_label(item.status) }}</span>
-        </a>
-        {% else %}<p class="empty-row">{{ tr('Complete more papers to build a reliable picture of your strengths.', '完成更多试卷后，系统才能更可靠地判断你的强项。') }}</p>{% endfor %}
-      </div>
-    </section>
   </div>
-
-  <aside class="focus-panel">
-    <p class="section-kicker">{{ tr('Focus next', '下一步重点') }}</p>
-    {% if skill_profile.concerns %}
-    {% set concern = skill_profile.concerns[0] %}
-    <h2>{{ skill_label(concern.skill) }}</h2>
-    <p>{{ concern.distinct_papers }} {{ tr('papers provide supporting evidence. Review the pattern before practising it.', '份试卷提供了相关证据。练习前先查看问题规律。') }}</p>
-    <a href="{{ skill_url(concern.skill) }}">{{ tr('See supporting evidence', '查看相关证据') }} <span aria-hidden="true">→</span></a>
-    {% else %}
-    <h2>{{ tr('Keep building evidence', '继续积累学习证据') }}</h2>
-    <p>{{ tr('No recurring concern is clear yet. Another paper will make your profile more useful.', '目前还没有明确的重复性问题。再分析一份试卷会让学习画像更有参考价值。') }}</p>
-    <a href="/student/analyse">{{ tr('Analyse another paper', '再分析一份试卷') }} <span aria-hidden="true">→</span></a>
-    {% endif %}
-  </aside>
 </div>
+{% endif %}
+{% if user.exam_candidate and user.exam_date %}
+<script>
+(() => {
+  const card = document.querySelector('[data-exam-date]');
+  if (!card) return;
+  const target = new Date(card.dataset.examDate + 'T00:00:00');
+  const days = Math.max(0, Math.ceil((target - new Date()) / 86400000));
+  card.querySelector('[data-countdown]').textContent = String(days) +
+    {{ tr(' days until your exam', ' 天后考试')|tojson }};
+})();
+</script>
 {% endif %}
 {% endblock %}

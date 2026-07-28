@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from db import execute, query_all, query_one
+from taxonomy import CANONICAL_TOPICS, canonical_skill, canonical_topic
 
 
-RECENCY_HALF_LIFE_DAYS = 60.0
-CALCULATION_VERSION = "beta-recency-60d-v2"
+RECENCY_HALF_LIFE_DAYS = 25.0
+CALCULATION_VERSION = "beta-recency-25d-v3"
 TAXONOMY_VERSION = "0606-v1"
 
 CORE_0606_SKILLS = [
@@ -412,7 +413,10 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
     )
     grouped = defaultdict(list)
     for row in rows:
-        grouped[row["skill"]].append(row)
+        normalised = dict(row)
+        normalised["topic"] = canonical_topic(row["topic"], row["skill"])
+        normalised["skill"] = canonical_skill(row["skill"], normalised["topic"])
+        grouped[normalised["skill"]].append(normalised)
     execute("DELETE FROM student_skill_states WHERE student_id = ?", (student_id,))
     result = []
     for skill, observations in grouped.items():
@@ -501,11 +505,72 @@ def student_skill_profile(student_id: int) -> dict:
         if row["status"] in {"recurring concern", "resurfaced", "early signal"}
         and row["current_estimate"] < 0.65
     ]
+    topic_rows = query_all(
+        """
+        SELECT * FROM (
+            SELECT so.id AS observation_id, so.submission_id,
+                   so.observed_at, so.topic, so.skill, so.marks_earned,
+                   so.marks_available, so.success_fraction, so.evidence_weight
+            FROM skill_observations so
+            JOIN submissions s ON s.id = so.submission_id
+            JOIN assignments a ON a.id = s.assignment_id
+            WHERE so.student_id = ? AND a.syllabus_code = '0606'
+            UNION ALL
+            SELECT 1000000000 + aso.id, 1000000000 + aso.paper_id,
+                   aso.observed_at, aso.topic, aso.skill, aso.marks_earned,
+                   aso.marks_available, aso.success_fraction, aso.evidence_weight
+            FROM analysis_skill_observations aso
+            WHERE aso.student_id = ? AND aso.is_current = 1
+            UNION ALL
+            SELECT 2000000000 + shq.id, 2000000000 + shq.id, shq.created_at,
+                   shq.topic, shq.skill, 0.0, 2.0, 0.0,
+                   MAX(0.5, 2.0 * shq.classification_confidence)
+            FROM student_help_questions shq
+            WHERE shq.student_id = ? AND shq.status = 'completed'
+        )
+        ORDER BY observed_at, observation_id
+        """,
+        (student_id, student_id, student_id),
+    )
+    grouped_topics = defaultdict(list)
+    for raw in topic_rows:
+        item = dict(raw)
+        item["topic"] = canonical_topic(item["topic"], item["skill"])
+        grouped_topics[item["topic"]].append(item)
+    topic_states = []
+    for topic_name, observations in grouped_topics.items():
+        state = _state_for_observations(observations)
+        confidence = max(0.0, min(1.0, 1.0 - 2.0 * state["uncertainty"]))
+        level = (
+            "weak"
+            if state["current_estimate"] < 0.5
+            else "developing"
+            if state["current_estimate"] < 0.75
+            else "secure"
+        )
+        topic_states.append(
+            {
+                "topic": topic_name,
+                **state,
+                "percentage": round(100 * state["current_estimate"], 1),
+                "confidence": round(confidence, 2),
+                "level": level,
+            }
+        )
+    topic_states.sort(key=lambda row: (row["current_estimate"], -row["evidence_count"], row["topic"]))
+    tested_topics = {row["topic"] for row in topic_states}
+    untested_topics = [
+        {"topic": topic, "status": "untested"}
+        for topic in CANONICAL_TOPICS
+        if topic not in tested_topics
+    ]
     return {
         "states": states,
         "strengths": strengths,
         "concerns": concerns,
         "untested": untested,
+        "topic_states": topic_states,
+        "untested_topics": untested_topics,
         "calculation_version": CALCULATION_VERSION,
     }
 

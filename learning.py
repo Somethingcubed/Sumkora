@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import random
 import re
 import textwrap
 from collections import defaultdict
@@ -14,6 +16,7 @@ from urllib.parse import quote
 import fitz
 
 from db import execute, query_all, query_one
+from taxonomy import canonical_topic
 
 
 def _now() -> str:
@@ -35,14 +38,27 @@ def skill_url(skill: str) -> str:
     return f"/student/skills/detail?skill={quote(skill or '', safe='')}"
 
 
-def skill_detail(student_id: int, skill: str) -> dict | None:
-    state = query_one(
-        """
-        SELECT * FROM student_skill_states
-        WHERE student_id = ? AND lower(skill) = lower(?)
-        """,
-        (student_id, skill),
-    )
+def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | None:
+    state = None
+    if topic:
+        from assessment import student_skill_profile
+
+        state = next(
+            (
+                item
+                for item in student_skill_profile(student_id)["topic_states"]
+                if item["topic"].lower() == topic.lower()
+            ),
+            None,
+        )
+    else:
+        state = query_one(
+            """
+            SELECT * FROM student_skill_states
+            WHERE student_id = ? AND lower(skill) = lower(?)
+            """,
+            (student_id, skill),
+        )
     observations = query_all(
         """
         SELECT aso.*, sp.title AS paper_title, sp.id AS source_id,
@@ -56,10 +72,10 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
         JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
         JOIN analysis_question_results aqr ON aqr.id = aso.question_result_id
         WHERE aso.student_id = ? AND aso.is_current = 1
-          AND lower(aso.skill) = lower(?)
+          AND (? != '' OR lower(aso.skill) = lower(?))
         ORDER BY aso.observed_at, aso.id
         """,
-        (student_id, skill),
+        (student_id, topic, skill),
     )
     legacy = query_all(
         """
@@ -75,12 +91,19 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
         LEFT JOIN questions q ON q.id = so.question_id
         LEFT JOIN grade_drafts gd
           ON gd.submission_id = s.id AND gd.question_id = q.id
-        WHERE so.student_id = ? AND lower(so.skill) = lower(?)
+        WHERE so.student_id = ? AND (? != '' OR lower(so.skill) = lower(?))
         ORDER BY so.observed_at, so.id
         """,
-        (student_id, skill),
+        (student_id, topic, skill),
     )
     rows = [dict(row) for row in observations] + [dict(row) for row in legacy]
+    if topic:
+        rows = [
+            row
+            for row in rows
+            if canonical_topic(row.get("topic", ""), row.get("skill", "")).lower()
+            == topic.lower()
+        ]
     if not state and not rows:
         return None
 
@@ -155,12 +178,13 @@ def skill_detail(student_id: int, skill: str) -> dict | None:
     for index, item in enumerate(trend):
         item["chart_x"] = index
     return {
-        "skill": state["skill"] if state else skill,
-        "display_skill": _display_skill(state["skill"] if state else skill),
-        "topic": state["topic"] if state else (rows[-1]["topic"] if rows else ""),
+        "skill": topic or (state["skill"] if state else skill),
+        "display_skill": topic or _display_skill(state["skill"] if state else skill),
+        "topic": topic or (state["topic"] if state else (rows[-1]["topic"] if rows else "")),
         "state": dict(state) if state else None,
         "papers": trend,
         "paper_count": len(trend),
+        "is_topic": bool(topic),
     }
 
 
@@ -465,16 +489,73 @@ def mistake_book(
             )
         item["has_parent_context"] = use_bank_parent or len(complete_parts) > 1
         items.append(item)
+    help_rows = query_all(
+        """
+        SELECT * FROM student_help_questions
+        WHERE student_id = ? AND status = 'completed'
+        ORDER BY created_at DESC, id DESC
+        """,
+        (student_id,),
+    )
+    for raw in help_rows:
+        help_item = dict(raw)
+        help_topic = help_item["topic"] or "Unclassified"
+        topics.add(help_topic)
+        if topic and help_topic != topic:
+            continue
+        if status and help_item["mistake_status"] != status:
+            continue
+        items.append(
+            {
+                "id": -int(help_item["id"]),
+                "question_result_id": None,
+                "analysis_version_id": None,
+                "question_label": "Question",
+                "question_text": help_item["transcription"],
+                "question_latex": help_item["question_latex"],
+                "maximum_marks": 2,
+                "mark": 0,
+                "ai_rationale": help_item["solution_en"],
+                "ai_rationale_zh": help_item["solution_zh"],
+                "mark_scheme_text": "",
+                "topic": help_topic,
+                "skill": help_item["skill"],
+                "error_category": "unsolved question",
+                "error_mechanism": "You asked Sumkora for a worked solution.",
+                "error_mechanism_zh": "你向 Sumkora 请求了这道题的完整解答。",
+                "assessment_status": "help",
+                "paper_id": None,
+                "paper_title": "Solved with Sumkora",
+                "paper_date": help_item["created_at"],
+                "assessment_mode": "help",
+                "question_asset_path": None,
+                "answer_asset_path": None,
+                "answer_text": help_item["final_answer"],
+                "source_key": f"help:{help_item['id']}",
+                "bank_question_text": "",
+                "bank_question_latex": "",
+                "complete_question_text": (
+                    help_item["question_latex"] or help_item["transcription"]
+                ),
+                "has_parent_context": False,
+                "outcome": "incorrect",
+                "status": help_item["mistake_status"],
+            }
+        )
+    total_count = len(rows) + len(help_rows)
+    all_statuses = [row["status"] for row in rows] + [
+        row["mistake_status"] for row in help_rows
+    ]
     return {
         "items": items,
         "topics": sorted(topics),
         "selected_topic": topic,
         "selected_status": status,
         "counts": {
-            "total": len(rows),
-            "not_retried": sum(row["status"] == "not_retried" for row in rows),
-            "improving": sum(row["status"] == "improving" for row in rows),
-            "mastered": sum(row["status"] == "mastered" for row in rows),
+            "total": total_count,
+            "not_retried": sum(value == "not_retried" for value in all_statuses),
+            "improving": sum(value == "improving" for value in all_statuses),
+            "mastered": sum(value == "mastered" for value in all_statuses),
         },
     }
 
@@ -482,6 +563,22 @@ def mistake_book(
 def update_mistake_status(student_id: int, entry_id: int, status: str) -> bool:
     if status not in {"not_retried", "improving", "mastered"}:
         return False
+    if entry_id < 0:
+        row = query_one(
+            "SELECT id FROM student_help_questions WHERE id = ? AND student_id = ?",
+            (-entry_id, student_id),
+        )
+        if not row:
+            return False
+        execute(
+            """
+            UPDATE student_help_questions
+            SET mistake_status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, _now(), -entry_id),
+        )
+        return True
     row = query_one(
         "SELECT id FROM mistake_book_entries WHERE id = ? AND student_id = ?",
         (entry_id, student_id),
@@ -538,11 +635,55 @@ def _bank_candidates() -> list[dict]:
     result = []
     for row in rows:
         item = dict(row)
+        item["canonical_topic"] = canonical_topic(
+            item.get("topic") or "",
+            " ".join(str(value) for value in _json(item.get("skills"), [])),
+            item.get("prompt_text") or "",
+        )
         item["skill_list"] = [
             str(value).lower() for value in _json(item["skills"], [])
         ]
         result.append(item)
     return result
+
+
+def _choose_weak_topic(
+    topic_states: list[dict],
+    available_topics: set[str],
+    previous_topic: str = "",
+    *,
+    rng=None,
+) -> str:
+    """Choose one evidenced weak topic, avoiding the previous set when possible."""
+    rng = rng or random.SystemRandom()
+    eligible = [
+        row
+        for row in topic_states
+        if row.get("topic") in available_topics
+    ]
+    if not eligible:
+        return ""
+    alternatives = [
+        row for row in eligible
+        if len(eligible) < 2 or row.get("topic") != previous_topic
+    ]
+    pool = alternatives or eligible
+    weights = []
+    for row in pool:
+        mastery = max(0.0, min(1.0, float(row.get("current_estimate") or 0.5)))
+        evidence = max(1, int(row.get("evidence_count") or 1))
+        confidence = max(0.25, min(1.0, float(row.get("confidence") or 0.5)))
+        # Severity dominates; evidence and confidence stop one noisy result
+        # from overwhelming repeated, well-supported weaknesses.
+        weight = (0.12 + (1.0 - mastery) ** 2) * (1.0 + math.log1p(evidence)) * confidence
+        weights.append(max(weight, 0.01))
+    threshold = rng.random() * sum(weights)
+    cumulative = 0.0
+    for row, weight in zip(pool, weights):
+        cumulative += weight
+        if cumulative >= threshold:
+            return str(row["topic"])
+    return str(pool[-1]["topic"])
 
 
 def create_practice_set(
@@ -577,19 +718,30 @@ def create_practice_set(
             (student_id,),
         )
     }
-    states = [
-        dict(row)
-        for row in query_all(
-            """
-            SELECT * FROM student_skill_states
-            WHERE student_id = ?
-            ORDER BY current_estimate, evidence_count DESC
-            """,
-            (student_id,),
+    from assessment import student_skill_profile
+
+    profile = student_skill_profile(student_id)
+    topic_states = profile["topic_states"]
+    states = profile["states"]
+    available_topics = {item["canonical_topic"] for item in candidates}
+    previous = query_one(
+        """
+        SELECT topic FROM practice_sets
+        WHERE student_id = ? AND selection_mode = 'weaknesses' AND topic != ''
+        ORDER BY created_at DESC, id DESC LIMIT 1
+        """,
+        (student_id,),
+    )
+    selected_weak_topic = ""
+    if selection_mode == "weaknesses":
+        selected_weak_topic = _choose_weak_topic(
+            topic_states,
+            available_topics,
+            previous["topic"] if previous else "",
         )
-    ]
-    weak_topics = [row["topic"].lower() for row in states[:4]]
-    weak_skills = [row["skill"].lower() for row in states[:8]]
+        if not selected_weak_topic and available_topics:
+            selected_weak_topic = sorted(available_topics)[0]
+        topic = selected_weak_topic
     mistake_question_ids = {
         row["paper_question_id"]: row["id"]
         for row in query_all(
@@ -611,31 +763,27 @@ def create_practice_set(
             continue
         if difficulty != "mixed" and item["question_demand"] != difficulty:
             continue
-        item_topic = (item["topic"] or "").lower()
+        item_topic = item["canonical_topic"]
         item_skills = item["skill_list"]
         score = 0
         reason = "Mixed revision"
         if selection_mode == "topic":
-            if not topic or item_topic != topic.lower():
+            requested_topic = canonical_topic(topic)
+            if not topic or item_topic != requested_topic:
                 continue
             score = 100
-            reason = f"Selected topic: {topic}"
+            topic = requested_topic
+            reason = f"Selected topic: {requested_topic}"
         elif selection_mode == "mistakes":
             if item["id"] not in mistake_question_ids:
                 continue
             score = 120
             reason = "Retry an earlier mistake"
         elif selection_mode == "weaknesses":
-            if item_topic in weak_topics:
-                score += 80 - 5 * weak_topics.index(item_topic)
-                reason = f"Current priority: {item['topic']}"
-            overlap = [skill for skill in item_skills if skill in weak_skills]
-            if overlap:
-                score += 50
-                reason = f"Current priority: {overlap[0]}"
-            if not states:
-                score += 10
-                reason = "Build initial evidence"
+            if selected_weak_topic and item_topic != selected_weak_topic:
+                continue
+            score = 100
+            reason = f"Targeted weak topic: {selected_weak_topic or item_topic}"
         else:
             score = 20
         if item["id"] in recent:
@@ -660,23 +808,33 @@ def create_practice_set(
             break
     now = _now()
     title_en = {
-        "weaknesses": "Targeted weakness practice",
+        "weaknesses": f"{topic or 'Targeted'} practice",
         "topic": f"{topic or 'Topic'} practice",
         "mixed": "Mixed revision worksheet",
         "mistakes": "Mistake retry worksheet",
     }[selection_mode]
     title_zh = {
-        "weaknesses": "薄弱项针对练习",
+        "weaknesses": f"{topic or '薄弱项'}专项练习",
         "topic": f"{topic or '专题'}练习",
         "mixed": "综合复习练习",
         "mistakes": "错题重练",
     }[selection_mode]
     explanation_en = (
         f"Selected {len(selected)} non-repeating questions from the approved "
-        f"question bank for {title_en.lower()}."
+        f"question bank for {title_en.lower()}. "
+        + (
+            f"Only {len(selected)} suitable questions were available."
+            if len(selected) < count
+            else "The worksheet contains the requested number of questions."
+        )
     )
     explanation_zh = (
         f"已从审核通过的题库中选择 {len(selected)} 道不重复题目，用于{title_zh}。"
+        + (
+            f"题库中目前只有 {len(selected)} 道符合条件的题目。"
+            if len(selected) < count
+            else "练习题数量符合你的选择。"
+        )
     )
     set_id = execute(
         """

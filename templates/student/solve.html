@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('Solve one question', '解答一道题') }} — Sumkora{% endblock %}
+{% block content %}
+<div class="page-header compact-header">
+  <div>
+    <p class="eyebrow">{{ tr('Quick help', '快速辅导') }}</p>
+    <h1>{{ tr('Solve one question', '解答一道题') }}</h1>
+    <p>{{ tr('Upload one clear photo. Sumkora will read the complete context and return a bilingual worked solution.', '上传一张清晰照片。Sumkora 会读取完整题目内容，并提供中英双语的详细解答。') }}</p>
+  </div>
+</div>
+
+{% if error == 'invalid_image' %}
+<div class="form-message form-message-error mb-5" role="alert">{{ tr('Choose a JPEG, PNG, or WebP image under the upload limit.', '请选择不超过上传限制的 JPEG、PNG 或 WebP 图片。') }}</div>
+{% endif %}
+
+<section class="surface solve-upload-card">
+  <form method="post" action="/student/solve" enctype="multipart/form-data" class="solve-form" data-solve-form>
+    <label class="solve-dropzone" for="question-image">
+      <span class="solve-icon" aria-hidden="true">+</span>
+      <strong>{{ tr('Choose a question photo', '选择题目照片') }}</strong>
+      <span>{{ tr('Include tables, diagrams, definitions, and domain restrictions in the same image.', '请将表格、图形、定义和取值范围完整拍入同一张照片。') }}</span>
+      <input id="question-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required data-solve-input>
+    </label>
+    <div class="solve-preview hidden" data-solve-preview-wrap>
+      <img alt="{{ tr('Selected question preview', '所选题目预览') }}" data-solve-preview>
+    </div>
+    <button class="button button-primary" type="submit" data-solve-submit>{{ tr('Get worked solution', '获取详细解答') }}</button>
+    <p class="solve-timer hidden" role="status" aria-live="polite" data-solve-timer>{{ tr('Reading and solving your question…', '正在读取并解答题目…') }} <span>0</span>s</p>
+  </form>
+</section>
+
+{% if questions %}
+<section class="list-section mt-6">
+  <div class="section-heading"><div><h2>{{ tr('Recent questions', '最近提问') }}</h2><p>{{ tr('Questions you asked Sumkora to explain.', '你曾请 Sumkora 讲解的题目。') }}</p></div></div>
+  <div class="paper-list">
+    {% for item in questions %}
+    <a href="/student/solve/{{ item.id }}" class="paper-row">
+      <div><p>{{ item.final_answer or item.transcription|truncate(80) }}</p><span>{{ item.topic }} · {{ item.created_at[:10] }}</span></div>
+      <span class="badge badge-{{ item.status }}">{{ tr('Solved', '已解答') if item.status == 'completed' else tr('Try again', '请重试') }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<script>
+(() => {
+  const input = document.querySelector('[data-solve-input]');
+  const preview = document.querySelector('[data-solve-preview]');
+  const wrap = document.querySelector('[data-solve-preview-wrap]');
+  const form = document.querySelector('[data-solve-form]');
+  const button = document.querySelector('[data-solve-submit]');
+  const timer = document.querySelector('[data-solve-timer]');
+  if (input) input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    preview.src = URL.createObjectURL(file);
+    wrap.classList.remove('hidden');
+  });
+  if (form) form.addEventListener('submit', () => {
+    button.disabled = true;
+    button.textContent = {{ tr('Solving…', '正在解答…')|tojson }};
+    timer.classList.remove('hidden');
+    let seconds = 0;
+    window.setInterval(() => {
+      seconds += 1;
+      timer.querySelector('span').textContent = String(seconds);
+    }, 1000);
+  });
+})();
+</script>
+{% endblock %}

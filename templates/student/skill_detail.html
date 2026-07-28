@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}{{ skill_label(detail.display_skill) }} — Sumkora{% endblock %}
+{% block title %}{{ topic_label(detail.display_skill) if detail.is_topic else skill_label(detail.display_skill) }} — Sumkora{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
     <p class="eyebrow">{{ topic_label(detail.topic) }}</p>
-    <h1>{{ skill_label(detail.display_skill) }}</h1>
-    <p>{{ tr('See how your performance in this skill changes from paper to paper.', '查看你在这一技能上的表现如何随每次试卷分析而变化。') }}</p>
+    <h1>{{ topic_label(detail.display_skill) if detail.is_topic else skill_label(detail.display_skill) }}</h1>
+    <p>{{ tr('See how your performance in this topic changes from paper to paper.', '查看你在这一知识点上的表现如何随每次试卷分析而变化。') if detail.is_topic else tr('See how your performance in this skill changes from paper to paper.', '查看你在这一技能上的表现如何随每次试卷分析而变化。') }}</p>
   </div>
-  <a href="/student/skills" class="button button-secondary">{{ tr('Back to all skills', '返回全部技能') }}</a>
+  <a href="/student/skills" class="button button-secondary">{{ tr('Back to Progress', '返回学习进步') }}</a>
 </div>
 
 {% if detail.state %}
@@ -25,7 +25,7 @@
     <div class="text-xs text-slate-500 flex gap-4"><span>● {{ tr('Detailed', '详细批改') }}</span><span>○ {{ tr('Estimated', '估分') }}</span></div>
   </div>
   <div class="skill-chart mt-5" role="img" aria-label="{{ tr('Skill percentage over time', '技能得分率随时间变化图') }}">
-    <svg viewBox="0 0 800 270" preserveAspectRatio="none">
+    <svg viewBox="0 0 800 270" preserveAspectRatio="xMidYMid meet">
       {% for tick in [0,25,50,75,100] %}
       {% set y = 220 - tick * 1.7 %}
       <line x1="70" y1="{{ y }}" x2="750" y2="{{ y }}" class="chart-grid"/>

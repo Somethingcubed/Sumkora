@@ -152,7 +152,7 @@ def cell(value, style):
     return Paragraph(escape(clean_text(str(value))), style)
 
 
-def table(data, widths=None, header=True, lang="en"):
+def table(data, widths=None, header=True, lang="en", row_backgrounds=None):
     styles = report_styles(lang)
     wrapped = [[cell(value, styles["body"]) for value in row] for row in data]
     tbl = Table(wrapped, colWidths=widths, hAlign="LEFT", repeatRows=1 if header else 0)
@@ -173,6 +173,13 @@ def table(data, widths=None, header=True, lang="en"):
             ("FONT", (0, 0), (-1, 0), bold_font_for_lang(lang)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#111827")),
         ])
+    if row_backgrounds:
+        start = 1 if header else 0
+        for index, background in enumerate(row_backgrounds, start=start):
+            if background:
+                style.append(
+                    ("BACKGROUND", (0, index), (-1, index), colors.HexColor(background))
+                )
     tbl.setStyle(TableStyle(style))
     return tbl
 
@@ -510,6 +517,7 @@ def self_service_assessment_report(
         tr("Mark", "得分"),
         tr("What this shows", "分析说明"),
     ]]
+    row_backgrounds = []
     for row in rows:
         mark = (
             row["human_mark"]
@@ -530,14 +538,29 @@ def self_service_assessment_report(
             explanation = (
                 f"{explanation} {tr('Lost marks:', '失分原因：')} {mechanism}"
             )
+        uncertain = mark is None or row["assessment_status"] in {"ungraded", "uncertain"}
+        correct = (
+            not uncertain
+            and float(mark or 0) >= float(row["maximum_marks"] or 0) - 0.001
+        )
+        state_label = (
+            tr("Needs review", "需要复核")
+            if uncertain
+            else tr("Correct", "正确")
+            if correct
+            else tr("Marks lost", "有失分")
+        )
+        row_backgrounds.append(
+            "#f8fafc" if uncertain else "#f1faf6" if correct else "#fff6f4"
+        )
         data.append(
             [
                 row["question_label"],
                 f"{row['topic']} / {row['skill']}",
                 (
-                    tr("Needs review", "需要复核")
-                    if mark is None or row["assessment_status"] == "ungraded"
-                    else f"{mark}/{row['maximum_marks']}"
+                    state_label
+                    if uncertain
+                    else f"{mark}/{row['maximum_marks']} - {state_label}"
                 ),
                 explanation[:420],
             ]
@@ -547,6 +570,7 @@ def self_service_assessment_report(
             data,
             widths=[2 * cm, 4.2 * cm, 2.1 * cm, 8.1 * cm],
             lang=lang,
+            row_backgrounds=row_backgrounds,
         )
     )
     story.append(p(tr("Interpretation", "结果说明"), styles["h2"]))

@@ -432,7 +432,9 @@ TOPIC_ZH = {
     "Probability": "概率",
     "Graphs": "图像",
     "Functions": "函数",
+    "Functions and graphs": "函数与图像",
     "Sequences": "数列",
+    "Sequences and series": "数列与级数",
     "Unclassified": "待分类",
 }
 

@@ -522,6 +522,31 @@ def init_db():
             UNIQUE(student_id, analysis_question_result_id)
         );
 
+        CREATE TABLE IF NOT EXISTS student_help_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            image_path TEXT NOT NULL,
+            original_filename TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'processing'
+                CHECK(status IN ('processing', 'completed', 'failed')),
+            transcription TEXT NOT NULL DEFAULT '',
+            question_latex TEXT NOT NULL DEFAULT '',
+            solution_en TEXT NOT NULL DEFAULT '',
+            solution_zh TEXT NOT NULL DEFAULT '',
+            final_answer TEXT NOT NULL DEFAULT '',
+            final_answer_zh TEXT NOT NULL DEFAULT '',
+            topic TEXT NOT NULL DEFAULT 'Unclassified',
+            skill TEXT NOT NULL DEFAULT 'Unclassified',
+            classification_confidence REAL NOT NULL DEFAULT 0.5,
+            model TEXT NOT NULL DEFAULT '',
+            duration_ms INTEGER,
+            mistake_status TEXT NOT NULL DEFAULT 'not_retried'
+                CHECK(mistake_status IN ('not_retried', 'improving', 'mastered')),
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS practice_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -644,6 +669,9 @@ def init_db():
         "username": "TEXT",
         "username_normalized": "TEXT",
         "recovery_code_hash": "TEXT",
+        "exam_candidate": "INTEGER NOT NULL DEFAULT 0",
+        "exam_date": "TEXT",
+        "exam_session": "TEXT",
     }
     for column, definition in user_column_defs.items():
         if column not in user_columns:

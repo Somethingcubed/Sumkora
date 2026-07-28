@@ -29,7 +29,7 @@ from pdf_utils import save_upload
 client = TestClient(app)
 
 
-def test_student_evidence_uses_a_60_day_recency_half_life():
+def test_student_evidence_uses_a_25_day_recency_half_life():
     observed_at = datetime.now(timezone.utc) - timedelta(
         days=RECENCY_HALF_LIFE_DAYS
     )
@@ -48,10 +48,11 @@ def test_student_evidence_uses_a_60_day_recency_half_life():
 
     # The all-time failure has weight 2, producing Beta(1, 3) = 0.25.
     assert state["all_time_estimate"] == pytest.approx(0.25)
-    # At exactly one 60-day half-life, its current weight is 1,
+    # At exactly one 25-day half-life, its current weight is 1,
     # producing Beta(1, 2) = 1/3.
     assert state["current_estimate"] == pytest.approx(1 / 3, abs=0.0001)
-    assert CALCULATION_VERSION == "beta-recency-60d-v2"
+    assert RECENCY_HALF_LIFE_DAYS == 25.0
+    assert CALCULATION_VERSION == "beta-recency-25d-v3"
 
 
 def test_outdated_persisted_profiles_are_rebuilt_with_the_new_rule():
@@ -62,7 +63,7 @@ def test_outdated_persisted_profiles_are_rebuilt_with_the_new_rule():
         teacher,
         "half-life",
         0,
-        datetime.now(timezone.utc) - timedelta(days=60),
+        datetime.now(timezone.utc) - timedelta(days=25),
     )
     sync_submission_evidence(submission)
     execute(
@@ -86,7 +87,7 @@ def test_outdated_persisted_profiles_are_rebuilt_with_the_new_rule():
     )
     assert state["calculation_version"] == CALCULATION_VERSION
     # The integration path weights this 4-mark answer by 4 × 0.9 grading
-    # confidence × 0.5 legacy extraction confidence = 1.8. At 60 days that
+    # confidence × 0.5 legacy extraction confidence = 1.8. At 25 days that
     # becomes 0.9, producing Beta(1, 1.9).
     assert state["current_estimate"] == pytest.approx(1 / 2.9, abs=0.0001)
 

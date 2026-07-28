@@ -104,6 +104,7 @@ from question_bank import (
     review_questions,
     update_question_review,
 )
+from question_solver import solve_question_image
 from self_service import (
     MAX_ANSWER_IMAGE_PAGES,
     SELF_SERVICE_STAGES,
@@ -125,7 +126,7 @@ _refreshed_profiles = refresh_outdated_student_profiles()
 if _refreshed_profiles:
     print(
         f"Refreshed {_refreshed_profiles} student skill profiles for "
-        "the 60-day evidence half-life."
+        "the 25-day evidence half-life."
     )
 _restart_time = datetime.now().isoformat()
 execute(
@@ -2308,6 +2309,48 @@ def student_settings_profile(
     )
 
 
+@app.post("/student/settings/exam")
+def student_settings_exam(
+    request: Request,
+    exam_candidate: str = Form("0"),
+    exam_date: str = Form(""),
+    exam_session: str = Form(""),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    enabled = exam_candidate == "1"
+    cleaned_date = exam_date.strip() if enabled else ""
+    if cleaned_date:
+        try:
+            datetime.strptime(cleaned_date, "%Y-%m-%d")
+        except ValueError:
+            return render(
+                request,
+                "student/settings.html",
+                {
+                    "user": user,
+                    "error": "Choose a valid exam date.",
+                    "success": None,
+                },
+                status_code=400,
+            )
+    execute(
+        """
+        UPDATE users
+        SET exam_candidate = ?, exam_date = ?, exam_session = ?
+        WHERE id = ?
+        """,
+        (
+            1 if enabled else 0,
+            cleaned_date or None,
+            exam_session.strip()[:60] if enabled else None,
+            user["id"],
+        ),
+    )
+    return RedirectResponse("/student/settings?success=exam", status_code=303)
+
+
 @app.post("/student/settings/password", response_class=HTMLResponse)
 def student_settings_password(
     request: Request,
@@ -2340,6 +2383,159 @@ def student_settings_password(
         "/student/settings?success=password",
         status_code=303,
     )
+
+
+@app.get("/student/solve", response_class=HTMLResponse)
+def student_solve_page(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    questions = query_all(
+        """
+        SELECT * FROM student_help_questions
+        WHERE student_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 20
+        """,
+        (user["id"],),
+    )
+    return render(
+        request,
+        "student/solve.html",
+        {
+            "user": user,
+            "questions": questions,
+            "error": request.query_params.get("error"),
+        },
+    )
+
+
+@app.post("/student/solve")
+def student_solve_question(
+    request: Request,
+    image: UploadFile = File(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    content = image.file.read(config.MAX_UPLOAD_BYTES + 1)
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if (
+        not content
+        or len(content) > config.MAX_UPLOAD_BYTES
+        or image.content_type not in allowed_types
+    ):
+        return RedirectResponse(
+            "/student/solve?error=invalid_image",
+            status_code=303,
+        )
+    extension = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }[image.content_type]
+    filename = f"solve-{user['id']}-{uuid.uuid4().hex}{extension}"
+    path = save_upload(filename, content)
+    started = monotonic()
+    now = datetime.now().astimezone().isoformat()
+    question_id = execute(
+        """
+        INSERT INTO student_help_questions
+        (student_id, image_path, original_filename, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'processing', ?, ?)
+        """,
+        (user["id"], path, image.filename or "", now, now),
+    )
+    try:
+        solution = solve_question_image(path)
+        duration_ms = int((monotonic() - started) * 1000)
+        execute(
+            """
+            UPDATE student_help_questions
+            SET status = 'completed', transcription = ?, question_latex = ?,
+                solution_en = ?, solution_zh = ?, final_answer = ?,
+                final_answer_zh = ?, topic = ?, skill = ?,
+                classification_confidence = ?, model = ?, duration_ms = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                solution["transcription"],
+                solution["question_latex"],
+                solution["solution_en"],
+                solution["solution_zh"],
+                solution["final_answer"],
+                solution["final_answer_zh"],
+                solution["topic"],
+                solution["skill"],
+                solution["classification_confidence"],
+                solution["model"],
+                duration_ms,
+                datetime.now().astimezone().isoformat(),
+                question_id,
+            ),
+        )
+        record_student_activity(
+            user["id"],
+            "other",
+            path=request.url.path,
+            entity_type="help_question",
+            entity_id=question_id,
+            metadata={"duration_ms": duration_ms},
+        )
+    except Exception as exc:
+        execute(
+            """
+            UPDATE student_help_questions
+            SET status = 'failed', failure_message = ?, duration_ms = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(exc)[:600],
+                int((monotonic() - started) * 1000),
+                datetime.now().astimezone().isoformat(),
+                question_id,
+            ),
+        )
+    return RedirectResponse(f"/student/solve/{question_id}", status_code=303)
+
+
+@app.get("/student/solve/{question_id}", response_class=HTMLResponse)
+def student_solve_result(request: Request, question_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    question = query_one(
+        """
+        SELECT * FROM student_help_questions
+        WHERE id = ? AND student_id = ?
+        """,
+        (question_id, user["id"]),
+    )
+    if not question:
+        return RedirectResponse("/student/solve", status_code=303)
+    return render(
+        request,
+        "student/solve_result.html",
+        {"user": user, "question": question},
+    )
+
+
+@app.get("/student/solve/{question_id}/image")
+def student_solve_image(request: Request, question_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    question = query_one(
+        """
+        SELECT image_path FROM student_help_questions
+        WHERE id = ? AND student_id = ?
+        """,
+        (question_id, user["id"]),
+    )
+    if not question or not os.path.isfile(question["image_path"]):
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return FileResponse(question["image_path"])
 
 
 @app.get("/student/report")
@@ -2645,11 +2841,11 @@ def student_skills(request: Request):
 
 
 @app.get("/student/skills/detail", response_class=HTMLResponse)
-def student_skill_detail(request: Request, skill: str = ""):
+def student_skill_detail(request: Request, skill: str = "", topic: str = ""):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    detail = skill_detail(user["id"], skill)
+    detail = skill_detail(user["id"], skill, topic)
     if not detail:
         return RedirectResponse("/student/skills", status_code=303)
     return render(

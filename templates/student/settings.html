@@ -5,15 +5,32 @@
   <div>
     <p class="eyebrow">{{ tr('Your account', '你的账号') }}</p>
     <h1>{{ tr('Settings', '设置') }}</h1>
-    <p>{{ tr('Manage how your name appears and update your password.', '管理显示名称并更新密码。') }}</p>
+    <p>{{ tr('Manage your exam date, display name, and password.', '管理考试日期、显示名称和密码。') }}</p>
   </div>
 </div>
 
 {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
 {% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your display name has been updated.', '显示名称已更新。') }}</div>{% endif %}
 {% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your password has been updated.', '密码已更新。') }}</div>{% endif %}
+{% if success == 'exam' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your exam countdown has been updated.', '考试倒计时已更新。') }}</div>{% endif %}
 
 <div class="settings-grid">
+  <section class="surface" id="exam-settings">
+    <h2>{{ tr('Exam countdown', '考试倒计时') }}</h2>
+    <p class="text-sm text-slate-500 mt-2">{{ tr('Optional. Show your target exam date at the top of the dashboard.', '选填。在主页顶部显示你的目标考试日期。') }}</p>
+    <form method="post" action="/student/settings/exam" class="form-stack mt-5">
+      <label class="check-row">
+        <input type="checkbox" name="exam_candidate" value="1" {% if user.exam_candidate %}checked{% endif %}>
+        <span>{{ tr('I am preparing for an exam', '我正在准备考试') }}</span>
+      </label>
+      <label class="form-label" for="exam-date">{{ tr('Exam date', '考试日期') }}</label>
+      <input class="field" id="exam-date" type="date" name="exam_date" value="{{ user.exam_date or '' }}">
+      <label class="form-label" for="exam-session">{{ tr('Session or component', '考季或试卷类型') }} <span class="optional">{{ tr('Optional', '选填') }}</span></label>
+      <input class="field" id="exam-session" name="exam_session" value="{{ user.exam_session or '' }}" maxlength="60" placeholder="{{ tr('For example: October/November Paper 2', '例如：十月/十一月 Paper 2') }}">
+      <button class="button button-primary" type="submit">{{ tr('Save countdown', '保存倒计时') }}</button>
+    </form>
+  </section>
+
   <section class="surface">
     <h2>{{ tr('Profile', '个人资料') }}</h2>
     <dl class="account-summary">
