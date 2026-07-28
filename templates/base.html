@@ -24,7 +24,7 @@
     };
   </script>
   <script defer src="/static/vendor/mathjax/tex-chtml.js"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260728-2">
+  <link rel="stylesheet" href="/static/style.css?v=20260728-3">
 </head>
 <body class="app-page {% if is_researcher %}research-mode{% endif %}">
   <a href="#main-content" class="skip-link">{{ tr('Skip to content', '跳至主要内容') }}</a>
@@ -37,7 +37,9 @@
 
       {% if user %}
       <nav class="desktop-nav" aria-label="{{ tr('Primary navigation', '主要导航') }}">
-        {% if is_researcher %}
+        {% if is_admin %}
+        <a href="/research" aria-current="page">{{ tr('Student usage', '学生使用情况') }}</a>
+        {% elif is_researcher %}
         <a href="/research" {% if current_path == '/research' %}aria-current="page"{% endif %}>{{ tr('Overview', '概览') }}</a>
         <a href="/research/experiments" {% if current_path.startswith('/research/experiments') %}aria-current="page"{% endif %}>{{ tr('Experiments', '实验') }}</a>
         <a href="/research/ocr" {% if current_path == '/research/ocr' %}aria-current="page"{% endif %}>OCR</a>
@@ -65,7 +67,7 @@
             <span class="account-name">{{ user.name }}</span>
           </summary>
           <div class="account-popover">
-            <p>{{ tr('Researcher', '研究员') if is_researcher else tr('Student', '学生') }}</p>
+            <p>{{ tr('Administrator', '管理员') if is_admin else tr('Researcher', '研究员') if is_researcher else tr('Student', '学生') }}</p>
             {% if not is_researcher %}<a href="/student/settings">{{ tr('Settings', '设置') }}</a>{% endif %}
             <a href="/logout">{{ tr('Log out', '退出登录') }}</a>
           </div>
@@ -75,7 +77,9 @@
       <details class="mobile-menu">
         <summary aria-label="{{ tr('Open navigation', '打开导航') }}">{{ tr('Menu', '菜单') }}</summary>
         <nav aria-label="{{ tr('Mobile navigation', '移动端导航') }}">
-          {% if is_researcher %}
+          {% if is_admin %}
+          <a href="/research">{{ tr('Student usage', '学生使用情况') }}</a>
+          {% elif is_researcher %}
           <a href="/research">{{ tr('Overview', '概览') }}</a><a href="/research/experiments">{{ tr('Experiments', '实验') }}</a><a href="/research/ocr">{{ tr('OCR laboratory', 'OCR 实验室') }}</a><a href="/research/grading">{{ tr('Grading evaluation', '批改评估') }}</a><a href="/research/failures">{{ tr('Failure gallery', '失败案例') }}</a><a href="/research/student-models">{{ tr('Student models', '学生模型') }}</a><a href="/research/taxonomy">{{ tr('Taxonomy', '分类体系') }}</a>
           {% else %}
           <a href="/student">{{ tr('Dashboard', '主页') }}</a><a href="/student/solve">{{ tr('Solve one question', '解答一道题') }}</a><a href="/student/analyse">{{ tr('Analyse a paper', '分析试卷') }}</a><a href="/student/papers">{{ tr('My papers', '我的试卷') }}</a><a href="/student/skills">{{ tr('Progress', '学习进步') }}</a><a href="/student/mistakes">{{ tr('Mistakes', '错题本') }}</a><a href="/student/practice">{{ tr('Practice', '练习') }}</a><a href="/student/settings">{{ tr('Settings', '设置') }}</a>
@@ -93,12 +97,27 @@
   {% if user and not is_researcher %}
   <script>
   (() => {
-    let activeSince = document.hidden ? null : performance.now();
-    const sendActiveTime = () => {
-      if (activeSince === null) return;
-      const now = performance.now();
-      const seconds = Math.min(90, Math.round((now - activeSince) / 1000));
-      activeSince = now;
+    const tabId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const leaderKey = "sumkora-page-time-leader";
+    let lastSentAt = Date.now();
+    const leader = () => {
+      const now = Date.now();
+      let current = null;
+      try { current = JSON.parse(localStorage.getItem(leaderKey) || "null"); } catch (_) {}
+      if (!current || current.expiresAt < now || current.tabId === tabId) {
+        localStorage.setItem(leaderKey, JSON.stringify({tabId, expiresAt: now + 75000}));
+        return true;
+      }
+      return false;
+    };
+    const sendOpenTime = () => {
+      const now = Date.now();
+      if (!leader()) {
+        lastSentAt = now;
+        return;
+      }
+      const seconds = Math.min(900, Math.round((now - lastSentAt) / 1000));
+      lastSentAt = now;
       if (seconds < 5) return;
       const body = new FormData();
       body.append("path", window.location.pathname);
@@ -110,18 +129,15 @@
         keepalive: true
       }).catch(() => {});
     };
-    window.setInterval(() => {
-      if (!document.hidden) sendActiveTime();
-    }, 60000);
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        sendActiveTime();
-        activeSince = null;
-      } else {
-        activeSince = performance.now();
-      }
+    leader();
+    window.setInterval(sendOpenTime, 60000);
+    window.addEventListener("pagehide", () => {
+      sendOpenTime();
+      try {
+        const current = JSON.parse(localStorage.getItem(leaderKey) || "null");
+        if (current && current.tabId === tabId) localStorage.removeItem(leaderKey);
+      } catch (_) {}
     });
-    window.addEventListener("pagehide", sendActiveTime);
   })();
   </script>
   {% endif %}

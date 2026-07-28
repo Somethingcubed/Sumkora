@@ -290,6 +290,10 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
             context.get("user")
             and user_has_role(context["user"]["id"], "researcher", "owner")
         ),
+        "is_admin": bool(
+            context.get("user")
+            and user_has_role(context["user"]["id"], "owner")
+        ),
     }
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
@@ -375,7 +379,7 @@ def record_student_activity(
 ) -> None:
     safe_event = (
         event_type
-        if event_type in {"active_time", "download"}
+        if event_type in {"page_open_time", "active_time", "download"}
         else "other"
     )
     execute(
@@ -391,7 +395,7 @@ def record_student_activity(
             str(path or "")[:300],
             str(entity_type or "")[:80],
             str(entity_id or "")[:120],
-            max(0, min(90, int(active_seconds or 0))),
+            max(0, min(900, int(active_seconds or 0))),
             json.dumps(metadata or {}, ensure_ascii=False),
             datetime.now().astimezone().isoformat(),
         ),
@@ -407,11 +411,11 @@ def student_activity_ping(
     user = require_role(request, "student")
     if not user:
         return JSONResponse({"detail": "Authentication required."}, status_code=401)
-    seconds = max(0, min(90, int(active_seconds or 0)))
+    seconds = max(0, min(900, int(active_seconds or 0)))
     if seconds:
         record_student_activity(
             user["id"],
-            "active_time",
+            "page_open_time",
             path=path,
             active_seconds=seconds,
         )
@@ -3273,11 +3277,139 @@ def _research_overview():
     }
 
 
+def _student_usage_rows(today_started_at: str) -> list[dict]:
+    return [
+        {
+            **dict(row),
+            "open_minutes": round(float(row["open_seconds"] or 0) / 60, 1),
+            "open_minutes_today": round(
+                float(row["open_seconds_today"] or 0) / 60,
+                1,
+            ),
+        }
+        for row in query_all(
+            """
+            SELECT u.id, u.name, COALESCE(u.username, u.email) AS username,
+                   COALESCE(SUM(sae.active_seconds), 0) AS open_seconds,
+                   COALESCE(SUM(
+                       CASE WHEN sae.created_at >= ?
+                            THEN sae.active_seconds ELSE 0 END
+                   ), 0) AS open_seconds_today,
+                   COALESCE(SUM(
+                       CASE WHEN sae.event_type = 'download' THEN 1 ELSE 0 END
+                   ), 0) AS download_count,
+                   MAX(sae.created_at) AS last_active_at,
+                   (
+                       SELECT sae2.path
+                       FROM student_activity_events sae2
+                       WHERE sae2.student_id = u.id
+                         AND sae2.active_seconds > 0
+                       ORDER BY sae2.id DESC LIMIT 1
+                   ) AS last_page,
+                   (
+                       SELECT COUNT(*)
+                       FROM paper_analysis_versions pav
+                       JOIN student_papers sp ON sp.id = pav.paper_id
+                       WHERE sp.student_id = u.id AND pav.status = 'completed'
+                   ) AS paper_analysis_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM analysis_question_results aqr
+                       JOIN paper_analysis_versions pav
+                         ON pav.id = aqr.analysis_version_id
+                       JOIN student_papers sp ON sp.id = pav.paper_id
+                       WHERE sp.student_id = u.id AND pav.status = 'completed'
+                   ) AS analysed_question_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM student_help_questions shq
+                       WHERE shq.student_id = u.id AND shq.status = 'completed'
+                   ) AS solved_question_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM practice_sets ps
+                       WHERE ps.student_id = u.id AND ps.status != 'archived'
+                   ) AS worksheet_count
+            FROM users u
+            LEFT JOIN student_activity_events sae ON sae.student_id = u.id
+            WHERE u.role = 'student'
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_roles ur
+                  WHERE ur.user_id = u.id
+                    AND ur.role IN ('researcher', 'owner')
+              )
+            GROUP BY u.id, u.name, u.username, u.email
+            ORDER BY last_active_at DESC, u.name
+            """,
+            (today_started_at,),
+        )
+    ]
+
+
+def _recent_student_downloads() -> list:
+    return query_all(
+        """
+        SELECT sae.*, u.name AS student_name,
+               COALESCE(u.username, u.email) AS username
+        FROM student_activity_events sae
+        JOIN users u ON u.id = sae.student_id
+        WHERE sae.event_type = 'download'
+        ORDER BY sae.created_at DESC
+        LIMIT 20
+        """
+    )
+
+
+def _admin_usage_overview() -> dict:
+    return dict(
+        query_one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM users u
+               WHERE u.role = 'student'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM user_roles ur
+                   WHERE ur.user_id = u.id
+                     AND ur.role IN ('researcher', 'owner')
+                 )) AS students,
+              COALESCE((SELECT SUM(active_seconds)
+                        FROM student_activity_events), 0) AS open_seconds,
+              (SELECT COUNT(*) FROM student_activity_events
+               WHERE event_type = 'download') AS downloads,
+              (SELECT COUNT(*) FROM paper_analysis_versions
+               WHERE status = 'completed') AS paper_analyses,
+              (SELECT COUNT(*) FROM analysis_question_results) AS analysed_questions,
+              (SELECT COUNT(*) FROM student_help_questions
+               WHERE status = 'completed') AS solved_questions
+            """
+        )
+    )
+
+
 @app.get("/research", response_class=HTMLResponse)
 def research_dashboard(request: Request):
     user = require_researcher(request)
     if not user:
         return redirect_login()
+    today_started_at = (
+        datetime.now()
+        .astimezone()
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .isoformat()
+    )
+    student_activity = _student_usage_rows(today_started_at)
+    recent_downloads = _recent_student_downloads()
+    if user_has_role(user["id"], "owner"):
+        return render(
+            request,
+            "research/dashboard.html",
+            {
+                "user": user,
+                "admin_overview": _admin_usage_overview(),
+                "student_activity": student_activity,
+                "recent_downloads": recent_downloads,
+            },
+        )
     recent_runs = query_all(
         "SELECT * FROM model_runs ORDER BY started_at DESC LIMIT 20"
     )
@@ -3306,60 +3438,6 @@ def research_dashboard(request: Request):
           (SELECT COUNT(*) FROM analysis_ocr_pages) AS self_service_ocr_pages,
           (SELECT COUNT(*) FROM human_corrections) +
           (SELECT COUNT(*) FROM analysis_human_corrections) AS labelled_decisions
-        """
-    )
-    today_started_at = (
-        datetime.now()
-        .astimezone()
-        .replace(hour=0, minute=0, second=0, microsecond=0)
-        .isoformat()
-    )
-    student_activity = [
-        {
-            **dict(row),
-            "active_minutes": round(float(row["active_seconds"] or 0) / 60, 1),
-            "active_minutes_today": round(
-                float(row["active_seconds_today"] or 0) / 60,
-                1,
-            ),
-        }
-        for row in query_all(
-            """
-            SELECT u.id, u.name, COALESCE(u.username, u.email) AS username,
-                   COALESCE(SUM(sae.active_seconds), 0) AS active_seconds,
-                   COALESCE(SUM(
-                       CASE WHEN sae.created_at >= ?
-                            THEN sae.active_seconds ELSE 0 END
-                   ), 0) AS active_seconds_today,
-                   COALESCE(SUM(
-                       CASE WHEN sae.event_type = 'download' THEN 1 ELSE 0 END
-                   ), 0) AS download_count,
-                   MAX(sae.created_at) AS last_active_at,
-                   (SELECT COUNT(*) FROM student_papers sp
-                    WHERE sp.student_id = u.id) AS paper_count
-            FROM users u
-            LEFT JOIN student_activity_events sae ON sae.student_id = u.id
-            WHERE u.role = 'student'
-              AND NOT EXISTS (
-                  SELECT 1 FROM user_roles ur
-                  WHERE ur.user_id = u.id
-                    AND ur.role IN ('researcher', 'owner')
-              )
-            GROUP BY u.id, u.name, u.username, u.email
-            ORDER BY last_active_at DESC, u.name
-            """,
-            (today_started_at,),
-        )
-    ]
-    recent_downloads = query_all(
-        """
-        SELECT sae.*, u.name AS student_name,
-               COALESCE(u.username, u.email) AS username
-        FROM student_activity_events sae
-        JOIN users u ON u.id = sae.student_id
-        WHERE sae.event_type = 'download'
-        ORDER BY sae.created_at DESC
-        LIMIT 20
         """
     )
     analysis_runs = []

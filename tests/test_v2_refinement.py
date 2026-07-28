@@ -190,7 +190,7 @@ def test_researcher_can_inspect_active_time_and_downloads():
         ("tracked@student.local",),
     )
     assert [event["event_type"] for event in events] == [
-        "active_time",
+        "page_open_time",
         "download",
     ]
     assert events[0]["active_seconds"] == 61
@@ -212,10 +212,65 @@ def test_researcher_can_inspect_active_time_and_downloads():
     login("activity@research.local")
     dashboard = client.get("/research")
     assert dashboard.status_code == 200
-    assert "Student activity" in dashboard.text
+    assert "Student usage" in dashboard.text
     assert "tracked" in dashboard.text
     assert "Paper report" in dashboard.text
     assert "hybrid-research" not in dashboard.text
+    assert "Analysed questions" in dashboard.text
+    assert "One-question solves" in dashboard.text
+
+
+def test_owner_sees_usage_only_admin_dashboard():
+    student_id = create_user("admin-metrics@student.local", "student")
+    execute(
+        """
+        INSERT INTO student_activity_events
+        (student_id, event_type, path, active_seconds, created_at)
+        VALUES (?, 'page_open_time', '/student/skills', 120, ?)
+        """,
+        (student_id, datetime.now().isoformat()),
+    )
+    owner_id = create_user("owner@sumkora.local", "teacher")
+    execute(
+        "INSERT INTO user_roles (user_id, role, created_at) VALUES (?, 'owner', ?)",
+        (owner_id, datetime.now().isoformat()),
+    )
+    login("owner@sumkora.local")
+    dashboard = client.get("/research")
+    assert dashboard.status_code == 200
+    assert "Private administration" in dashboard.text
+    assert "Open-page hours" in dashboard.text
+    assert "admin-metrics" in dashboard.text
+    assert "/student/skills" in dashboard.text
+    assert "Laboratories" not in dashboard.text
+    assert 'href="/research/experiments"' not in dashboard.text
+
+
+def test_one_question_result_shows_large_image_above_solution_without_raw_latex():
+    student_id = create_user("clean-solver@student.local", "student")
+    question_id = execute(
+        """
+        INSERT INTO student_help_questions
+        (student_id, image_path, status, transcription, question_latex,
+         solution_en, solution_zh, final_answer, final_answer_zh,
+         topic, skill, created_at, updated_at)
+        VALUES (?, '', 'completed', 'raw transcription',
+                '\\text{broken latex} \\frac{1}{2}',
+                'Use the quadratic formula.', '使用求根公式。',
+                'x = 2', 'x = 2', 'Algebra', 'quadratics', ?, ?)
+        """,
+        (student_id, datetime.now().isoformat(), datetime.now().isoformat()),
+    )
+    login("clean-solver@student.local")
+    page = client.get(f"/student/solve/{question_id}")
+    assert page.status_code == 200
+    assert 'class="solve-result-page"' in page.text
+    assert 'class="solve-question-image"' in page.text
+    assert page.text.index("solve-question-stage") < page.text.index("solve-answer")
+    assert "Use the quadratic formula." in page.text
+    assert "broken latex" not in page.text
+    assert "raw transcription" not in page.text
+    assert "Plain transcription" not in page.text
 
 
 def test_metadata_rotated_scans_render_upright(tmp_path):

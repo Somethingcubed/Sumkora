@@ -1,7 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Research overview — Sumkora{% endblock %}
+{% block title %}{{ 'Administration' if is_admin else 'Research overview' }} — Sumkora{% endblock %}
 {% block content %}
 <div class="research-shell">
+  {% if is_admin %}
+  <div>
+    <p class="text-xs uppercase tracking-[0.22em] text-indigo-300">{{ tr('Private administration', '私密管理后台') }}</p>
+    <h1 class="text-3xl font-bold mt-2 text-white">{{ tr('Student usage', '学生使用情况') }}</h1>
+    <p class="text-slate-400 mt-2">{{ tr('See how long each student keeps Sumkora open and what they analyse, solve, and download.', '查看每位学生打开 Sumkora 的时长，以及分析、解题和下载情况。') }}</p>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-7">
+    {% for label, value in [
+      (tr('Students', '学生'), admin_overview.students),
+      (tr('Open-page hours', '页面打开小时数'), (admin_overview.open_seconds / 3600)|round(1)),
+      (tr('Downloads', '下载次数'), admin_overview.downloads),
+      (tr('Paper analyses', '试卷分析'), admin_overview.paper_analyses),
+      (tr('Analysed questions', '已分析题目'), admin_overview.analysed_questions),
+      (tr('Solved questions', '单题解答'), admin_overview.solved_questions)
+    ] %}
+    <div class="research-card"><p class="text-xs text-slate-400">{{ label }}</p><p class="text-2xl font-semibold text-white mt-1">{{ value }}</p></div>
+    {% endfor %}
+  </div>
+  {% else %}
   <div class="flex flex-wrap justify-between items-start gap-4">
     <div><p class="text-xs uppercase tracking-[0.22em] text-indigo-300">Private research workbench</p><h1 class="text-3xl font-bold mt-2 text-white">Research overview</h1><p class="text-slate-400 mt-2">Inspect model performance, human labels, experiments, and longitudinal evidence.</p></div>
     <div class="flex gap-2"><a href="/research/question-bank" class="bg-indigo-300 text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold">Question bank</a><a href="/research/experiments/new" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">New experiment</a><a href="/research/export?dataset=skill_observations&format=jsonl&mode=pseudonymized" class="border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm">Export data</a></div>
@@ -11,8 +30,10 @@
     <div class="research-card"><p class="text-xs text-slate-400">{{ label }}</p><p class="text-2xl font-semibold text-white mt-1">{{ value }}</p></div>
     {% endfor %}
   </div>
+  {% endif %}
 </div>
 
+{% if not is_admin %}
 <div class="grid lg:grid-cols-3 gap-6 mt-6">
   <section class="card lg:col-span-2">
     <div class="flex justify-between gap-3"><div><h2 class="font-semibold text-lg">Laboratories</h2><p class="text-sm text-slate-500">Move directly from aggregate signals to inspectable evidence.</p></div></div>
@@ -55,20 +76,21 @@
     </table>
   </div>
 </section>
+{% endif %}
 
 <section class="card mt-6">
   <div class="flex flex-wrap justify-between items-end gap-3">
-    <div><h2 class="font-semibold text-lg">{{ tr('Student activity', '学生活动') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Approximate active in-app time counts only visible-tab heartbeats. Background tabs are not counted as study time.', '活跃时间仅根据可见页面的心跳近似统计；后台标签页不会计入学习时间。') }}</p></div>
+    <div><h2 class="font-semibold text-lg">{{ tr('Student usage', '学生使用情况') }}</h2><p class="text-sm text-slate-500 mt-1">{{ tr('Page-open time continues while a Sumkora tab remains open, including in the background. Multiple tabs are counted only once.', '只要 Sumkora 标签页保持打开，后台状态也会继续计时；多个标签页不会重复计时。') }}</p></div>
     <span class="badge">{{ student_activity|length }} {{ tr('students', '名学生') }}</span>
   </div>
   <div class="overflow-x-auto mt-4">
     <table class="w-full text-sm">
-      <thead><tr class="text-left border-b text-slate-500"><th class="py-2 pr-4">{{ tr('Student', '学生') }}</th><th class="pr-4">{{ tr('Today', '今天') }}</th><th class="pr-4">{{ tr('All active time', '累计活跃时间') }}</th><th class="pr-4">{{ tr('Downloads', '下载次数') }}</th><th class="pr-4">{{ tr('Papers', '试卷数') }}</th><th>{{ tr('Last activity', '最近活动') }}</th></tr></thead>
+      <thead><tr class="text-left border-b text-slate-500"><th class="py-2 pr-4">{{ tr('Student', '学生') }}</th><th class="pr-4">{{ tr('Open today', '今天打开') }}</th><th class="pr-4">{{ tr('All open time', '累计打开时间') }}</th><th class="pr-4">{{ tr('Downloads', '下载') }}</th><th class="pr-4">{{ tr('Paper analyses', '试卷分析') }}</th><th class="pr-4">{{ tr('Analysed questions', '分析题目') }}</th><th class="pr-4">{{ tr('One-question solves', '单题解答') }}</th><th class="pr-4">{{ tr('Worksheets', '练习') }}</th><th>{{ tr('Last page / activity', '最近页面 / 活动') }}</th></tr></thead>
       <tbody>
         {% for item in student_activity %}
-        <tr class="border-b border-slate-100"><td class="py-3 pr-4"><p class="font-medium">{{ item.name }}</p><p class="text-xs text-slate-500">{{ item.username }}</p></td><td class="pr-4">{{ item.active_minutes_today }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.active_minutes }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.download_count }}</td><td class="pr-4">{{ item.paper_count }}</td><td class="text-xs text-slate-500">{{ item.last_active_at[:19] if item.last_active_at else tr('Not recorded yet', '尚未记录') }}</td></tr>
+        <tr class="border-b border-slate-100"><td class="py-3 pr-4"><p class="font-medium">{{ item.name }}</p><p class="text-xs text-slate-500">{{ item.username }}</p></td><td class="pr-4">{{ item.open_minutes_today }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.open_minutes }} {{ tr('min', '分钟') }}</td><td class="pr-4">{{ item.download_count }}</td><td class="pr-4">{{ item.paper_analysis_count }}</td><td class="pr-4">{{ item.analysed_question_count }}</td><td class="pr-4">{{ item.solved_question_count }}</td><td class="pr-4">{{ item.worksheet_count }}</td><td class="text-xs text-slate-500"><p>{{ item.last_page or '—' }}</p><p>{{ item.last_active_at[:19] if item.last_active_at else tr('Not recorded yet', '尚未记录') }}</p></td></tr>
         {% else %}
-        <tr><td colspan="6" class="py-6 text-slate-500">{{ tr('No student activity has been recorded.', '尚未记录学生活动。') }}</td></tr>
+        <tr><td colspan="9" class="py-6 text-slate-500">{{ tr('No student activity has been recorded.', '尚未记录学生活动。') }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -86,5 +108,7 @@
   </div>
 </details>
 
+{% if not is_admin %}
 <details class="card mt-6"><summary class="font-semibold cursor-pointer">0606 paper-pack registry</summary><div class="mt-4 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b text-slate-500"><th class="py-2">Paper</th><th>Policy</th><th>Questions</th><th>Criteria</th><th>Status</th></tr></thead><tbody>{% for pack in paper_packs %}<tr class="border-b"><td class="py-2">{{ pack.examination_session }} {{ pack.year }}/{{ pack.component }}</td><td>{{ pack.calculator_policy }}</td><td>{{ pack.question_count }}</td><td>{{ pack.criterion_count }}</td><td>{{ pack.ingestion_status }}</td></tr>{% endfor %}</tbody></table></div><form method="post" action="/research/paper-packs/ingest" class="mt-4"><button class="border border-indigo-600 text-indigo-700 px-3 py-2 rounded-lg text-sm">Reingest supplied packs</button></form></details>
+{% endif %}
 {% endblock %}

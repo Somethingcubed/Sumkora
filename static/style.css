@@ -1356,23 +1356,39 @@ textarea.field {
   font-size: 0.8rem;
 }
 
-.solve-result-grid {
+.solve-result-page {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.72fr) minmax(20rem, 1.28fr);
-  align-items: start;
-  gap: 1.2rem;
+  width: min(1480px, calc(100vw - 3rem));
+  margin-left: 50%;
+  transform: translateX(-50%);
+  gap: 1.25rem;
 }
 
-.solve-source h2,
 .solve-answer h2 {
   margin: 1.2rem 0 0.55rem;
   font-size: 1rem;
 }
 
-.solve-source details {
-  margin-top: 1rem;
-  color: var(--muted);
-  font-size: 0.78rem;
+.solve-question-stage {
+  padding: 1rem;
+}
+
+.solve-question-stage .section-kicker {
+  margin: 0.2rem 0 0.75rem 0.35rem;
+}
+
+.solve-question-image {
+  display: block;
+  width: 100%;
+  height: clamp(25rem, 66vh, 48rem);
+  object-fit: contain;
+  border: 1px solid #eceef2;
+  border-radius: var(--radius);
+  background: white;
+}
+
+.solve-result-page .solve-answer {
+  padding: clamp(1.4rem, 3vw, 2.5rem);
 }
 
 .solve-final {
@@ -2007,9 +2023,16 @@ details[open] > summary {
 
   .learning-tool-grid,
   .dashboard-columns,
-  .dashboard-quick-actions,
-  .solve-result-grid {
+  .dashboard-quick-actions {
     grid-template-columns: 1fr;
+  }
+
+  .solve-result-page {
+    width: calc(100vw - 1.5rem);
+  }
+
+  .solve-question-image {
+    height: min(62vh, 34rem);
   }
 
   .learning-tool {

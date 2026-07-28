@@ -11,13 +11,11 @@
 </div>
 
 {% if question.status == 'completed' %}
-<div class="solve-result-grid">
-  <aside class="surface solve-source">
-    <img src="/student/solve/{{ question.id }}/image" alt="{{ tr('Uploaded mathematics question', '上传的数学题目') }}">
-    <h2>{{ tr('Question read from the image', '从图片读取的题目') }}</h2>
-    <div class="math-copy whitespace-pre-line">\[{{ question.question_latex }}\]</div>
-    <details><summary>{{ tr('Plain transcription', '纯文本识别结果') }}</summary><p class="whitespace-pre-line">{{ question.transcription }}</p></details>
-  </aside>
+<div class="solve-result-page">
+  <section class="surface solve-question-stage">
+    <p class="section-kicker">{{ tr('Question', '题目') }}</p>
+    <img class="solve-question-image" src="/student/solve/{{ question.id }}/image" alt="{{ tr('Uploaded mathematics question', '上传的数学题目') }}">
+  </section>
   <section class="surface solve-answer">
     <p class="section-kicker">{{ tr('Final answer', '最终答案') }}</p>
     <div class="solve-final math-copy">{{ question.final_answer_zh if lang == 'zh' else question.final_answer }}</div>
