@@ -249,6 +249,37 @@ def _render_document_image_parts(
     return parts
 
 
+def _render_responses_document_image_parts(
+    path: str,
+    *,
+    label: str,
+    dpi: int,
+) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
+    with fitz.open(path) as document:
+        total = len(document)
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        for index, page in enumerate(document):
+            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            encoded = base64.b64encode(
+                pixmap.tobytes("jpeg", jpg_quality=88)
+            ).decode("ascii")
+            parts.extend(
+                [
+                    {
+                        "type": "input_text",
+                        "text": f"{label}, page {index + 1} of {total}:",
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                ]
+            )
+    return parts
+
+
 def _document_render_dpi(paths: list[str]) -> int:
     pages = sum(_page_count(path) for path in paths)
     if pages <= 4:
@@ -520,6 +551,7 @@ def _call_structured_document_model(
     document_texts: list[tuple[str, str]] | None = None,
     timeout_seconds: int | None = None,
     retries: int | None = None,
+    render_documents_as_images: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     request_timeout = timeout_seconds or config.WHOLE_DOCUMENT_TIMEOUT_SECONDS
     request_retries = (
@@ -645,6 +677,23 @@ def _call_structured_document_model(
         content: list[dict[str, Any]] = [
             {"type": "input_text", "text": "\n\n".join(text_sections)}
         ]
+        render_dpi = None
+    elif render_documents_as_images:
+        content = [{"type": "input_text", "text": prompt}]
+        render_dpi = _document_render_dpi(document_paths)
+        for index, path in enumerate(document_paths):
+            label = (
+                "Completed student work"
+                if index == 0
+                else "Official mark scheme"
+            )
+            content.extend(
+                _render_responses_document_image_parts(
+                    path,
+                    label=label,
+                    dpi=render_dpi,
+                )
+            )
     else:
         content = [{"type": "input_text", "text": prompt}]
         content.extend(
@@ -655,6 +704,7 @@ def _call_structured_document_model(
             }
             for path in document_paths
         )
+        render_dpi = None
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -677,10 +727,15 @@ def _call_structured_document_model(
         retries=1 if retries is None else max(0, retries),
     )
     return _strip_json_fence(_extract_response_text(result)), {
-        "provider": "cxsee_responses",
+        "provider": (
+            "cxsee_responses_images"
+            if render_documents_as_images
+            else "cxsee_responses"
+        ),
         "usage": result.get("usage") or {},
         "response_id": result.get("id"),
         "model_version": result.get("model"),
+        "render_dpi": render_dpi,
     }
 
 
@@ -1513,6 +1568,9 @@ def assess_documents(
                         document_texts=document_texts,
                         timeout_seconds=primary_timeout,
                         retries=0,
+                        render_documents_as_images=(
+                            transport_attempt > 0 and not document_texts
+                        ),
                     )
                 )
                 break

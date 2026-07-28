@@ -329,12 +329,17 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
 
     assert len(calls) == 2
     assert all(call[1]["retries"] == 0 for call in calls)
-    assert all(
-        call[0]["input"][0]["content"][1]["type"] == "input_file"
-        for call in calls
+    assert calls[0][0]["input"][0]["content"][1]["type"] == "input_file"
+    retry_content = calls[1][0]["input"][0]["content"]
+    assert retry_content[1]["type"] == "input_text"
+    assert retry_content[2]["type"] == "input_image"
+    assert retry_content[2]["image_url"].startswith(
+        "data:image/jpeg;base64,"
     )
     assert metadata["transport_attempts"] == 2
     assert len(metadata["transport_timeouts"]) == 2
+    assert metadata["provider"] == "cxsee_responses_images"
+    assert metadata["render_dpi"] == 160
     assert any(stage == "provider_retry" for stage, _detail in progress)
     assert result["estimated_score"] == 2
 

@@ -1352,6 +1352,16 @@ def run_self_service_analysis(version_id: int) -> dict:
     if not version:
         return {"status": "failed", "error": "Version was not found."}
     try:
+        if version["status"] == "failed":
+            execute(
+                """
+                UPDATE paper_analysis_versions
+                SET started_at = NULL, finished_at = NULL,
+                    failure_details = '{}', failure_message = NULL
+                WHERE id = ?
+                """,
+                (version_id,),
+            )
         if not version["answer_script_path"] or not os.path.isfile(
             version["answer_script_path"]
         ):
