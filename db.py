@@ -515,6 +515,9 @@ def init_db():
             student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             analysis_question_result_id INTEGER NOT NULL REFERENCES analysis_question_results(id) ON DELETE CASCADE,
             paper_question_id INTEGER REFERENCES paper_questions(id) ON DELETE SET NULL,
+            worked_solution_en TEXT NOT NULL DEFAULT '',
+            worked_solution_zh TEXT NOT NULL DEFAULT '',
+            worked_solution_model TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'not_retried'
                 CHECK(status IN ('not_retried', 'improving', 'mastered')),
             first_added_at TEXT NOT NULL,
@@ -923,6 +926,22 @@ def init_db():
         if column not in practice_set_columns:
             conn.execute(
                 f"ALTER TABLE practice_sets ADD COLUMN {column} {definition}"
+            )
+    mistake_book_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(mistake_book_entries)"
+        ).fetchall()
+    }
+    mistake_book_column_defs = {
+        "worked_solution_en": "TEXT NOT NULL DEFAULT ''",
+        "worked_solution_zh": "TEXT NOT NULL DEFAULT ''",
+        "worked_solution_model": "TEXT NOT NULL DEFAULT ''",
+    }
+    for column, definition in mistake_book_column_defs.items():
+        if column not in mistake_book_columns:
+            conn.execute(
+                f"ALTER TABLE mistake_book_entries ADD COLUMN {column} {definition}"
             )
     conn.execute(
         """

@@ -29,19 +29,6 @@
   </div>
 </section>
 
-<section class="surface mt-5">
-  <h2 class="text-lg font-semibold">{{ tr('Finished the worksheet?', '完成练习了吗？') }}</h2>
-  {% if practice.set.analysis_paper_id %}
-  <p class="text-sm text-slate-500 mt-2">{{ tr('Your completed worksheet has been submitted for analysis. The result updates your skill progress and Mistake Book.', '已提交完成的练习进行分析；结果会更新技能进步和错题本。') }}</p>
-  <a href="/student/papers/{{ practice.set.analysis_paper_id }}" class="button button-secondary mt-4">{{ tr('View practice analysis', '查看练习分析') }}</a>
-  {% else %}
-  <p class="text-sm text-slate-500 mt-2">{{ tr('Scan the completed question booklet as one PDF. Sumkora already has the matching answer booklet, so the result can update your progress.', '将完成的题目册扫描为一个 PDF。Sumkora 已有对应答案册，分析结果会更新你的学习进步。') }}</p>
-  <form method="post" action="/student/practice/{{ practice.set.id }}/submit" enctype="multipart/form-data" class="flex flex-wrap items-end gap-3 mt-4">
-    <label class="flex-1 min-w-[200px]"><span class="form-label">{{ tr('Completed worksheet PDF', '已完成的练习 PDF') }}</span><input type="file" name="completed_work" accept=".pdf,application/pdf" required></label>
-    <button class="button button-primary">{{ tr('Analyse completed worksheet', '分析已完成的练习') }}</button>
-  </form>
-  {% endif %}
-</section>
 {% else %}
 <section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('No suitable questions were available', '没有可用的合适题目') }}</h2><p class="text-slate-500 mt-2">{{ tr('Try a mixed worksheet or wait for more papers to be added to the question bank.', '请尝试综合练习，或等待题库加入更多试卷。') }}</p><a href="/student/practice" class="button button-primary mt-5">{{ tr('Change worksheet settings', '修改练习设置') }}</a></section>
 {% endif %}

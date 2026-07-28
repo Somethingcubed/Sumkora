@@ -1,7 +1,9 @@
 """Focused checks for the student refinement session."""
 
+import json
+
 from learning import _choose_weak_topic
-from question_solver import _enforce_solution_consistency
+from question_solver import _enforce_solution_consistency, solve_question_texts
 from taxonomy import canonical_topic
 
 
@@ -68,3 +70,49 @@ def test_solver_keeps_an_already_consistent_answer():
     }
     _enforce_solution_consistency(result)
     assert result["final_answer"] == "x <= -2 or x >= 3"
+
+
+def test_text_solver_returns_worked_solutions_without_exposing_mark_schemes(
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_post(_url, payload, **_kwargs):
+        captured["payload"] = payload
+        body = {
+            "solutions": [
+                {
+                    "id": 7,
+                    "solution_en": "Factor: (x - 3)(x + 2) >= 0. "
+                    "Hence x <= -2 or x >= 3.",
+                    "solution_zh": "因式分解得 (x - 3)(x + 2) >= 0，"
+                    "所以 x <= -2 或 x >= 3。",
+                }
+            ]
+        }
+        return {
+            "model": "test-tutor",
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+        }
+
+    monkeypatch.setattr("question_solver.api_post_json", fake_post)
+    result = solve_question_texts(
+        [
+            {
+                "id": 7,
+                "question": "Solve x^2 - x - 6 >= 0.",
+                "reference_answer": "M1 factorisation; A1 correct intervals",
+            }
+        ]
+    )
+    assert result["solutions"][0]["id"] == 7
+    assert "x <= -2 or x >= 3" in result["solutions"][0]["solution_en"]
+    prompt = captured["payload"]["input"][0]["content"][0]["text"]
+    assert "Do not mention a mark scheme" in prompt
+    assert captured["payload"]["reasoning"]["effort"] == "low"

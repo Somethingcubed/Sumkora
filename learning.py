@@ -9,6 +9,7 @@ import random
 import re
 import textwrap
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -531,6 +532,9 @@ def mistake_book(
                 "question_asset_path": None,
                 "answer_asset_path": None,
                 "answer_text": help_item["final_answer"],
+                "worked_solution_en": help_item["solution_en"],
+                "worked_solution_zh": help_item["solution_zh"],
+                "worked_solution_model": help_item["model"],
                 "source_key": f"help:{help_item['id']}",
                 "bank_question_text": "",
                 "bank_question_latex": "",
@@ -942,6 +946,8 @@ def _plain_math(value: str) -> str:
             r"(\1)/(\2)",
             text,
         )
+        text = re.sub(r"\\boxed\{([^{}]+)\}", r"\1", text)
+        text = re.sub(r"\\(?:mathrm|mathbf)\{([^{}]+)\}", r"\1", text)
     replacements = {
         r"\leq": "≤",
         r"\le": "≤",
@@ -958,6 +964,9 @@ def _plain_math(value: str) -> str:
         r"\sum": "Σ",
         r"\therefore": "∴",
         r"\in": "∈",
+        r"\cdot": "·",
+        r"\left": "",
+        r"\right": "",
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
@@ -1235,22 +1244,130 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
     return flow.finish()
 
 
+def _fallback_worked_solution(item: dict, lang: str) -> str:
+    """Keep the answer PDF useful if the tutoring model is unavailable."""
+    if lang == "zh":
+        rationale = item.get("ai_rationale_zh")
+        guidance = item.get("error_mechanism_zh")
+        heading = "解题过程"
+    else:
+        rationale = item.get("ai_rationale")
+        guidance = item.get("error_mechanism")
+        heading = "Worked process"
+    parts = [f"{heading}:"]
+    if rationale:
+        parts.append(str(rationale).strip())
+    if guidance and str(guidance).strip() != str(rationale or "").strip():
+        parts.append(str(guidance).strip())
+    if len(parts) == 1:
+        parts.append(
+            "请根据题目中的已知量列式，并逐步化简至最终答案。"
+            if lang == "zh"
+            else "Set up the mathematics from the given information, then "
+            "simplify each step to the final answer."
+        )
+    return "\n\n".join(parts)
+
+
+def prepare_mistake_worked_solutions(items: list[dict]) -> None:
+    """Generate and cache worked solutions without changing assessment results."""
+    pending = [
+        item
+        for item in items
+        if int(item.get("id") or 0) > 0
+        and not (
+            str(item.get("worked_solution_en") or "").strip()
+            and str(item.get("worked_solution_zh") or "").strip()
+        )
+        and str(item.get("complete_question_text") or "").strip()
+    ]
+    if not pending:
+        return
+
+    import config
+
+    if not config.CXSEE_API_KEY:
+        return
+    from question_solver import solve_question_texts
+
+    batches = [pending[index:index + 8] for index in range(0, len(pending), 8)]
+
+    def generate(batch: list[dict]) -> dict:
+        return solve_question_texts(
+            [
+                {
+                    "id": int(item["id"]),
+                    "question": item["complete_question_text"],
+                    "reference_answer": (
+                        item.get("answer_text")
+                        or item.get("mark_scheme_text")
+                        or ""
+                    ),
+                }
+                for item in batch
+            ]
+        )
+
+    generated: list[dict] = []
+    model_by_id: dict[int, str] = {}
+    with ThreadPoolExecutor(max_workers=min(3, len(batches))) as pool:
+        futures = {pool.submit(generate, batch): batch for batch in batches}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+            except Exception:
+                continue
+            model = str(result.get("model") or "")
+            for solution in result.get("solutions") or []:
+                generated.append(solution)
+                model_by_id[int(solution["id"])] = model
+
+    by_id = {int(item["id"]): item for item in items}
+    for solution in generated:
+        entry_id = int(solution["id"])
+        solution_en = str(solution.get("solution_en") or "").strip()
+        solution_zh = str(solution.get("solution_zh") or "").strip()
+        if not solution_en and not solution_zh:
+            continue
+        execute(
+            """
+            UPDATE mistake_book_entries
+            SET worked_solution_en = ?, worked_solution_zh = ?,
+                worked_solution_model = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                solution_en,
+                solution_zh,
+                model_by_id.get(entry_id, ""),
+                _now(),
+                entry_id,
+            ),
+        )
+        if entry_id in by_id:
+            by_id[entry_id]["worked_solution_en"] = solution_en
+            by_id[entry_id]["worked_solution_zh"] = solution_zh
+            by_id[entry_id]["worked_solution_model"] = model_by_id.get(entry_id, "")
+
+
 def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
     data = mistake_book(student_id)
     is_questions = kind == "questions"
+    if not is_questions:
+        prepare_mistake_worked_solutions(data["items"])
     if lang == "zh":
         title = "Sumkora 错题本" if is_questions else "Sumkora 错题答案"
         subtitle = (
             "本册包含尚未完全掌握的题目。请重新作答，并写出完整过程。"
             if is_questions
-            else "本册包含对应的答案、评分依据和改进建议。"
+            else "每道题均提供完整的分步解题过程和最终答案。"
         )
     else:
-        title = "Sumkora Mistake Book" if is_questions else "Sumkora Mistake Book Answers"
+        title = "Sumkora Mistake Book" if is_questions else "Sumkora Worked Solutions"
         subtitle = (
             "Retry these questions and show complete working."
             if is_questions
-            else "Answers, marking evidence, and improvement guidance."
+            else "A step-by-step worked solution and final answer for every question."
         )
     count_text = (
         f"共 {len(data['items'])} 道题"
@@ -1267,34 +1384,14 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
             source_label=source,
         ):
             continue
-        if not is_questions and flow.add_asset(
-            item["answer_asset_path"],
-            label=heading,
-            source_label=source,
-        ):
-            continue
         if is_questions:
             unavailable = "暂无题目文本。" if lang == "zh" else "Question text unavailable."
             body = item["complete_question_text"] or unavailable
         else:
-            rationale = (
-                item["error_mechanism_zh"] or item["ai_rationale_zh"]
+            body = (
+                item.get("worked_solution_zh")
                 if lang == "zh"
-                else item["error_mechanism"] or item["ai_rationale"]
-            )
-            answer = item["answer_text"] or item["mark_scheme_text"]
-            if answer and "supplied as a complete document" in answer.lower():
-                answer = None
-            if answer:
-                body = (
-                    f"{'答案' if lang == 'zh' else 'Answer'}: {answer}\n\n"
-                    f"{'反馈' if lang == 'zh' else 'Feedback'}: "
-                    f"{rationale or answer}"
-                )
-            else:
-                body = (
-                    f"{'针对性反馈' if lang == 'zh' else 'Question-specific feedback'}: "
-                    f"{rationale or ('暂无可用答案。' if lang == 'zh' else 'No answer is available.')}"
-                )
+                else item.get("worked_solution_en")
+            ) or _fallback_worked_solution(item, lang)
         flow.add_text(label=heading, body=body, source_label=source)
     return flow.finish()

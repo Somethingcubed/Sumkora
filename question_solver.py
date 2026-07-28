@@ -45,6 +45,27 @@ SOLUTION_SCHEMA = {
     },
 }
 
+TEXT_SOLUTIONS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["solutions"],
+    "properties": {
+        "solutions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "solution_en", "solution_zh"],
+                "properties": {
+                    "id": {"type": "integer"},
+                    "solution_en": {"type": "string"},
+                    "solution_zh": {"type": "string"},
+                },
+            },
+        }
+    },
+}
+
 
 PROMPT = """You are Sumkora's mathematics tutor. Read the single question image
 directly and solve it. The image may come from any mathematics source, not an
@@ -66,6 +87,18 @@ the corresponding worked solution; copy the same result rather than
 recalculating or simplifying it differently. Use one of these broad topics when appropriate: Algebra, Functions
 and graphs, Coordinate geometry, Geometry, Trigonometry, Calculus, Sequences
 and series, Vectors. Return only the required JSON object."""
+
+TEXT_SOLUTIONS_PROMPT = """You are Sumkora's mathematics tutor. Produce a
+concise, complete worked solution for every mathematics question in the JSON
+input. Each solution must show the mathematical process step by step and end
+with the final answer. Preserve exact values, units, domains, inequalities,
+and all question parts. Check the algebra and signs.
+
+Some questions include a private reference answer. Use it only to verify
+accuracy. Do not mention a mark scheme, marking instructions, marks, examiner
+codes, or the reference answer in the output. Write a natural worked solution,
+not a marking guide. Return both English and Simplified Chinese. Return only
+the required JSON object, with one result for every supplied id."""
 
 
 def _image_data_url(path: str) -> str:
@@ -158,3 +191,81 @@ def solve_question_image(path: str) -> dict:
     parsed["model"] = result.get("model") or config.QUESTION_SOLVER_MODEL
     parsed["usage"] = result.get("usage") or {}
     return parsed
+
+
+def solve_question_texts(questions: list[dict]) -> dict:
+    """Return bilingual worked solutions keyed by the supplied integer id."""
+    if not questions:
+        return {"solutions": [], "model": "", "usage": {}}
+    compact = [
+        {
+            "id": int(item["id"]),
+            "question": str(item.get("question") or "")[:5000],
+            "reference_answer": str(
+                item.get("reference_answer") or ""
+            )[:2500],
+        }
+        for item in questions
+    ]
+    result = api_post_json(
+        f"{cxsee_api_base()}/responses",
+        {
+            "model": config.QUESTION_SOLVER_MODEL,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"{TEXT_SOLUTIONS_PROMPT}\n\n"
+                                f"Questions:\n"
+                                f"{json.dumps(compact, ensure_ascii=False)}"
+                            ),
+                        }
+                    ],
+                }
+            ],
+            "reasoning": {"effort": "low"},
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "sumkora_worked_solutions",
+                    "strict": True,
+                    "schema": TEXT_SOLUTIONS_SCHEMA,
+                }
+            },
+            "max_output_tokens": min(18000, max(4200, len(compact) * 1400)),
+            "store": False,
+        },
+        headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
+        timeout=config.QUESTION_SOLVER_TIMEOUT_SECONDS,
+        retries=1,
+    )
+    parsed = _parse_provider_json(
+        _strip_json_fence(_extract_response_text(result))
+    )
+    supplied_ids = {item["id"] for item in compact}
+    solutions = []
+    for solution in parsed.get("solutions") or []:
+        try:
+            source_id = int(solution.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if source_id not in supplied_ids:
+            continue
+        solution_en = str(solution.get("solution_en") or "").strip()
+        solution_zh = str(solution.get("solution_zh") or "").strip()
+        if solution_en or solution_zh:
+            solutions.append(
+                {
+                    "id": source_id,
+                    "solution_en": solution_en,
+                    "solution_zh": solution_zh,
+                }
+            )
+    return {
+        "solutions": solutions,
+        "model": result.get("model") or config.QUESTION_SOLVER_MODEL,
+        "usage": result.get("usage") or {},
+    }

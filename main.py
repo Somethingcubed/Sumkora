@@ -2933,7 +2933,7 @@ def student_mistake_book_pdf(request: Request, kind: str):
     if kind not in {"questions", "answers"}:
         return JSONResponse({"detail": "Not found."}, status_code=404)
     content = mistake_book_pdf(user["id"], kind, get_lang(request))
-    suffix = "questions" if kind == "questions" else "answers"
+    suffix = "questions" if kind == "questions" else "worked-solutions"
     record_student_activity(
         user["id"],
         "download",
@@ -3018,86 +3018,6 @@ def student_practice_pdf(request: Request, set_id: int, kind: str):
     return pdf_response(
         content,
         f"sumkora-practice-{set_id}-{kind}.pdf",
-    )
-
-
-@app.post("/student/practice/{set_id}/submit")
-async def student_practice_submit(
-    request: Request,
-    set_id: int,
-    background_tasks: BackgroundTasks,
-    completed_work: UploadFile = File(...),
-):
-    user = require_role(request, "student")
-    if not user:
-        return redirect_login()
-    detail = practice_set_detail(user["id"], set_id)
-    if not detail:
-        return RedirectResponse("/student/practice", status_code=303)
-    payload = await completed_work.read()
-    if (
-        not payload
-        or len(payload) > config.MAX_UPLOAD_BYTES
-        or not is_valid_pdf(payload)
-    ):
-        return RedirectResponse(
-            f"/student/practice/{set_id}?upload_error=1",
-            status_code=303,
-        )
-    answer_key = practice_pdf(user["id"], set_id, "answers", get_lang(request))
-    if not answer_key:
-        return RedirectResponse(f"/student/practice/{set_id}", status_code=303)
-    try:
-        paper_id, version_id = create_student_paper_draft(
-            user["id"],
-            completed_work.filename or f"practice-{set_id}.pdf",
-            payload,
-            f"sumkora-practice-{set_id}-answers.pdf",
-            answer_key,
-        )
-    except ValueError:
-        return RedirectResponse(
-            f"/student/practice/{set_id}?upload_error=1",
-            status_code=303,
-        )
-    execute(
-        """
-        UPDATE student_papers
-        SET title = ?, source_type = 'practice', updated_at = ?
-        WHERE id = ?
-        """,
-        (
-            f"Practice: {detail['set']['title']}",
-            datetime.now().isoformat(),
-            paper_id,
-        ),
-    )
-    execute(
-        """
-        UPDATE practice_sets
-        SET status = 'completed', analysis_paper_id = ?, submitted_at = ?,
-            updated_at = ?
-        WHERE id = ? AND student_id = ?
-        """,
-        (
-            paper_id,
-            datetime.now().isoformat(),
-            datetime.now().isoformat(),
-            set_id,
-            user["id"],
-        ),
-    )
-    version = _owned_analysis_version(user["id"], version_id)
-    confirm_version(
-        user["id"],
-        version_id,
-        parse_json(version["detected_metadata"], {}),
-        parse_json(version["question_plan"], []),
-    )
-    background_tasks.add_task(run_self_service_analysis, version_id)
-    return RedirectResponse(
-        f"/student/analysis/{version_id}/processing",
-        status_code=303,
     )
 
 

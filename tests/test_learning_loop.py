@@ -179,7 +179,10 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     answer_book = mistake_book_pdf(student_id, "answers", "en")
     with fitz.open(stream=answer_book, filetype="pdf") as document:
         answer_text = "\n".join(page.get_text() for page in document)
+    assert "Sumkora Worked Solutions" in answer_text
+    assert "Worked process" in answer_text
     assert "Incorrect amplitude" in answer_text
+    assert "mark scheme" not in answer_text.lower()
     assert "supplied as a complete document" not in answer_text
 
     set_id = create_practice_set(
@@ -213,6 +216,15 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert client.get(
         f"/student/practice/{set_id}/questions.pdf", cookies=cookies
     ).headers["content-type"].startswith("application/pdf")
+    mistake_page = client.get("/student/mistakes", cookies=cookies)
+    assert 'download="sumkora-mistake-book-questions.pdf"' in mistake_page.text
+    assert "Download worked solutions" in mistake_page.text
+    practice_page = client.get(f"/student/practice/{set_id}", cookies=cookies)
+    assert f"/student/practice/{set_id}/submit" not in practice_page.text
+    assert "Analyse completed worksheet" not in practice_page.text
+    assert client.post(
+        f"/student/practice/{set_id}/submit", cookies=cookies
+    ).status_code == 404
 
 
 def test_progress_report_uses_current_paper_analysis_data():

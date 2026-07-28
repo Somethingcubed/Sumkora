@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <div><p class="eyebrow">{{ tr('Review and retry', '复习与重练') }}</p><h1>{{ tr('Mistake Book', '错题本') }}</h1><p>{{ tr('Every partially correct or incorrect question from your latest paper analyses.', '收集每份最新试卷分析中部分得分或错误的题目。') }}</p></div>
-  {% if book['items'] %}<div class="flex flex-wrap gap-2"><a href="/student/mistakes/questions.pdf" class="button button-primary">{{ tr('Print questions', '打印题目') }}</a><a href="/student/mistakes/answers.pdf" class="button button-secondary">{{ tr('Print answers', '打印答案') }}</a></div>{% endif %}
+  {% if book['items'] %}<div class="flex flex-wrap gap-2"><a href="/student/mistakes/questions.pdf" download="sumkora-mistake-book-questions.pdf" class="button button-primary">{{ tr('Download questions PDF', '下载题目 PDF') }}</a><a href="/student/mistakes/answers.pdf" download="sumkora-mistake-book-worked-solutions.pdf" class="button button-secondary">{{ tr('Download worked solutions', '下载详细解答') }}</a></div>{% endif %}
 </div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
