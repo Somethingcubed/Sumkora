@@ -21,6 +21,7 @@ from learning import (
 )
 from main import app
 from question_bank import _question_labels, ingest_question_bank_zip
+from reports import profile_report
 from self_service import _match_question_bank_parent
 
 
@@ -175,6 +176,11 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     with fitz.open(stream=chinese_book, filetype="pdf") as document:
         assert "错题本" in document[0].get_text()
         assert "共 1 道题" in document[0].get_text()
+    answer_book = mistake_book_pdf(student_id, "answers", "en")
+    with fitz.open(stream=answer_book, filetype="pdf") as document:
+        answer_text = "\n".join(page.get_text() for page in document)
+    assert "Incorrect amplitude" in answer_text
+    assert "supplied as a complete document" not in answer_text
 
     set_id = create_practice_set(
         student_id,
@@ -207,6 +213,37 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert client.get(
         f"/student/practice/{set_id}/questions.pdf", cookies=cookies
     ).headers["content-type"].startswith("application/pdf")
+
+
+def test_progress_report_uses_current_paper_analysis_data():
+    email = "progress-report@student.local"
+    student_id = create_student(email)
+    paper_id, _ = seed_direct_observation(student_id)
+    execute(
+        """
+        UPDATE paper_analysis_versions
+        SET provisional_score = 2, confirmed_min_score = 2,
+            possible_max_score = 2, finished_at = ?
+        WHERE paper_id = ?
+        """,
+        (now(), paper_id),
+    )
+
+    payload = profile_report(student_id, lang="en", variant="student")
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert "0606/11/O/N/25" in text
+    assert "2.0/5.0 (40.0%)" in text
+    assert "Trigonometry" in text
+    assert "Q1" in text
+    assert "Not enough data" not in text
+
+    cookies = login(email)
+    response = client.get("/student/report", cookies=cookies)
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].endswith(
+        'sumkora-learning-student-progress-report.pdf"'
+    )
 
 
 def test_mistake_book_recombines_sibling_subquestions_for_context():

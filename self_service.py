@@ -84,6 +84,157 @@ def json_text(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def purge_failed_paper(
+    paper_id: int,
+    *,
+    triggering_version_id: int | None = None,
+    failure_details: dict | None = None,
+) -> dict:
+    """Remove failed analyses while preserving any older completed version."""
+    paper = query_one(
+        "SELECT id, student_id FROM student_papers WHERE id = ?",
+        (paper_id,),
+    )
+    if not paper:
+        return {"paper_deleted": False, "deleted_version_ids": []}
+    failed_versions = query_all(
+        """
+        SELECT id, question_paper_path, answer_script_path, mark_scheme_path
+        FROM paper_analysis_versions
+        WHERE paper_id = ? AND status = 'failed'
+        ORDER BY version_number
+        """,
+        (paper_id,),
+    )
+    if not failed_versions:
+        return {"paper_deleted": False, "deleted_version_ids": []}
+
+    deleted_version_ids = [row["id"] for row in failed_versions]
+    paths = {
+        path
+        for row in failed_versions
+        for path in (
+            row["question_paper_path"],
+            row["answer_script_path"],
+            row["mark_scheme_path"],
+        )
+        if path
+    }
+    for version_id in deleted_version_ids:
+        existing = query_one(
+            """
+            SELECT id FROM audit_logs
+            WHERE action = 'student_analysis_failed_and_deleted'
+              AND entity_type = 'analysis_version' AND entity_id = ?
+            LIMIT 1
+            """,
+            (str(version_id),),
+        )
+        if not existing:
+            execute(
+                """
+                INSERT INTO audit_logs
+                (actor_id, action, entity_type, entity_id, metadata, created_at)
+                VALUES (?, 'student_analysis_failed_and_deleted',
+                        'analysis_version', ?, ?, ?)
+                """,
+                (
+                    paper["student_id"],
+                    str(version_id),
+                    json_text(
+                        {
+                            "paper_id": paper_id,
+                            "failure": (
+                                failure_details
+                                if version_id == triggering_version_id
+                                else {}
+                            ),
+                        }
+                    ),
+                    now_iso(),
+                ),
+            )
+
+    completed = query_one(
+        """
+        SELECT id, version_number
+        FROM paper_analysis_versions
+        WHERE paper_id = ? AND status = 'completed'
+        ORDER BY version_number DESC LIMIT 1
+        """,
+        (paper_id,),
+    )
+    if completed:
+        for version_id in deleted_version_ids:
+            execute(
+                "DELETE FROM paper_analysis_versions WHERE id = ? AND status = 'failed'",
+                (version_id,),
+            )
+        execute(
+            """
+            UPDATE student_papers
+            SET status = 'completed', latest_version_number = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (completed["version_number"], now_iso(), paper_id),
+        )
+        paper_deleted = False
+    else:
+        execute("DELETE FROM student_papers WHERE id = ?", (paper_id,))
+        paper_deleted = True
+
+    upload_root = os.path.realpath(config.UPLOAD_DIR)
+    removed_files = []
+    for path in sorted(paths):
+        referenced = query_one(
+            """
+            SELECT 1 AS found
+            FROM paper_analysis_versions
+            WHERE question_paper_path = ?
+               OR answer_script_path = ?
+               OR mark_scheme_path = ?
+            LIMIT 1
+            """,
+            (path, path, path),
+        )
+        real_path = os.path.realpath(path)
+        if (
+            not referenced
+            and real_path.startswith(upload_root + os.sep)
+            and os.path.isfile(real_path)
+        ):
+            os.remove(real_path)
+            removed_files.append(real_path)
+
+    from assessment import rebuild_student_profile
+
+    rebuild_student_profile(paper["student_id"])
+    return {
+        "paper_deleted": paper_deleted,
+        "deleted_version_ids": deleted_version_ids,
+        "removed_files": removed_files,
+    }
+
+
+def purge_all_failed_papers() -> int:
+    """Enforce the global invariant that failed papers do not remain listed."""
+    paper_ids = [
+        row["id"]
+        for row in query_all(
+            """
+            SELECT DISTINCT sp.id
+            FROM student_papers sp
+            LEFT JOIN paper_analysis_versions pav ON pav.paper_id = sp.id
+            WHERE sp.status = 'failed' OR pav.status = 'failed'
+            ORDER BY sp.id
+            """
+        )
+    ]
+    for paper_id in paper_ids:
+        purge_failed_paper(paper_id)
+    return len(paper_ids)
+
+
 def parse_json(value, fallback):
     try:
         parsed = json.loads(value or "")
@@ -1668,7 +1819,7 @@ def run_self_service_analysis(version_id: int) -> dict:
         logger.exception("Whole-document analysis version %s failed", version_id)
         public_message = (
             "We could not complete this analysis. No zero marks were recorded. "
-            "Try again; your files and previous results are safe."
+            "The failed analysis was deleted automatically."
         )
         failed_at = now_iso()
         current = query_one(
@@ -1739,38 +1890,20 @@ def run_self_service_analysis(version_id: int) -> dict:
             "UPDATE student_papers SET status = 'failed', updated_at = ? WHERE id = ?",
             (failed_at, version["student_paper_id"]),
         )
-        existing_case = query_one(
-            """
-            SELECT id FROM research_failure_cases
-            WHERE analysis_version_id = ? AND failure_type = ?
-            LIMIT 1
-            """,
-            (version_id, failure_type),
+        cleanup = purge_failed_paper(
+            version["student_paper_id"],
+            triggering_version_id=version_id,
+            failure_details={
+                "failure_type": failure_type,
+                **failure_details,
+            },
         )
-        if not existing_case:
-            execute(
-                """
-                INSERT INTO research_failure_cases
-                (analysis_version_id, failure_type, severity, tags, notes,
-                 created_at, updated_at)
-                VALUES (?, ?, 'high', ?, ?, ?, ?)
-                """,
-                (
-                    version_id,
-                    failure_type,
-                    json_text(
-                        [
-                            "whole_document",
-                            failure_details["stage"],
-                            error_type,
-                        ]
-                    ),
-                    json_text(failure_details),
-                    failed_at,
-                    failed_at,
-                ),
-            )
-        return {"status": "failed", "error": public_message}
+        return {
+            "status": "failed",
+            "error": public_message,
+            "deleted": True,
+            **cleanup,
+        }
 
 
 def student_owned_papers(student_id: int):

@@ -574,8 +574,8 @@ def test_rerun_preserves_versions_and_original_results():
     assert preserved == original_results
 
 
-def test_failed_analysis_hides_provider_details_and_offers_retry():
-    create_user("retry@student.local", "student")
+def test_failed_analysis_is_deleted_and_hides_provider_details():
+    student_id = create_user("retry@student.local", "student")
     paper, version, _ = upload_direct_paper("retry@student.local")
     execute(
         """
@@ -586,20 +586,29 @@ def test_failed_analysis_hides_provider_details_and_offers_retry():
         """,
         (version["id"],),
     )
+    execute(
+        "UPDATE student_papers SET status = 'failed' WHERE id = ?",
+        (paper["id"],),
+    )
+    self_service.purge_failed_paper(
+        paper["id"],
+        triggering_version_id=version["id"],
+        failure_details={"message": "HTTP 503 from provider-internal.example"},
+    )
 
     status = client.get(f"/student/analysis/{version['id']}/status")
     assert status.status_code == 200
     assert status.json()["status"] == "failed"
+    assert status.json()["deleted"] is True
     assert "provider-internal" not in status.json()["failure_message"]
-    assert "Try again" in status.json()["failure_message"]
+    assert "deleted automatically" in status.json()["failure_message"]
+    assert query_one(
+        "SELECT id FROM student_papers WHERE id = ? AND student_id = ?",
+        (paper["id"], student_id),
+    ) is None
 
-    page = client.get(f"/student/analysis/{version['id']}/processing")
-    assert page.status_code == 200
-    assert f'href="/student/papers/{paper["id"]}/rerun"' in page.text
-    assert "Try again" in page.text
 
-
-def test_provider_failure_records_no_question_zero_marks(monkeypatch):
+def test_provider_failure_deletes_failed_paper_and_records_no_zero_marks(monkeypatch):
     import self_service
 
     create_user("no-false-zero@student.local", "student")
@@ -622,12 +631,10 @@ def test_provider_failure_records_no_question_zero_marks(monkeypatch):
     )
     assert response.status_code == 303
     version_id = int(response.headers["location"].split("/")[3])
-    version = query_one(
-        "SELECT status, failure_message FROM paper_analysis_versions WHERE id = ?",
+    assert query_one(
+        "SELECT id FROM paper_analysis_versions WHERE id = ?",
         (version_id,),
-    )
-    assert version["status"] == "failed"
-    assert "No zero marks were recorded" in version["failure_message"]
+    ) is None
     assert query_one(
         """
         SELECT COUNT(*) AS n FROM analysis_question_results
@@ -635,6 +642,53 @@ def test_provider_failure_records_no_question_zero_marks(monkeypatch):
         """,
         (version_id,),
     )["n"] == 0
+    status = client.get(f"/student/analysis/{version_id}/status")
+    assert status.status_code == 200
+    assert status.json()["status"] == "failed"
+    assert status.json()["deleted"] is True
+
+
+def test_failed_rerun_is_deleted_without_erasing_completed_version():
+    student_id = create_user("failed-rerun@student.local", "student")
+    paper, completed, _ = upload_direct_paper("failed-rerun@student.local")
+    failed_version_id = self_service.create_rerun_draft(
+        student_id,
+        paper["id"],
+        None,
+        None,
+    )
+    execute(
+        """
+        UPDATE paper_analysis_versions SET status = 'failed'
+        WHERE id = ?
+        """,
+        (failed_version_id,),
+    )
+    execute(
+        """
+        UPDATE student_papers
+        SET status = 'failed', latest_version_number = 2
+        WHERE id = ?
+        """,
+        (paper["id"],),
+    )
+
+    cleanup = self_service.purge_failed_paper(paper["id"])
+    assert cleanup["paper_deleted"] is False
+    assert query_one(
+        "SELECT id FROM paper_analysis_versions WHERE id = ?",
+        (failed_version_id,),
+    ) is None
+    assert query_one(
+        "SELECT status FROM paper_analysis_versions WHERE id = ?",
+        (completed["id"],),
+    )["status"] == "completed"
+    restored = query_one(
+        "SELECT status, latest_version_number FROM student_papers WHERE id = ?",
+        (paper["id"],),
+    )
+    assert restored["status"] == "completed"
+    assert restored["latest_version_number"] == completed["version_number"]
 
 
 def test_multiple_experiments_edit_run_and_separate_human_label():

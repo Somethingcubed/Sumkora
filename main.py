@@ -116,6 +116,7 @@ from self_service import (
     normalize_answer_uploads,
     paper_with_versions,
     parse_json,
+    purge_all_failed_papers,
     run_self_service_analysis,
     student_owned_papers,
 )
@@ -165,6 +166,9 @@ execute(
     """,
     (_restart_time,),
 )
+_purged_failed_papers = purge_all_failed_papers()
+if _purged_failed_papers:
+    print(f"Removed {_purged_failed_papers} failed student paper records.")
 seed_if_empty()
 for warning in getattr(config, "CONFIG_WARNINGS", []):
     print(f"CONFIG WARNING: {warning}")
@@ -1041,6 +1045,36 @@ def student_self_service_status(request: Request, version_id: int):
         return JSONResponse({"detail": "Authentication required."}, status_code=401)
     version = _owned_analysis_version(user["id"], version_id)
     if not version:
+        deleted_failure = query_one(
+            """
+            SELECT metadata
+            FROM audit_logs
+            WHERE actor_id = ?
+              AND action = 'student_analysis_failed_and_deleted'
+              AND entity_type = 'analysis_version'
+              AND entity_id = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (user["id"], str(version_id)),
+        )
+        if deleted_failure:
+            return {
+                "status": "failed",
+                "deleted": True,
+                "current_stage": "failed",
+                "stage_index": 0,
+                "progress_percent": 0,
+                "progress_message": "",
+                "connection_state": "failed",
+                "failure_message": (
+                    "此次失败的分析已自动删除。请重新上传答卷后再试。"
+                    if get_lang(request) == "zh"
+                    else (
+                        "The failed analysis was deleted automatically. "
+                        "Please upload the paper again."
+                    )
+                ),
+            }
         return JSONResponse({"detail": "Not found."}, status_code=404)
     failure_message = None
     if version["status"] == "failed":

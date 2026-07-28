@@ -1283,10 +1283,18 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
                 else item["error_mechanism"] or item["ai_rationale"]
             )
             answer = item["answer_text"] or item["mark_scheme_text"]
-            body = (
-                f"{'答案' if lang == 'zh' else 'Answer'}: "
-                f"{answer or rationale}\n\n"
-                f"{'反馈' if lang == 'zh' else 'Feedback'}: {rationale}"
-            )
+            if answer and "supplied as a complete document" in answer.lower():
+                answer = None
+            if answer:
+                body = (
+                    f"{'答案' if lang == 'zh' else 'Answer'}: {answer}\n\n"
+                    f"{'反馈' if lang == 'zh' else 'Feedback'}: "
+                    f"{rationale or answer}"
+                )
+            else:
+                body = (
+                    f"{'针对性反馈' if lang == 'zh' else 'Question-specific feedback'}: "
+                    f"{rationale or ('暂无可用答案。' if lang == 'zh' else 'No answer is available.')}"
+                )
         flow.add_text(label=heading, body=body, source_label=source)
     return flow.finish()

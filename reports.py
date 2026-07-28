@@ -242,10 +242,320 @@ def assessment_rows(submission_id):
     )
 
 
+def active_profile_data(student_id):
+    """Read profile evidence from the current self-service paper system."""
+    score_history = [
+        dict(row)
+        for row in query_all(
+            """
+            SELECT sp.id AS paper_id, sp.title,
+                   COALESCE(pav.finished_at, pav.updated_at, sp.updated_at) AS analysed_at,
+                   pav.assessment_mode, pav.provisional_score,
+                   pav.confirmed_min_score, pav.possible_max_score,
+                   COALESCE(
+                       NULLIF(sp.maximum_marks, 0),
+                       pav.expected_maximum_marks,
+                       pav.possible_max_score,
+                       0
+                   ) AS maximum_marks
+            FROM student_papers sp
+            JOIN paper_analysis_versions pav
+              ON pav.paper_id = sp.id
+             AND pav.version_number = sp.latest_version_number
+            WHERE sp.student_id = ?
+              AND sp.status = 'completed'
+              AND pav.status = 'completed'
+            ORDER BY analysed_at, sp.id
+            """,
+            (student_id,),
+        )
+    ]
+    if not score_history:
+        return None
+
+    from assessment import student_skill_profile
+
+    profile = student_skill_profile(student_id)
+    question_rows = query_all(
+        """
+        SELECT sp.title AS paper_title, sp.updated_at AS paper_date,
+               aqr.id, aqr.question_label, aqr.topic, aqr.skill,
+               aqr.maximum_marks, aqr.awarded_mark, aqr.ai_mark,
+               aqr.assessment_status,
+               (
+                   SELECT ahc.corrected_mark
+                   FROM analysis_human_corrections ahc
+                   WHERE ahc.analysis_question_result_id = aqr.id
+                   ORDER BY ahc.id DESC LIMIT 1
+               ) AS human_mark
+        FROM student_papers sp
+        JOIN paper_analysis_versions pav
+          ON pav.paper_id = sp.id
+         AND pav.version_number = sp.latest_version_number
+        JOIN analysis_question_results aqr
+          ON aqr.analysis_version_id = pav.id
+        WHERE sp.student_id = ?
+          AND sp.status = 'completed'
+          AND pav.status = 'completed'
+        ORDER BY sp.updated_at DESC, aqr.id
+        """,
+        (student_id,),
+    )
+    review_questions = []
+    for raw in question_rows:
+        item = dict(raw)
+        mark = item["human_mark"]
+        if mark is None:
+            mark = item["awarded_mark"]
+        if mark is None and item["assessment_status"] not in {"ungraded", "uncertain"}:
+            mark = item["ai_mark"]
+        item["mark"] = mark
+        maximum = float(item["maximum_marks"] or 0)
+        if (
+            mark is None
+            or item["assessment_status"] in {"ungraded", "uncertain"}
+            or float(mark or 0) < maximum - 0.001
+        ):
+            review_questions.append(item)
+
+    recent_practice = [
+        dict(row)
+        for row in query_all(
+            """
+            SELECT title, topic, actual_count, created_at
+            FROM practice_sets
+            WHERE student_id = ? AND status != 'archived'
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            (student_id,),
+        )
+    ]
+    return {
+        "score_history": score_history,
+        "topic_states": profile["topic_states"],
+        "review_questions": review_questions,
+        "recent_practice": recent_practice,
+    }
+
+
+def active_profile_report(student, data, lang="en", variant="student"):
+    t = strings(lang)
+    styles = report_styles(lang)
+    tr = lambda english, chinese: chinese if lang == "zh" else english
+    title = f"{t['student_profile_report']} - {student['name']}"
+    story = [p(title, styles["title"])]
+    identity_line = f"{t['student']}: {student['name']}"
+    if variant == "teacher":
+        identity_line += f" | {t['class']}: {student['class_name'] or '-'}"
+    identity_line += f" | {t['generated']}: {datetime.now().strftime('%Y-%m-%d')}"
+    story.extend([p(identity_line, styles["small"]), Spacer(1, 8)])
+
+    history = data["score_history"]
+    scored = [
+        item
+        for item in history
+        if item["provisional_score"] is not None
+        and float(item["maximum_marks"] or 0) > 0
+    ]
+    latest = scored[-1] if scored else None
+    average = (
+        round(
+            sum(
+                pct(float(item["provisional_score"]), float(item["maximum_marks"]))
+                for item in scored
+            )
+            / len(scored),
+            1,
+        )
+        if scored
+        else None
+    )
+    weakest = data["topic_states"][0] if data["topic_states"] else None
+    summary_data = [
+        [
+            t["latest_score"],
+            (
+                f"{latest['provisional_score']}/{latest['maximum_marks']} "
+                f"({pct(float(latest['provisional_score']), float(latest['maximum_marks']))}%)"
+                if latest
+                else t["not_enough_data"]
+            ),
+        ],
+        [
+            t["average_score"],
+            f"{average}%" if average is not None else t["not_enough_data"],
+        ],
+        [tr("Completed analyses", "已完成分析"), len(history)],
+        [
+            tr("Current priority", "当前重点"),
+            (
+                f"{topic_label(lang, weakest['topic'])} ({weakest['percentage']}%)"
+                if weakest
+                else t["not_enough_data"]
+            ),
+        ],
+    ]
+    story.append(table(summary_data, widths=[5 * cm, 10 * cm], header=False, lang=lang))
+
+    story.append(p(t["score_history"], styles["h2"]))
+    if scored:
+        score_rows = [[
+            tr("Paper", "试卷"),
+            t["score"],
+            tr("Analysis", "分析方式"),
+            t["date"],
+        ]]
+        for item in scored[-10:]:
+            mode = (
+                tr("Estimated", "估分")
+                if item["assessment_mode"] == "estimate"
+                else tr("Detailed", "详细评分")
+            )
+            score_rows.append(
+                [
+                    item["title"],
+                    (
+                        f"{item['provisional_score']}/{item['maximum_marks']} "
+                        f"({pct(float(item['provisional_score']), float(item['maximum_marks']))}%)"
+                    ),
+                    mode,
+                    (item["analysed_at"] or "-")[:10],
+                ]
+            )
+        story.append(
+            table(
+                score_rows,
+                widths=[7.2 * cm, 3.6 * cm, 2.6 * cm, 2.6 * cm],
+                lang=lang,
+            )
+        )
+    else:
+        story.append(p(tr("No scored analyses yet.", "尚无已评分的分析。"), styles["body"]))
+
+    story.append(p(t["topic_mastery"], styles["h2"]))
+    topic_states = data["topic_states"]
+    if topic_states:
+        topic_rows = [[
+            t["topic"],
+            tr("Mastery", "掌握度"),
+            tr("Evidence", "证据数"),
+            tr("Confidence", "可信度"),
+        ]]
+        for item in topic_states[:12]:
+            topic_rows.append(
+                [
+                    topic_label(lang, item["topic"]),
+                    f"{item['percentage']}%",
+                    item["evidence_count"],
+                    f"{round(100 * float(item['confidence']))}%",
+                ]
+            )
+        story.append(
+            table(
+                topic_rows,
+                widths=[7 * cm, 3 * cm, 3 * cm, 3 * cm],
+                lang=lang,
+            )
+        )
+        story.append(
+            p(
+                tr(
+                    "Topic mastery uses the current 25-day evidence half-life.",
+                    "知识点掌握度采用当前的 25 天证据半衰期。",
+                ),
+                styles["small"],
+            )
+        )
+    else:
+        story.append(p(tr("No topic evidence yet.", "尚无知识点证据。"), styles["body"]))
+
+    story.append(p(t["review_questions"], styles["h2"]))
+    reviews = data["review_questions"]
+    if reviews:
+        review_rows = [[
+            tr("Paper / question", "试卷 / 题目"),
+            t["topic"],
+            t["score"],
+            tr("Status", "状态"),
+        ]]
+        for item in reviews[:12]:
+            mark = item["mark"]
+            score = (
+                tr("Needs review", "需要复核")
+                if mark is None or item["assessment_status"] in {"ungraded", "uncertain"}
+                else f"{mark}/{item['maximum_marks']}"
+            )
+            review_rows.append(
+                [
+                    f"{item['paper_title']} - {item['question_label']}",
+                    topic_label(lang, item["topic"] or "Unclassified"),
+                    score,
+                    tr("Review", "复习"),
+                ]
+            )
+        story.append(
+            table(
+                review_rows,
+                widths=[7.2 * cm, 4 * cm, 2.4 * cm, 2.4 * cm],
+                lang=lang,
+            )
+        )
+    else:
+        story.append(p(t["no_review_questions"], styles["body"]))
+
+    story.append(p(t["suggested_practice"], styles["h2"]))
+    if topic_states:
+        for item in topic_states[:3]:
+            story.append(
+                p(
+                    tr(
+                        f"Create a targeted worksheet for {item['topic']} "
+                        f"(current mastery {item['percentage']}%).",
+                        f"为{topic_label(lang, item['topic'])}创建针对性练习"
+                        f"（当前掌握度 {item['percentage']}%）。",
+                    ),
+                    styles["body"],
+                )
+            )
+    else:
+        story.append(p(t["not_enough_data"], styles["body"]))
+
+    if data["recent_practice"]:
+        story.append(p(tr("Recent worksheets", "最近练习"), styles["h2"]))
+        practice_rows = [[
+            tr("Worksheet", "练习"),
+            t["topic"],
+            tr("Questions", "题数"),
+            t["date"],
+        ]]
+        for item in data["recent_practice"]:
+            practice_rows.append(
+                [
+                    item["title"],
+                    topic_label(lang, item["topic"] or "Mixed"),
+                    item["actual_count"],
+                    (item["created_at"] or "-")[:10],
+                ]
+            )
+        story.append(
+            table(
+                practice_rows,
+                widths=[7 * cm, 4 * cm, 2.5 * cm, 2.5 * cm],
+                lang=lang,
+            )
+        )
+
+    return build_pdf(story, title, lang)
+
+
 def profile_report(student_id, lang="en", variant="teacher", teacher_id=None):
     t = strings(lang)
     styles = report_styles(lang)
     student = student_context(student_id, teacher_id=teacher_id)
+    active_data = active_profile_data(student_id)
+    if active_data:
+        return active_profile_report(student, active_data, lang=lang, variant=variant)
     analytics = student_analytics_summary(student_id, teacher_id=teacher_id)
     practice = analytics_practice(student_id, limit=6)
     title = f"{t['student_profile_report']} - {student['name']}"
