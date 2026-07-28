@@ -53,6 +53,7 @@ STAGE_PROGRESS = {
 
 REASONING_PROGRESS = {
     "primary_request": (22, "Reading every page and applying the marking evidence"),
+    "provider_retry": (30, "Reconnecting the complete paper to the assessor"),
     "primary_response": (56, "Checking the returned question inventory"),
     "validation_repair": (44, "Correcting an incomplete question inventory"),
     "audit": (62, "Cross-checking the detailed marks"),

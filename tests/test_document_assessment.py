@@ -1,4 +1,5 @@
 import json
+import urllib.error
 
 import fitz
 import pytest
@@ -279,8 +280,63 @@ def test_ocr_transcript_is_sent_to_gpt_as_one_complete_text_input(
     assert "PAGE 1" in content[0]["text"]
     assert "Student Work: 2x" in content[0]["text"]
     assert "input_file" not in content[0]["text"]
-    assert calls[0][1]["retries"] == 1
+    assert calls[0][1]["retries"] == 0
     assert result["questions"][0]["question_latex"] == r"Differentiate \(x^2\)."
+
+
+def test_retryable_provider_failure_reconnects_complete_pdf_once(
+    tmp_path, monkeypatch
+):
+    answer = tmp_path / "answer.pdf"
+    make_pdf(answer, "Q1 answer")
+    calls = []
+    progress = []
+
+    def fake_post(_url, payload, **kwargs):
+        calls.append((payload, kwargs))
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                "https://provider.invalid/v1/responses",
+                500,
+                "Internal Server Error",
+                {},
+                None,
+            )
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "response-after-reconnect",
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+    monkeypatch.setattr(document_assessment.time, "sleep", lambda _seconds: None)
+
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="gpt-5.5",
+        progress_callback=lambda stage, detail: progress.append((stage, detail)),
+    )
+
+    assert len(calls) == 2
+    assert all(call[1]["retries"] == 0 for call in calls)
+    assert all(
+        call[0]["input"][0]["content"][1]["type"] == "input_file"
+        for call in calls
+    )
+    assert metadata["transport_attempts"] == 2
+    assert len(metadata["transport_timeouts"]) == 2
+    assert any(stage == "provider_retry" for stage, _detail in progress)
+    assert result["estimated_score"] == 2
 
 
 def test_qwen_receives_complete_ocr_transcript_without_rendered_images(

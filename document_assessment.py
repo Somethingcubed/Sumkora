@@ -9,9 +9,11 @@ contradictory output never become zero marks.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import math
 import time
+import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
@@ -492,6 +494,20 @@ def _thinking_budget(effort: str) -> int:
         "medium": 4096,
         "high": 8192,
     }.get(effort, 4096)
+
+
+def _retryable_provider_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {408, 429, 500, 502, 503, 504}
+    return isinstance(
+        error,
+        (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionResetError,
+            http.client.RemoteDisconnected,
+        ),
+    )
 
 
 def _call_structured_document_model(
@@ -1459,28 +1475,65 @@ def assess_documents(
             raise TimeoutError(
                 "The assessment exceeded its processing time budget."
             )
-        primary_retries = 1
-        primary_timeout = max(
-            45,
-            min(
-                config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-                int((remaining - 15) / (primary_retries + 1)),
-            ),
-        )
-        response_text, response_metadata = _call_structured_document_model(
-            model=selected_model,
-            prompt=_prompt(
-                mode,
-                repair_errors,
-                expected_maximum_marks=expected_maximum_marks,
-            ),
-            schema=assessment_schema(),
-            document_paths=document_paths,
-            reasoning_effort=effort,
-            document_texts=document_texts,
-            timeout_seconds=primary_timeout,
-            retries=primary_retries,
-        )
+        # A long document request can continue upstream after our HTTP client
+        # times out. Retrying it immediately previously produced a second 500
+        # and made a healthy image gallery look corrupt. Keep one controlled
+        # recovery window, pause briefly, and always respect the total budget.
+        transport_attempt = 0
+        transport_timeouts: list[int] = []
+        while True:
+            remaining = remaining_seconds()
+            if remaining < 45:
+                raise TimeoutError(
+                    "The assessment exceeded its processing time budget."
+                )
+            recovery_reserve = (
+                135 if transport_attempt == 0 and remaining >= 240 else 0
+            )
+            primary_timeout = max(
+                45,
+                min(
+                    config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+                    int(remaining - 15 - recovery_reserve),
+                ),
+            )
+            transport_timeouts.append(primary_timeout)
+            try:
+                response_text, response_metadata = (
+                    _call_structured_document_model(
+                        model=selected_model,
+                        prompt=_prompt(
+                            mode,
+                            repair_errors,
+                            expected_maximum_marks=expected_maximum_marks,
+                        ),
+                        schema=assessment_schema(),
+                        document_paths=document_paths,
+                        reasoning_effort=effort,
+                        document_texts=document_texts,
+                        timeout_seconds=primary_timeout,
+                        retries=0,
+                    )
+                )
+                break
+            except Exception as exc:
+                can_recover = (
+                    transport_attempt == 0
+                    and _retryable_provider_error(exc)
+                    and remaining_seconds() >= 60
+                )
+                if not can_recover:
+                    raise
+                transport_attempt += 1
+                _notify_progress(
+                    progress_callback,
+                    "provider_retry",
+                    (
+                        "The document provider interrupted the first request; "
+                        "the same complete paper is being reconnected"
+                    ),
+                )
+                time.sleep(4)
         _notify_progress(
             progress_callback,
             "primary_response",
@@ -1508,6 +1561,8 @@ def assess_documents(
                 "expected_maximum_marks": expected_maximum_marks,
                 "target_seconds": target_seconds,
                 "primary_timeout_seconds": primary_timeout,
+                "transport_attempts": transport_attempt + 1,
+                "transport_timeouts": transport_timeouts,
             }
             if (
                 mode == "detailed"
