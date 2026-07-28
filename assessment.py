@@ -9,7 +9,8 @@ from typing import Iterable
 from db import execute, query_all, query_one
 
 
-CALCULATION_VERSION = "beta-recency-v1"
+RECENCY_HALF_LIFE_DAYS = 60.0
+CALCULATION_VERSION = "beta-recency-60d-v2"
 TAXONOMY_VERSION = "0606-v1"
 
 CORE_0606_SKILLS = [
@@ -324,7 +325,9 @@ def _state_for_observations(rows: Iterable) -> dict:
         all_alpha += success * weight
         all_beta += (1 - success) * weight
         age_days = max(0.0, (now - _parse_date(row["observed_at"])).total_seconds() / 86400)
-        recency = math.exp(-math.log(2) * age_days / 180.0)
+        recency = math.exp(
+            -math.log(2) * age_days / RECENCY_HALF_LIFE_DAYS
+        )
         current_alpha += success * weight * recency
         current_beta += (1 - success) * weight * recency
         papers.add(row["submission_id"])
@@ -445,6 +448,33 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
         )
         result.append({"skill": skill, "topic": topic, **state})
     return result
+
+
+def refresh_outdated_student_profiles() -> int:
+    """Recalculate persisted profiles when the evidence formula changes."""
+    students = query_all(
+        """
+        SELECT DISTINCT student_id
+        FROM student_skill_states
+        WHERE calculation_version != ?
+        UNION
+        SELECT DISTINCT observed.student_id
+        FROM (
+            SELECT student_id FROM skill_observations
+            UNION
+            SELECT student_id FROM analysis_skill_observations
+            WHERE is_current = 1
+        ) AS observed
+        WHERE NOT EXISTS (
+            SELECT 1 FROM student_skill_states states
+            WHERE states.student_id = observed.student_id
+        )
+        """,
+        (CALCULATION_VERSION,),
+    )
+    for row in students:
+        rebuild_student_profile(row["student_id"])
+    return len(students)
 
 
 def student_skill_profile(student_id: int) -> dict:

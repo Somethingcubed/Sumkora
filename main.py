@@ -36,6 +36,7 @@ from assessment import (
     marks_lost_breakdown,
     paper_summary,
     rebuild_student_profile,
+    refresh_outdated_student_profiles,
     student_attempts,
     student_skill_profile,
     sync_submission_evidence,
@@ -120,6 +121,12 @@ from self_service import (
 from topics import TOPICS
 
 init_db()
+_refreshed_profiles = refresh_outdated_student_profiles()
+if _refreshed_profiles:
+    print(
+        f"Refreshed {_refreshed_profiles} student skill profiles for "
+        "the 60-day evidence half-life."
+    )
 _restart_time = datetime.now().isoformat()
 execute(
     """

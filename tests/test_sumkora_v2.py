@@ -1,12 +1,17 @@
 """Compatibility and evidence-model tests for the Sumkora v2 application."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
 from assessment import (
+    CALCULATION_VERSION,
+    RECENCY_HALF_LIFE_DAYS,
+    _state_for_observations,
     compare_papers,
+    refresh_outdated_student_profiles,
     student_skill_profile,
     sync_submission_evidence,
 )
@@ -22,6 +27,68 @@ from pdf_utils import save_upload
 
 
 client = TestClient(app)
+
+
+def test_student_evidence_uses_a_60_day_recency_half_life():
+    observed_at = datetime.now(timezone.utc) - timedelta(
+        days=RECENCY_HALF_LIFE_DAYS
+    )
+    state = _state_for_observations(
+        [
+            {
+                "success_fraction": 0.0,
+                "evidence_weight": 2.0,
+                "observed_at": observed_at.isoformat(),
+                "submission_id": 1,
+                "marks_earned": 0.0,
+                "marks_available": 2.0,
+            }
+        ]
+    )
+
+    # The all-time failure has weight 2, producing Beta(1, 3) = 0.25.
+    assert state["all_time_estimate"] == pytest.approx(0.25)
+    # At exactly one 60-day half-life, its current weight is 1,
+    # producing Beta(1, 2) = 1/3.
+    assert state["current_estimate"] == pytest.approx(1 / 3, abs=0.0001)
+    assert CALCULATION_VERSION == "beta-recency-60d-v2"
+
+
+def test_outdated_persisted_profiles_are_rebuilt_with_the_new_rule():
+    teacher = seed_user("recency-owner@test.local", "teacher")
+    student = seed_user("recency-student@test.local", "student")
+    submission, _ = create_attempt(
+        student,
+        teacher,
+        "half-life",
+        0,
+        datetime.now(timezone.utc) - timedelta(days=60),
+    )
+    sync_submission_evidence(submission)
+    execute(
+        """
+        UPDATE student_skill_states
+        SET calculation_version = 'beta-recency-v1',
+            current_estimate = 0.99
+        WHERE student_id = ?
+        """,
+        (student,),
+    )
+
+    assert refresh_outdated_student_profiles() >= 1
+    state = query_one(
+        """
+        SELECT calculation_version, current_estimate
+        FROM student_skill_states
+        WHERE student_id = ? AND skill = 'differentiation'
+        """,
+        (student,),
+    )
+    assert state["calculation_version"] == CALCULATION_VERSION
+    # The integration path weights this 4-mark answer by 4 × 0.9 grading
+    # confidence × 0.5 legacy extraction confidence = 1.8. At 60 days that
+    # becomes 0.9, producing Beta(1, 1.9).
+    assert state["current_estimate"] == pytest.approx(1 / 2.9, abs=0.0001)
 
 
 def make_pdf(text: str) -> bytes:
