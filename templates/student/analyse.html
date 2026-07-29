@@ -7,6 +7,7 @@
       <p class="eyebrow">{{ tr('New paper analysis', '新试卷分析') }}</p>
       <h1>{{ tr('Analyse a paper', '分析试卷') }}</h1>
       <p>{{ tr('Upload your completed work. Add a mark scheme when you want detailed marking.', '上传你已完成的答卷；如需详细批改，可再添加评分标准。') }}</p>
+      <p class="text-xs text-slate-500 mt-2"><span class="badge badge-completed">{% if user.math_mode == 'general' %}{{ tr('General mathematics', '通用数学') }}{% else %}Cambridge 0606{% endif %}</span> <a href="/student/settings" class="text-indigo-700">{{ tr('Change pathway', '更改课程路径') }}</a></p>
     </div>
   </div>
 

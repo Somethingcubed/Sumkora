@@ -356,6 +356,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             title TEXT NOT NULL,
+            curriculum_mode TEXT NOT NULL DEFAULT '0606',
             syllabus_code TEXT NOT NULL DEFAULT '0606',
             paper_number TEXT NOT NULL DEFAULT '',
             paper_year INTEGER,
@@ -528,6 +529,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS student_help_questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            curriculum_mode TEXT NOT NULL DEFAULT '0606',
             image_path TEXT NOT NULL,
             original_filename TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'processing'
@@ -567,6 +569,8 @@ def init_db():
             selection_explanation TEXT NOT NULL DEFAULT '',
             analysis_paper_id INTEGER REFERENCES student_papers(id) ON DELETE SET NULL,
             submitted_at TEXT,
+            source_mode TEXT NOT NULL DEFAULT 'bank',
+            generation_model TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -579,6 +583,27 @@ def init_db():
             order_index INTEGER NOT NULL,
             selection_reason TEXT NOT NULL DEFAULT '',
             UNIQUE(practice_set_id, paper_question_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS generated_practice_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            practice_set_id INTEGER NOT NULL REFERENCES practice_sets(id) ON DELETE CASCADE,
+            order_index INTEGER NOT NULL,
+            topic TEXT NOT NULL,
+            skill TEXT NOT NULL,
+            difficulty TEXT NOT NULL DEFAULT 'standard',
+            calculator_policy TEXT NOT NULL DEFAULT 'any',
+            prompt_en TEXT NOT NULL,
+            prompt_zh TEXT NOT NULL,
+            solution_en TEXT NOT NULL,
+            solution_zh TEXT NOT NULL,
+            final_answer_en TEXT NOT NULL DEFAULT '',
+            final_answer_zh TEXT NOT NULL DEFAULT '',
+            maximum_marks REAL NOT NULL DEFAULT 1,
+            validation_notes TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(practice_set_id, order_index)
         );
 
         CREATE TABLE IF NOT EXISTS research_experiment_runs (
@@ -675,10 +700,33 @@ def init_db():
         "exam_candidate": "INTEGER NOT NULL DEFAULT 0",
         "exam_date": "TEXT",
         "exam_session": "TEXT",
+        "math_mode": "TEXT NOT NULL DEFAULT '0606'",
     }
     for column, definition in user_column_defs.items():
         if column not in user_columns:
             conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+    student_paper_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(student_papers)"
+        ).fetchall()
+    }
+    if "curriculum_mode" not in student_paper_columns:
+        conn.execute(
+            "ALTER TABLE student_papers "
+            "ADD COLUMN curriculum_mode TEXT NOT NULL DEFAULT '0606'"
+        )
+    student_help_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(student_help_questions)"
+        ).fetchall()
+    }
+    if "curriculum_mode" not in student_help_columns:
+        conn.execute(
+            "ALTER TABLE student_help_questions "
+            "ADD COLUMN curriculum_mode TEXT NOT NULL DEFAULT '0606'"
+        )
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_normalized
@@ -921,6 +969,8 @@ def init_db():
     practice_set_column_defs = {
         "analysis_paper_id": "INTEGER REFERENCES student_papers(id)",
         "submitted_at": "TEXT",
+        "source_mode": "TEXT NOT NULL DEFAULT 'bank'",
+        "generation_model": "TEXT NOT NULL DEFAULT ''",
     }
     for column, definition in practice_set_column_defs.items():
         if column not in practice_set_columns:

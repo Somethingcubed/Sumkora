@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">{{ tr('Your account', '你的账号') }}</p>
     <h1>{{ tr('Settings', '设置') }}</h1>
-    <p>{{ tr('Manage your exam date, display name, and password.', '管理考试日期、显示名称和密码。') }}</p>
+    <p>{{ tr('Choose your mathematics pathway and manage your account.', '选择数学课程路径并管理你的账号。') }}</p>
   </div>
 </div>
 
@@ -13,8 +13,25 @@
 {% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your display name has been updated.', '显示名称已更新。') }}</div>{% endif %}
 {% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your password has been updated.', '密码已更新。') }}</div>{% endif %}
 {% if success == 'exam' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your exam countdown has been updated.', '考试倒计时已更新。') }}</div>{% endif %}
+{% if success == 'mathematics' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your mathematics pathway has been updated. New papers and practice will use this setting.', '数学课程路径已更新。新试卷和练习将使用此设置。') }}</div>{% endif %}
 
 <div class="settings-grid">
+  <section class="surface">
+    <h2>{{ tr('Mathematics pathway', '数学课程路径') }}</h2>
+    <p class="text-sm text-slate-500 mt-2">{{ tr('This controls how new papers are classified and how your targeted worksheets are created.', '此设置决定新试卷的分类方式和针对练习的生成方式。') }}</p>
+    <form method="post" action="/student/settings/mathematics" class="form-stack mt-5">
+      <label class="check-row">
+        <input type="radio" name="math_mode" value="0606" {% if (user.math_mode or '0606') == '0606' %}checked{% endif %}>
+        <span><strong>Cambridge 0606</strong><br><small class="text-slate-500">{{ tr('Use the 0606 topic structure and approved past-paper question bank.', '使用 0606 知识点结构和审核通过的历年真题题库。') }}</small></span>
+      </label>
+      <label class="check-row">
+        <input type="radio" name="math_mode" value="general" {% if user.math_mode == 'general' %}checked{% endif %}>
+        <span><strong>{{ tr('General mathematics', '通用数学') }}</strong><br><small class="text-slate-500">{{ tr('For any syllabus. Sumkora detects each topic and creates original, checked practice.', '适用于任何课程。Sumkora 自动识别知识点并生成原创、经校验的练习。') }}</small></span>
+      </label>
+      <button class="button button-primary" type="submit">{{ tr('Save pathway', '保存课程路径') }}</button>
+    </form>
+  </section>
+
   <section class="surface" id="exam-settings">
     <h2>{{ tr('Exam countdown', '考试倒计时') }}</h2>
     <p class="text-sm text-slate-500 mt-2">{{ tr('Optional. Show your target exam date at the top of the dashboard.', '选填。在主页顶部显示你的目标考试日期。') }}</p>

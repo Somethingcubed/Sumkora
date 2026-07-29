@@ -87,6 +87,7 @@ from reports import (
     self_service_assessment_report,
 )
 from learning import (
+    create_generated_practice_set,
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
@@ -98,6 +99,7 @@ from learning import (
     skill_url,
     update_mistake_status,
 )
+from taxonomy import GENERAL_MATH_TOPICS
 from question_bank import (
     ingest_question_bank_zip,
     paper_bank_rows,
@@ -2347,6 +2349,33 @@ def student_settings_profile(
     )
 
 
+@app.post("/student/settings/mathematics")
+def student_settings_mathematics(
+    request: Request,
+    math_mode: str = Form(...),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    if math_mode not in {"0606", "general"}:
+        return render(
+            request,
+            "student/settings.html",
+            {
+                "user": user,
+                "error": "Choose a valid mathematics pathway.",
+                "success": None,
+            },
+            status_code=400,
+        )
+    execute("UPDATE users SET math_mode = ? WHERE id = ?", (math_mode, user["id"]))
+    rebuild_student_profile(user["id"])
+    return RedirectResponse(
+        "/student/settings?success=mathematics",
+        status_code=303,
+    )
+
+
 @app.post("/student/settings/exam")
 def student_settings_exam(
     request: Request,
@@ -2478,10 +2507,18 @@ def student_solve_question(
     question_id = execute(
         """
         INSERT INTO student_help_questions
-        (student_id, image_path, original_filename, status, created_at, updated_at)
-        VALUES (?, ?, ?, 'processing', ?, ?)
+        (student_id, curriculum_mode, image_path, original_filename,
+         status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'processing', ?, ?)
         """,
-        (user["id"], path, image.filename or "", now, now),
+        (
+            user["id"],
+            user["math_mode"] or "0606",
+            path,
+            image.filename or "",
+            now,
+            now,
+        ),
     )
     try:
         solution = solve_question_image(path)
@@ -2955,6 +2992,9 @@ def student_practice(request: Request):
             "user": user,
             "sets": practice_sets(user["id"]),
             "bank": question_bank_inventory(),
+            "math_mode": user["math_mode"] or "0606",
+            "available_topics": GENERAL_MATH_TOPICS,
+            "error": request.query_params.get("error"),
         },
     )
 
@@ -2971,15 +3011,26 @@ def student_create_practice(
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    set_id = create_practice_set(
-        user["id"],
-        count=count,
-        selection_mode=selection_mode,
-        topic=topic,
-        difficulty=difficulty,
-        calculator_policy=calculator_policy,
-        lang=get_lang(request),
-    )
+    try:
+        creator = (
+            create_generated_practice_set
+            if user["math_mode"] == "general"
+            else create_practice_set
+        )
+        set_id = creator(
+            user["id"],
+            count=count,
+            selection_mode=selection_mode,
+            topic=topic,
+            difficulty=difficulty,
+            calculator_policy=calculator_policy,
+            lang=get_lang(request),
+        )
+    except (RuntimeError, ValueError):
+        return RedirectResponse(
+            "/student/practice?error=generation",
+            status_code=303,
+        )
     return RedirectResponse(f"/student/practice/{set_id}", status_code=303)
 
 

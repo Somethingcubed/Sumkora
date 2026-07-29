@@ -24,7 +24,7 @@
   <h2 class="text-lg font-semibold">{{ tr('Questions included', '包含的题目') }}</h2>
   <div class="mt-4 divide-y divide-slate-100">
     {% for item in practice['items'] %}
-    <div class="py-3 flex justify-between gap-4 text-sm"><div><p class="font-medium">{{ loop.index }}. {{ item.syllabus_code }} {{ item.examination_session }} {{ item.year }} / {{ item.component }} / Q{{ item.question_number }}</p><p class="text-slate-500 mt-1">{{ topic_label(item.topic) }} · {{ item.selection_reason }}</p></div><p>{{ item.maximum_marks }} {{ tr('marks', '分') }}</p></div>
+    <div class="py-3 flex justify-between gap-4 text-sm"><div><p class="font-medium">{{ loop.index }}. {% if practice.set.source_mode == 'generated' %}{{ topic_label(item.topic) }} · {{ item.skill }}{% else %}{{ item.syllabus_code }} {{ item.examination_session }} {{ item.year }} / {{ item.component }} / Q{{ item.question_number }}{% endif %}</p><p class="text-slate-500 mt-1">{% if practice.set.source_mode == 'generated' %}{{ tr('Original question · independently solved and checked', '原创题目 · 已独立解答和校验') }}{% else %}{{ topic_label(item.topic) }} · {{ item.selection_reason }}{% endif %}</p></div><p>{{ item.maximum_marks }} {{ tr('marks', '分') }}</p></div>
     {% endfor %}
   </div>
 </section>
