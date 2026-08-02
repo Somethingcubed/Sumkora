@@ -21,7 +21,6 @@ import fitz
 
 import config
 from ocr import api_post_json, cxsee_api_base
-from taxonomy import GENERAL_MATH_TOPICS
 
 
 ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v3-gpt55-direct"
@@ -77,7 +76,6 @@ def assessment_schema() -> dict[str, Any]:
             "evidence_pages",
             "rationale",
             "topic",
-            "skill",
         ],
         "properties": {
             "label": {"type": "string"},
@@ -94,7 +92,6 @@ def assessment_schema() -> dict[str, Any]:
             },
             "rationale": {"type": "string"},
             "topic": {"type": "string"},
-            "skill": {"type": "string"},
         },
     }
     return {
@@ -305,7 +302,6 @@ def _prompt(
     mode: str,
     repair_errors: list[str] | None = None,
     expected_maximum_marks: float | None = None,
-    curriculum_mode: str = "0606",
 ) -> str:
     mode_instruction = (
         """
@@ -349,31 +345,12 @@ and ensure the sum of question maximum_marks and total_max_marks both equal
 {expected_maximum_marks:g}. If the document genuinely contradicts this value,
 explain the discrepancy in warnings without inventing questions or marks.
 """
-    curriculum_instruction = (
-        f"""
-This student uses GENERAL MATHEMATICS mode. Do not assume Cambridge 0606 or
-any particular syllabus. Classify every question with exactly one broad topic
-from: {", ".join(GENERAL_MATH_TOPICS)}. Also return a concise, specific skill
-(for example, "solving quadratic inequalities" rather than "Algebra").
-"""
-        if curriculum_mode == "general"
-        else """
-This student uses Cambridge IGCSE Additional Mathematics 0606 mode.
-Use the established 0606 topic and skill vocabulary.
-"""
-    )
-    assessor = (
-        "senior mathematics assessor across secondary and pre-university curricula"
-        if curriculum_mode == "general"
-        else "senior Cambridge IGCSE mathematics assessor"
-    )
     return rf"""
-You are Sumkora's {assessor}. Assess the
+You are Sumkora's senior Cambridge IGCSE mathematics assessor. Assess the
 documents as a whole. Work question by question internally, but do not rely on
 an external OCR mapper or assume one answer page per question.
 
 {mode_instruction}
-{curriculum_instruction}
 
 Rules:
 - Read every page. Page numbers in evidence_pages refer to the completed-work
@@ -1491,7 +1468,6 @@ def assess_documents(
     completed_work_text: str | None = None,
     mark_scheme_text: str | None = None,
     progress_callback: ProgressCallback | None = None,
-    curriculum_mode: str = "0606",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not config.CXSEE_API_KEY:
         raise RuntimeError("The assessment API key is not configured.")
@@ -1585,7 +1561,6 @@ def assess_documents(
                             mode,
                             repair_errors,
                             expected_maximum_marks=expected_maximum_marks,
-                            curriculum_mode=curriculum_mode,
                         ),
                         schema=assessment_schema(),
                         document_paths=document_paths,
@@ -1646,7 +1621,6 @@ def assess_documents(
                 "primary_timeout_seconds": primary_timeout,
                 "transport_attempts": transport_attempt + 1,
                 "transport_timeouts": transport_timeouts,
-                "curriculum_mode": curriculum_mode,
             }
             if (
                 mode == "detailed"

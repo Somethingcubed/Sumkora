@@ -7,12 +7,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from db import execute, query_all, query_one
-from taxonomy import (
-    CORE_0606_TOPICS,
-    GENERAL_MATH_TOPICS,
-    canonical_skill,
-    canonical_topic,
-)
+from taxonomy import CANONICAL_TOPICS, canonical_skill, canonical_topic
 
 
 RECENCY_HALF_LIFE_DAYS = 25.0
@@ -392,8 +387,6 @@ def _state_for_observations(rows: Iterable) -> dict:
 
 
 def rebuild_student_profile(student_id: int) -> list[dict]:
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    math_mode = "general" if user and user["math_mode"] == "general" else "0606"
     rows = query_all(
         """
         SELECT so.id, so.student_id, so.submission_id, so.observed_at,
@@ -404,7 +397,7 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
         FROM skill_observations so
         JOIN submissions s ON s.id = so.submission_id
         JOIN assignments a ON a.id = s.assignment_id
-        WHERE so.student_id = ? AND a.syllabus_code = '0606' AND ? = '0606'
+        WHERE so.student_id = ? AND a.syllabus_code = '0606'
         UNION ALL
         SELECT 1000000000 + aso.id AS id, aso.student_id,
                1000000000 + aso.paper_id AS submission_id, aso.observed_at,
@@ -413,12 +406,10 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
                aso.grading_confidence, aso.extraction_confidence,
                aso.evidence_weight
         FROM analysis_skill_observations aso
-        JOIN student_papers sp ON sp.id = aso.paper_id
         WHERE aso.student_id = ? AND aso.is_current = 1
-          AND sp.curriculum_mode = ?
         ORDER BY skill, observed_at, id
         """,
-        (student_id, math_mode, student_id, math_mode),
+        (student_id, student_id),
     )
     grouped = defaultdict(list)
     for row in rows:
@@ -491,8 +482,6 @@ def refresh_outdated_student_profiles() -> int:
 
 
 def student_skill_profile(student_id: int) -> dict:
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    math_mode = "general" if user and user["math_mode"] == "general" else "0606"
     states = [dict(row) for row in query_all(
         """
         SELECT * FROM student_skill_states
@@ -505,7 +494,7 @@ def student_skill_profile(student_id: int) -> dict:
     untested = [
         {"topic": topic, "skill": skill, "status": "untested"}
         for topic, skill in CORE_0606_SKILLS
-        if math_mode == "0606" and skill.lower() not in observed
+        if skill.lower() not in observed
     ]
     strengths = [
         row for row in states
@@ -526,33 +515,22 @@ def student_skill_profile(student_id: int) -> dict:
             JOIN submissions s ON s.id = so.submission_id
             JOIN assignments a ON a.id = s.assignment_id
             WHERE so.student_id = ? AND a.syllabus_code = '0606'
-              AND ? = '0606'
             UNION ALL
             SELECT 1000000000 + aso.id, 1000000000 + aso.paper_id,
                    aso.observed_at, aso.topic, aso.skill, aso.marks_earned,
                    aso.marks_available, aso.success_fraction, aso.evidence_weight
             FROM analysis_skill_observations aso
-            JOIN student_papers sp ON sp.id = aso.paper_id
             WHERE aso.student_id = ? AND aso.is_current = 1
-              AND sp.curriculum_mode = ?
             UNION ALL
             SELECT 2000000000 + shq.id, 2000000000 + shq.id, shq.created_at,
                    shq.topic, shq.skill, 0.0, 2.0, 0.0,
                    MAX(0.5, 2.0 * shq.classification_confidence)
             FROM student_help_questions shq
             WHERE shq.student_id = ? AND shq.status = 'completed'
-              AND shq.curriculum_mode = ?
         )
         ORDER BY observed_at, observation_id
         """,
-        (
-            student_id,
-            math_mode,
-            student_id,
-            math_mode,
-            student_id,
-            math_mode,
-        ),
+        (student_id, student_id, student_id),
     )
     grouped_topics = defaultdict(list)
     for raw in topic_rows:
@@ -583,9 +561,7 @@ def student_skill_profile(student_id: int) -> dict:
     tested_topics = {row["topic"] for row in topic_states}
     untested_topics = [
         {"topic": topic, "status": "untested"}
-        for topic in (
-            GENERAL_MATH_TOPICS if math_mode == "general" else CORE_0606_TOPICS
-        )
+        for topic in CANONICAL_TOPICS
         if topic not in tested_topics
     ]
     return {
@@ -596,7 +572,6 @@ def student_skill_profile(student_id: int) -> dict:
         "topic_states": topic_states,
         "untested_topics": untested_topics,
         "calculation_version": CALCULATION_VERSION,
-        "math_mode": math_mode,
     }
 
 

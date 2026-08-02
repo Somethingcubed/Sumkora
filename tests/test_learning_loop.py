@@ -12,7 +12,6 @@ from assessment import rebuild_student_profile
 from db import execute, hash_password, query_one
 from learning import (
     _PdfFlow,
-    create_generated_practice_set,
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
@@ -593,85 +592,3 @@ def test_tall_question_asset_uses_the_worksheet_title_page(tmp_path):
     with fitz.open(stream=flow.finish(), filetype="pdf") as document:
         assert "1. Q1" in document[0].get_text()
         assert "A complete tall question asset." in document[0].get_text()
-
-
-def test_general_mathematics_setting_separates_mastery_and_upload_mode():
-    email = "general-pathway@student.local"
-    student_id = create_student(email)
-    seed_direct_observation(student_id)
-    cookies = login(email)
-
-    response = client.post(
-        "/student/settings/mathematics",
-        data={"math_mode": "general"},
-        cookies=cookies,
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    assert query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))[
-        "math_mode"
-    ] == "general"
-    assert query_one(
-        "SELECT COUNT(*) AS n FROM student_skill_states WHERE student_id = ?",
-        (student_id,),
-    )["n"] == 0
-
-    settings = client.get("/student/settings", cookies=cookies)
-    assert 'value="general" checked' in settings.text
-    analyse = client.get("/student/analyse", cookies=cookies)
-    assert "General mathematics" in analyse.text
-
-
-def test_general_mathematics_creates_validated_original_practice(monkeypatch):
-    email = "generated-practice@student.local"
-    student_id = create_student(email)
-    execute("UPDATE users SET math_mode = 'general' WHERE id = ?", (student_id,))
-
-    def fake_generation(**kwargs):
-        questions = []
-        for order in range(1, kwargs["count"] + 1):
-            questions.append(
-                {
-                    "order": order,
-                    "topic": kwargs["topic"] or "Probability",
-                    "skill": "independent events",
-                    "difficulty": "standard",
-                    "prompt_en": f"Question {order}: find P(A) when P(A) = 1/2.",
-                    "prompt_zh": f"第 {order} 题：已知 P(A) = 1/2，求 P(A)。",
-                    "solution_en": "The probability is already given, so P(A) = 1/2.",
-                    "solution_zh": "概率已给出，因此 P(A) = 1/2。",
-                    "final_answer_en": "1/2",
-                    "final_answer_zh": "1/2",
-                    "maximum_marks": 2,
-                    "validation_notes": "Independently solved and checked.",
-                }
-            )
-        return questions, "test-validator"
-
-    monkeypatch.setattr(
-        "learning.generate_validated_practice_questions",
-        fake_generation,
-    )
-    set_id = create_generated_practice_set(
-        student_id,
-        count=10,
-        selection_mode="topic",
-        topic="Probability",
-        difficulty="standard",
-        calculator_policy="any",
-        lang="en",
-    )
-    practice = practice_set_detail(student_id, set_id)
-    assert practice["set"]["source_mode"] == "generated"
-    assert practice["set"]["generation_model"] == "test-validator"
-    assert len(practice["items"]) == 10
-    assert practice["items"][0]["skill"] == "independent events"
-
-    question_pdf = practice_pdf(student_id, set_id, "questions", "en")
-    answer_pdf = practice_pdf(student_id, set_id, "answers", "en")
-    with fitz.open(stream=question_pdf, filetype="pdf") as document:
-        assert "Question 1" in "".join(page.get_text() for page in document)
-    with fitz.open(stream=answer_pdf, filetype="pdf") as document:
-        text = "".join(page.get_text() for page in document)
-        assert "The probability is already given" in text
-        assert "Final answer" in text

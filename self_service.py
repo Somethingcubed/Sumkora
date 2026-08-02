@@ -651,12 +651,6 @@ def create_student_paper_draft(
     expected_maximum_marks: float | None = None,
     paper_name: str | None = None,
 ) -> tuple[int, int]:
-    student = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    curriculum_mode = (
-        "general"
-        if student and student["math_mode"] == "general"
-        else "0606"
-    )
     answer_filename, answer_content = normalize_answer_upload(
         answer_filename, answer_content
     )
@@ -683,9 +677,7 @@ def create_student_paper_draft(
             Path(answer_filename).stem,
         ),
         "title_source": "student" if str(paper_name or "").strip() else "filename",
-        "syllabus_code": (
-            "General mathematics" if curriculum_mode == "general" else "0606"
-        ),
+        "syllabus_code": "Mathematics",
         "paper_number": "",
         "paper_year": None,
         "examination_session": "",
@@ -700,8 +692,8 @@ def create_student_paper_draft(
         INSERT INTO student_papers
         (student_id, title, syllabus_code, paper_number, paper_year,
          examination_session, calculator_policy, maximum_marks, source_type,
-         curriculum_mode, status, latest_version_number, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?)
+         status, latest_version_number, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?)
         """,
         (
             student_id,
@@ -713,7 +705,6 @@ def create_student_paper_draft(
             metadata["calculator_policy"],
             metadata["maximum_marks"],
             metadata["source_type"],
-            curriculum_mode,
             now,
             now,
         ),
@@ -1220,7 +1211,7 @@ def _run_legacy_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
         SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
-               sp.title AS paper_title, sp.curriculum_mode
+               sp.title AS paper_title
         FROM paper_analysis_versions pav
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE pav.id = ?
@@ -1502,7 +1493,7 @@ def run_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
         SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
-               sp.title AS paper_title, sp.curriculum_mode
+               sp.title AS paper_title
         FROM paper_analysis_versions pav
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE pav.id = ?
@@ -1567,7 +1558,6 @@ def run_self_service_analysis(version_id: int) -> dict:
                 scheme_path,
                 expected_maximum_marks=version["expected_maximum_marks"],
                 progress_callback=_reasoning_progress_callback(version_id),
-                curriculum_mode=version["curriculum_mode"] or "0606",
             )
         _update_version(version_id, "result_validation", 3)
 
@@ -1580,11 +1570,7 @@ def run_self_service_analysis(version_id: int) -> dict:
                 else assessment.get("paper_title") or version["paper_title"]
             ),
             "title_source": draft_metadata.get("title_source", "filename"),
-            "syllabus_code": (
-                "General mathematics"
-                if version["curriculum_mode"] == "general"
-                else (assessment.get("syllabus_code") or "0606")
-            ),
+            "syllabus_code": assessment.get("syllabus_code") or "Mathematics",
             "paper_number": assessment.get("paper_reference") or "",
             "paper_year": None,
             "examination_session": "",

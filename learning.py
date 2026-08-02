@@ -17,7 +17,6 @@ from urllib.parse import quote
 import fitz
 
 from db import execute, query_all, query_one
-from practice_generator import generate_validated_practice_questions
 from taxonomy import canonical_topic
 
 
@@ -41,8 +40,6 @@ def skill_url(skill: str) -> str:
 
 
 def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | None:
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    math_mode = "general" if user and user["math_mode"] == "general" else "0606"
     state = None
     if topic:
         from assessment import student_skill_profile
@@ -76,11 +73,10 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
         JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
         JOIN analysis_question_results aqr ON aqr.id = aso.question_result_id
         WHERE aso.student_id = ? AND aso.is_current = 1
-          AND sp.curriculum_mode = ?
           AND (? != '' OR lower(aso.skill) = lower(?))
         ORDER BY aso.observed_at, aso.id
         """,
-        (student_id, math_mode, topic, skill),
+        (student_id, topic, skill),
     )
     legacy = query_all(
         """
@@ -96,11 +92,10 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
         LEFT JOIN questions q ON q.id = so.question_id
         LEFT JOIN grade_drafts gd
           ON gd.submission_id = s.id AND gd.question_id = q.id
-        WHERE so.student_id = ? AND ? = '0606'
-          AND (? != '' OR lower(so.skill) = lower(?))
+        WHERE so.student_id = ? AND (? != '' OR lower(so.skill) = lower(?))
         ORDER BY so.observed_at, so.id
         """,
-        (student_id, math_mode, topic, skill),
+        (student_id, topic, skill),
     )
     rows = [dict(row) for row in observations] + [dict(row) for row in legacy]
     if topic:
@@ -196,8 +191,6 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
 
 def sync_mistake_book(student_id: int) -> int:
     """Materialize current lost-mark results without duplicating entries."""
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    math_mode = "general" if user and user["math_mode"] == "general" else "0606"
     rows = query_all(
         """
         SELECT aqr.id, aqr.paper_question_id,
@@ -212,11 +205,10 @@ def sync_mistake_book(student_id: int) -> int:
         JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE sp.student_id = ?
-          AND sp.curriculum_mode = ?
           AND pav.version_number = sp.latest_version_number
           AND pav.status = 'completed'
         """,
-        (student_id, math_mode),
+        (student_id,),
     )
     now = _now()
     added = 0
@@ -373,8 +365,6 @@ def mistake_book(
     status: str = "",
 ) -> dict:
     sync_mistake_book(student_id)
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    math_mode = "general" if user and user["math_mode"] == "general" else "0606"
     rows = query_all(
         """
         SELECT mbe.*, aqr.id AS question_result_id,
@@ -400,10 +390,10 @@ def mistake_book(
         JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
         JOIN student_papers sp ON sp.id = pav.paper_id
         LEFT JOIN paper_questions pq ON pq.id = mbe.paper_question_id
-        WHERE mbe.student_id = ? AND sp.curriculum_mode = ?
+        WHERE mbe.student_id = ?
         ORDER BY sp.updated_at DESC, aqr.id
         """,
-        (student_id, math_mode),
+        (student_id,),
     )
     sibling_rows = query_all(
         """
@@ -412,10 +402,10 @@ def mistake_book(
         FROM analysis_question_results aqr
         JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
         JOIN student_papers sp ON sp.id = pav.paper_id
-        WHERE sp.student_id = ? AND sp.curriculum_mode = ?
+        WHERE sp.student_id = ?
         ORDER BY aqr.analysis_version_id, aqr.id
         """,
-        (student_id, math_mode),
+        (student_id,),
     )
     sibling_groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
     for sibling in sibling_rows:
@@ -892,155 +882,16 @@ def create_practice_set(
     return set_id
 
 
-def create_generated_practice_set(
-    student_id: int,
-    *,
-    count: int,
-    selection_mode: str,
-    topic: str,
-    difficulty: str,
-    calculator_policy: str,
-    lang: str,
-) -> int:
-    """Build independently checked, original practice for general maths."""
-    count = max(10, min(int(count), 50))
-    if selection_mode not in {"weaknesses", "topic", "mixed"}:
-        selection_mode = "weaknesses"
-    if difficulty not in {"mixed", "standard", "challenging"}:
-        difficulty = "mixed"
-    if calculator_policy not in {"any", "calculator", "non-calculator"}:
-        calculator_policy = "any"
-
-    from assessment import student_skill_profile
-    from taxonomy import GENERAL_MATH_TOPICS
-
-    selected_topic = ""
-    if selection_mode == "topic":
-        selected_topic = canonical_topic(topic)
-        if selected_topic not in GENERAL_MATH_TOPICS:
-            raise ValueError("Choose a valid topic.")
-    elif selection_mode == "weaknesses":
-        previous = query_one(
-            """
-            SELECT topic FROM practice_sets
-            WHERE student_id = ? AND source_mode = 'generated'
-              AND selection_mode = 'weaknesses' AND topic != ''
-            ORDER BY created_at DESC, id DESC LIMIT 1
-            """,
-            (student_id,),
-        )
-        selected_topic = _choose_weak_topic(
-            student_skill_profile(student_id)["topic_states"],
-            set(GENERAL_MATH_TOPICS),
-            previous["topic"] if previous else "",
-        )
-        if not selected_topic:
-            selected_topic = random.choice(list(GENERAL_MATH_TOPICS))
-
-    try:
-        questions, model = generate_validated_practice_questions(
-            topic=selected_topic,
-            count=count,
-            difficulty=difficulty,
-            calculator_policy=calculator_policy,
-        )
-    except Exception as exc:
-        raise RuntimeError("Practice generation was interrupted.") from exc
-    if len(questions) < count:
-        raise RuntimeError("The worksheet could not be fully validated.")
-
-    topic_label = selected_topic or "Mixed mathematics"
-    title_en = (
-        f"{topic_label} targeted practice"
-        if selection_mode != "mixed"
-        else "Mixed mathematics practice"
-    )
-    title_zh = (
-        f"{topic_label} 专项练习"
-        if selection_mode != "mixed"
-        else "数学综合练习"
-    )
-    explanation_en = (
-        f"{count} original {topic_label.lower()} questions were generated, "
-        "solved independently, and checked before this worksheet was saved."
-    )
-    explanation_zh = (
-        f"已生成 {count} 道原创{topic_label}题目，并在保存前独立解答和校验。"
-    )
-    now = _now()
-    set_id = execute(
-        """
-        INSERT INTO practice_sets
-        (student_id, title, selection_mode, requested_count, actual_count,
-         topic, difficulty, calculator_policy, language, status,
-         selection_explanation, source_mode, generation_model,
-         created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, 'generated', ?, ?, ?)
-        """,
-        (
-            student_id,
-            title_zh if lang == "zh" else title_en,
-            selection_mode,
-            count,
-            count,
-            selected_topic,
-            difficulty,
-            calculator_policy,
-            lang,
-            explanation_zh if lang == "zh" else explanation_en,
-            model,
-            now,
-            now,
-        ),
-    )
-    try:
-        for item in questions[:count]:
-            execute(
-                """
-                INSERT INTO generated_practice_questions
-                (practice_set_id, order_index, topic, skill, difficulty,
-                 calculator_policy, prompt_en, prompt_zh, solution_en, solution_zh,
-                 final_answer_en, final_answer_zh, maximum_marks,
-                 validation_notes, model, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    set_id,
-                    item["order"],
-                    item["topic"],
-                    item["skill"],
-                    item["difficulty"],
-                    calculator_policy,
-                    item["prompt_en"],
-                    item["prompt_zh"],
-                    item["solution_en"],
-                    item["solution_zh"],
-                    item["final_answer_en"],
-                    item["final_answer_zh"],
-                    item["maximum_marks"],
-                    item["validation_notes"],
-                    model,
-                    now,
-                ),
-            )
-    except Exception:
-        execute("DELETE FROM practice_sets WHERE id = ?", (set_id,))
-        raise
-    return set_id
-
-
 def practice_sets(student_id: int) -> list[dict]:
-    user = query_one("SELECT math_mode FROM users WHERE id = ?", (student_id,))
-    source_mode = "generated" if user and user["math_mode"] == "general" else "bank"
     return [
         dict(row)
         for row in query_all(
             """
             SELECT * FROM practice_sets
-            WHERE student_id = ? AND source_mode = ?
+            WHERE student_id = ?
             ORDER BY created_at DESC
             """,
-            (student_id, source_mode),
+            (student_id,),
         )
     ]
 
@@ -1052,18 +903,6 @@ def practice_set_detail(student_id: int, set_id: int) -> dict | None:
     )
     if not practice:
         return None
-    if practice["source_mode"] == "generated":
-        items = query_all(
-            """
-            SELECT *, order_index AS question_number,
-                   'Original Sumkora practice' AS selection_reason
-            FROM generated_practice_questions
-            WHERE practice_set_id = ?
-            ORDER BY order_index
-            """,
-            (set_id,),
-        )
-        return {"set": dict(practice), "items": [dict(row) for row in items]}
     items = query_all(
         """
         SELECT psi.*, pq.*, pp.year, pp.examination_session, pp.component,
@@ -1370,30 +1209,6 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
         )
     flow = _PdfFlow(title=title, subtitle=subtitle, lang=lang)
     for item in detail["items"]:
-        if practice["source_mode"] == "generated":
-            source = (
-                f"Sumkora original · {item['topic']} · {item['skill']}"
-                if lang == "en"
-                else f"Sumkora 原创 · {item['topic']} · {item['skill']}"
-            )
-            label = f"{item['order_index']}."
-            body = (
-                item["prompt_zh" if lang == "zh" else "prompt_en"]
-                if kind == "questions"
-                else item["solution_zh" if lang == "zh" else "solution_en"]
-            )
-            if kind == "answers":
-                final_answer = item[
-                    "final_answer_zh" if lang == "zh" else "final_answer_en"
-                ]
-                if final_answer:
-                    body = (
-                        f"{body}\n\n"
-                        + ("最终答案：" if lang == "zh" else "Final answer: ")
-                        + final_answer
-                    )
-            flow.add_text(label=label, body=body, source_label=source)
-            continue
         source = (
             f"{item['syllabus_code']} {item['examination_session']} "
             f"{item['year']} / {item['component']} / {item['question_number']}"
