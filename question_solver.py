@@ -81,6 +81,12 @@ Return:
 - a broad canonical topic and a specific skill;
 - classification confidence.
 
+In question_latex, solution_en, solution_zh, final_answer, and final_answer_zh,
+enclose every inline mathematical expression in \\( ... \\) and every display
+equation in \\[ ... \\]. Never leave LaTeX commands such as \\frac, \\sqrt,
+\\theta, or superscript notation outside MathJax delimiters. Keep ordinary
+sentences outside the delimiters.
+
 Check the algebra, signs, domain, exact/approximate form, and units before
 returning. The final_answer fields MUST exactly agree with the final line of
 the corresponding worked solution; copy the same result rather than

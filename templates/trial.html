@@ -1,11 +1,21 @@
 {% extends "auth_base.html" %}
 {% block title %}{{ tr('Try one question', '试做一道题') }} — Sumkora{% endblock %}
 {% block meta_description %}{{ tr('Upload one mathematics question and test the real Sumkora solver.', '上传一道数学题，体验真实的 Sumkora 解题流程。') }}{% endblock %}
+{% block head_extra %}
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+      chtml: { fontURL: '/static/vendor/mathjax/fonts' },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script defer src="/static/vendor/mathjax/tex-chtml.js"></script>
+{% endblock %}
 {% block auth_content %}
 <div class="public-demo">
   <p class="eyebrow">{{ tr('Real one-question trial', '真实单题体验') }}</p>
-  <h2 class="auth-title">{{ tr('Photograph one complete question', '拍摄一道完整题目') }}</h2>
-  <p class="auth-subtitle">{{ tr('This uses the same vision model as the student solver. Include every diagram, table, restriction, and question part.', '这会使用与学生端相同的视觉模型。请完整拍入图表、条件、取值范围和所有小题。') }}</p>
+  <h2 class="auth-title">{{ tr('Upload the question — you do not need to solve it', '只需上传题目，无需先作答') }}</h2>
+  <p class="auth-subtitle">{{ tr('Take a photo of the unanswered question itself. Sumkora will read it and produce the answer and worked method. Include every diagram, table, restriction, and question part.', '拍摄尚未作答的题目本身即可。Sumkora 会读取题目并给出答案和详细解法。请完整拍入图表、条件、取值范围和所有小题。') }}</p>
 
   {% if error %}<div class="form-message form-message-error" role="alert">{{ error }}</div>{% endif %}
   {% if result %}
@@ -20,8 +30,8 @@
 
   <form method="post" action="/trial" enctype="multipart/form-data" class="form-stack" data-trial-form>
     <label class="trial-dropzone" for="trial-image">
-      <strong>{{ tr('Take or choose a photo', '拍摄或选择照片') }}</strong>
-      <span>{{ tr('JPEG, PNG, or WebP · one complete question', 'JPEG、PNG 或 WebP · 一道完整题目') }}</span>
+      <strong>{{ tr('Photograph or choose the unanswered question', '拍摄或选择未作答的题目') }}</strong>
+      <span>{{ tr('Question only — no completed work or answer needed', '只需题目——无需完成答题或提供答案') }}</span>
       <input id="trial-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required>
     </label>
     <button class="button button-primary button-block" type="submit" data-trial-submit>{{ tr('Solve this question', '解答这道题') }}</button>

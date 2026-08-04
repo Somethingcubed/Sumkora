@@ -29,10 +29,10 @@ def test_public_sample_and_real_trial_are_available_before_signup(monkeypatch):
         main,
         "solve_question_image",
         lambda _path: {
-            "final_answer": "x = 2",
-            "final_answer_zh": "x = 2",
-            "solution_en": "Subtract 3, then divide by 2. Therefore x = 2.",
-            "solution_zh": "先减 3，再除以 2。因此 x = 2。",
+            "final_answer": r"\(x = \frac{1}{2}\)",
+            "final_answer_zh": r"\(x = \frac{1}{2}\)",
+            "solution_en": r"Divide both sides by 2. Therefore \(x = \frac{1}{2}\).",
+            "solution_zh": r"两边同时除以 2。因此 \(x = \frac{1}{2}\)。",
         },
     )
     trial = client.post(
@@ -40,7 +40,10 @@ def test_public_sample_and_real_trial_are_available_before_signup(monkeypatch):
         files={"image": ("question.jpg", b"synthetic-image", "image/jpeg")},
     )
     assert trial.status_code == 200
-    assert "x = 2" in trial.text
+    assert r"\(x = \frac{1}{2}\)" in trial.text
+    assert "/static/vendor/mathjax/tex-chtml.js" in trial.text
+    assert "you do not need to solve it" in trial.text
+    assert "no completed work or answer needed" in trial.text
     assert "deleted after processing" in trial.text
 
 

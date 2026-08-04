@@ -4,6 +4,7 @@ import json
 
 from learning import _choose_weak_topic
 from question_solver import _enforce_solution_consistency, solve_question_texts
+from question_solver import PROMPT
 from taxonomy import canonical_topic
 
 
@@ -70,6 +71,12 @@ def test_solver_keeps_an_already_consistent_answer():
     }
     _enforce_solution_consistency(result)
     assert result["final_answer"] == "x <= -2 or x >= 3"
+
+
+def test_single_question_solver_requires_mathjax_delimiters():
+    assert r"\( ... \)" in PROMPT
+    assert r"\[ ... \]" in PROMPT
+    assert r"\frac" in PROMPT
 
 
 def test_text_solver_returns_worked_solutions_without_exposing_mark_schemes(
