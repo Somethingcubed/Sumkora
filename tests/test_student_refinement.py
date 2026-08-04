@@ -3,7 +3,11 @@
 import json
 
 from learning import _choose_weak_topic
-from question_solver import _enforce_solution_consistency, solve_question_texts
+from question_solver import (
+    _enforce_solution_consistency,
+    _equation_rhs_signature,
+    solve_question_texts,
+)
 from question_solver import PROMPT
 from taxonomy import canonical_topic
 
@@ -71,6 +75,31 @@ def test_solver_keeps_an_already_consistent_answer():
     }
     _enforce_solution_consistency(result)
     assert result["final_answer"] == "x <= -2 or x >= 3"
+
+
+def test_solver_catches_conflicting_radicals_even_when_coefficients_match():
+    result = {
+        "solution_en": (
+            r"Therefore, the chord length is \(CD = 2\sqrt{6}\)."
+        ),
+        "solution_zh": r"所以弦长为 \(CD = 2\sqrt{6}\)。",
+        "final_answer": r"The chord length is \(CD = 2\sqrt{7}\).",
+        "final_answer_zh": r"弦长为 \(CD = 2\sqrt{7}\)。",
+    }
+    _enforce_solution_consistency(result)
+    assert r"\sqrt{6}" in result["final_answer"]
+    assert r"\sqrt{6}" in result["final_answer_zh"]
+    assert r"\sqrt{7}" not in result["final_answer"]
+    assert r"\sqrt{7}" not in result["final_answer_zh"]
+
+
+def test_equation_signature_ignores_presentation_but_not_the_result():
+    assert _equation_rhs_signature(
+        r"Hence \(CD=2\sqrt{6}\)."
+    ) == _equation_rhs_signature(r"所以 \[ CD = 2 \sqrt{6}. \]")
+    assert _equation_rhs_signature(
+        r"\(CD=2\sqrt{6}\)"
+    ) != _equation_rhs_signature(r"\(CD=2\sqrt{7}\)")
 
 
 def test_single_question_solver_requires_mathjax_delimiters():

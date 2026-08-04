@@ -138,6 +138,32 @@ def _numeric_values(value: str) -> set[str]:
     }
 
 
+def _equation_rhs_signature(value: str) -> str:
+    """Return a stable signature for the last explicit equation's right side."""
+    text = str(value or "")
+    math_blocks = [
+        inline or display
+        for inline, display in re.findall(
+            r"\\\((.*?)\\\)|\\\[(.*?)\\\]",
+            text,
+            flags=re.DOTALL,
+        )
+        if inline or display
+    ]
+    candidates = list(reversed(math_blocks)) + [text]
+    for candidate in candidates:
+        parts = re.split(r"(?<![<>!])=(?!=)", candidate)
+        if len(parts) < 2:
+            continue
+        rhs = parts[-1].lower()
+        rhs = re.sub(r"\\(?:dfrac|tfrac)", r"\\frac", rhs)
+        rhs = re.sub(r"\\(?:left|right)", "", rhs)
+        rhs = rhs.replace("√", r"\sqrt")
+        rhs = rhs.strip().rstrip(".,;:。；，")
+        return re.sub(r"[^a-z0-9\\^_{}()+\-*/.]", "", rhs)
+    return ""
+
+
 def _enforce_solution_consistency(parsed: dict) -> None:
     """Prefer the solution's explicit conclusion when final fields contradict it."""
     for final_key, solution_key, chinese in (
@@ -145,6 +171,11 @@ def _enforce_solution_consistency(parsed: dict) -> None:
         ("final_answer_zh", "solution_zh", True),
     ):
         conclusion = _conclusion(parsed.get(solution_key, ""), chinese=chinese)
+        conclusion_rhs = _equation_rhs_signature(conclusion)
+        final_rhs = _equation_rhs_signature(parsed.get(final_key, ""))
+        if conclusion_rhs and final_rhs and conclusion_rhs != final_rhs:
+            parsed[final_key] = conclusion
+            continue
         conclusion_numbers = _numeric_values(conclusion)
         final_numbers = _numeric_values(parsed.get(final_key, ""))
         if conclusion_numbers and final_numbers and conclusion_numbers.isdisjoint(final_numbers):
