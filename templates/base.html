@@ -24,7 +24,7 @@
     };
   </script>
   <script defer src="/static/vendor/mathjax/tex-chtml.js"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260804-1">
+  <link rel="stylesheet" href="/static/style.css?v=20260804-2">
 </head>
 <body class="app-page {% if is_researcher %}research-mode{% endif %}">
   <a href="#main-content" class="skip-link">{{ tr('Skip to content', '跳至主要内容') }}</a>
@@ -56,6 +56,9 @@
       </nav>
 
       <div class="nav-account">
+        {% if not is_researcher %}
+        <button type="button" class="nav-install" data-install-app hidden>{{ tr('Install app', '安装应用') }}</button>
+        {% endif %}
         <nav class="language-switcher" aria-label="{{ tr('Language', '语言') }}">
           <a href="/lang/en" lang="en" {% if lang == 'en' %}aria-current="true"{% endif %}>EN</a>
           <span aria-hidden="true">/</span>
@@ -142,6 +145,6 @@
   })();
   </script>
   {% endif %}
-  <script defer src="/static/pwa.js?v=20260804-1"></script>
+  <script defer src="/static/pwa.js?v=20260804-2"></script>
 </body>
 </html>

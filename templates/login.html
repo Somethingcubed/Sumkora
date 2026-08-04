@@ -45,6 +45,21 @@
   <button type="submit" class="button button-primary button-block">{{ tr('Log in', '登录') }}</button>
 </form>
 
+<section class="auth-preview-section" aria-labelledby="preview-heading">
+  <p class="section-kicker" id="preview-heading">{{ tr('Explore Sumkora first', '先体验 Sumkora') }}</p>
+  <div class="auth-preview-grid">
+    <a href="/sample" class="auth-preview-card">
+      <span class="auth-preview-icon" aria-hidden="true">✓</span>
+      <span><strong>{{ tr('View a sample analysis', '查看示例分析') }}</strong><small>{{ tr('See marks, feedback, and progress', '查看得分、反馈和学习进度') }}</small></span>
+      <span aria-hidden="true">→</span>
+    </a>
+    <a href="/trial" class="auth-preview-card">
+      <span class="auth-preview-icon" aria-hidden="true">?</span>
+      <span><strong>{{ tr('Try one real question', '真实试做一道题') }}</strong><small>{{ tr('Photograph a question and get a worked answer', '拍摄题目并获得详细解答') }}</small></span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </div>
+</section>
+
 <p class="auth-switch">{{ tr('New to Sumkora?', '第一次使用 Sumkora？') }} <a href="/signup">{{ tr('Create an account', '创建账号') }}</a></p>
-<p class="auth-switch auth-preview-links"><a href="/sample">{{ tr('View a sample analysis', '查看示例分析') }}</a> · <a href="/trial">{{ tr('Try one real question', '真实试做一道题') }}</a></p>
 {% endblock %}

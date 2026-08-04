@@ -84,6 +84,33 @@ def test_pwa_assets_have_root_scope_and_private_pages_are_not_precached():
     login = client.get("/login")
     assert "/static/pwa.js" in login.text
     assert "Install Sumkora" in login.text
+    assert 'class="auth-preview-grid"' in login.text
+    assert 'href="/sample"' in login.text
+    assert 'href="/trial"' in login.text
+
+    login_student()
+    dashboard = client.get("/student")
+    assert 'class="nav-install"' in dashboard.text
+    assert "Install app" in dashboard.text
+
+
+def test_account_created_page_offers_four_clear_next_steps():
+    client.cookies.clear()
+    response = client.post(
+        "/signup",
+        data={
+            "username": "ActivationOptions",
+            "password": "activation-password",
+            "password_confirmation": "activation-password",
+            "display_name": "",
+        },
+    )
+    assert response.status_code == 200
+    assert 'class="signup-next-actions"' in response.text
+    assert 'href="/student/analyse"' in response.text
+    assert 'href="/student"' in response.text
+    assert 'href="/sample"' in response.text
+    assert 'href="/student/solve"' in response.text
 
 
 def test_security_policy_allows_same_origin_camera_only():

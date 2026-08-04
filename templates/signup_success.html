@@ -9,6 +9,10 @@
 <div class="recovery-code" aria-label="Recovery code">{{ recovery_code }}</div>
 <p class="field-help">{{ tr('You can use it once to reset your password if you forget it.', '忘记密码时，可使用一次此恢复码进行重置。') }}</p>
 
-<a href="/student/analyse" class="button button-primary button-block">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
-<a href="/student" class="button button-secondary button-block">{{ tr('Go to dashboard', '前往主页') }}</a>
+<div class="signup-next-actions" aria-label="{{ tr('Choose what to do next', '选择下一步') }}">
+  <a href="/student/analyse" class="button button-primary">{{ tr('Analyse your first paper', '分析第一份试卷') }}</a>
+  <a href="/student" class="button button-secondary">{{ tr('Go to dashboard', '前往主页') }}</a>
+  <a href="/sample" class="button button-secondary">{{ tr('View sample analysis', '查看示例分析') }}</a>
+  <a href="/student/solve" class="button button-secondary">{{ tr('Solve one question', '解答一道题') }}</a>
+</div>
 {% endblock %}
