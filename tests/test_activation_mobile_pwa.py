@@ -103,6 +103,13 @@ def test_pwa_assets_have_root_scope_and_private_pages_are_not_precached():
     dashboard = client.get("/student")
     assert 'class="nav-install"' in dashboard.text
     assert "Install app" in dashboard.text
+    assert "data-install-always" in dashboard.text
+    assert "Add to Home Screen" in dashboard.text
+
+    settings = client.get("/student/settings")
+    assert "Install or view instructions" in settings.text
+    assert "Safari instructions are included" in settings.text
+    assert "data-install-help" in settings.text
 
 
 def test_account_created_page_offers_four_clear_next_steps():

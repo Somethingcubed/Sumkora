@@ -24,7 +24,7 @@
     };
   </script>
   <script defer src="/static/vendor/mathjax/tex-chtml.js"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260804-3">
+  <link rel="stylesheet" href="/static/style.css?v=20260804-4">
 </head>
 <body class="app-page {% if is_researcher %}research-mode{% endif %}">
   <a href="#main-content" class="skip-link">{{ tr('Skip to content', '跳至主要内容') }}</a>
@@ -87,7 +87,7 @@
           {% else %}
           <a href="/student">{{ tr('Dashboard', '主页') }}</a><a href="/student/solve">{{ tr('Solve one question', '解答一道题') }}</a><a href="/student/analyse">{{ tr('Analyse a paper', '分析试卷') }}</a><a href="/student/papers">{{ tr('My papers', '我的试卷') }}</a><a href="/student/skills">{{ tr('Progress', '学习进步') }}</a><a href="/student/mistakes">{{ tr('Mistakes', '错题本') }}</a><a href="/student/practice">{{ tr('Practice', '练习') }}</a><a href="/student/settings">{{ tr('Settings', '设置') }}</a>
           {% endif %}
-          <button type="button" class="mobile-install" data-install-app hidden>{{ tr('Install Sumkora', '安装 Sumkora') }}</button>
+          <button type="button" class="mobile-install" data-install-app data-install-always>{{ tr('Install Sumkora', '安装 Sumkora') }}</button>
           <div class="mobile-language-switcher"><a href="/lang/en">English</a><a href="/lang/zh">中文</a></div>
           <a href="/logout">{{ tr('Log out', '退出登录') }}</a>
         </nav>
@@ -145,6 +145,7 @@
   })();
   </script>
   {% endif %}
-  <script defer src="/static/pwa.js?v=20260804-2"></script>
+  {% include "pwa_install_help.html" %}
+  <script defer src="/static/pwa.js?v=20260804-3"></script>
 </body>
 </html>

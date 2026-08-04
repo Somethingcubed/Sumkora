@@ -56,5 +56,14 @@
       <button class="button button-secondary" type="submit">{{ tr('Update password', '更新密码') }}</button>
     </form>
   </section>
+
+  <section class="surface install-settings-card">
+    <span class="install-settings-icon" aria-hidden="true">S</span>
+    <div>
+      <h2>{{ tr('Install Sumkora', '安装 Sumkora') }}</h2>
+      <p class="text-sm text-slate-500 mt-2">{{ tr('Add Sumkora to your home screen for faster access. Safari instructions are included.', '将 Sumkora 添加到主屏幕以便快速打开，并提供 Safari 安装说明。') }}</p>
+      <button class="button button-secondary mt-5" type="button" data-install-app data-install-always>{{ tr('Install or view instructions', '安装或查看说明') }}</button>
+    </div>
+  </section>
 </div>
 {% endblock %}

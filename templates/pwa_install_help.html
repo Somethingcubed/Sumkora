@@ -1,0 +1,24 @@
+<div class="pwa-install-backdrop hidden" data-install-help>
+  <section class="pwa-install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-help-title">
+    <button type="button" class="pwa-install-close" data-install-help-close aria-label="{{ tr('Close installation instructions', '关闭安装说明') }}">×</button>
+    <span class="pwa-install-mark" aria-hidden="true">S</span>
+    <p class="eyebrow">{{ tr('Add Sumkora to your phone', '将 Sumkora 添加到手机') }}</p>
+    <h2 id="install-help-title">{{ tr('Install from your browser menu', '从浏览器菜单安装') }}</h2>
+    <ol class="pwa-install-steps">
+      <li>
+        <span>1</span>
+        <div><strong>{{ tr('On iPhone or iPad, open in Safari', '在 iPhone 或 iPad 上使用 Safari 打开') }}</strong><p>{{ tr('Installation must be started from Safari rather than an in-app browser.', '需要从 Safari 开始安装，而不是从应用内浏览器安装。') }}</p></div>
+      </li>
+      <li>
+        <span>2</span>
+        <div><strong>{{ tr('Tap the Share button', '点击“分享”按钮') }}</strong><p>{{ tr('It is the square with an upward arrow in Safari.', '即 Safari 中带向上箭头的方框图标。') }}</p></div>
+      </li>
+      <li>
+        <span>3</span>
+        <div><strong>{{ tr('Choose “Add to Home Screen”', '选择“添加到主屏幕”') }}</strong><p>{{ tr('Confirm Add. Sumkora will then open like an app from your home screen.', '确认添加后，即可像应用一样从主屏幕打开 Sumkora。') }}</p></div>
+      </li>
+    </ol>
+    <p class="pwa-install-other">{{ tr('Android or desktop: open the browser menu and choose “Install app” or “Add to Home screen”.', 'Android 或电脑：打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。') }}</p>
+    <button type="button" class="button button-primary button-block" data-install-help-close>{{ tr('Got it', '知道了') }}</button>
+  </section>
+</div>
