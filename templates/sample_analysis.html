@@ -1,0 +1,42 @@
+{% extends "auth_base.html" %}
+{% block title %}{{ tr('Sample analysis', '示例分析') }} — Sumkora{% endblock %}
+{% block meta_description %}{{ tr('See a realistic Sumkora mathematics paper analysis before creating an account.', '创建账号前，先查看真实风格的 Sumkora 数学试卷分析。') }}{% endblock %}
+{% block auth_content %}
+<div class="public-demo">
+  <p class="eyebrow">{{ tr('Realistic product preview', '真实产品预览') }}</p>
+  <h2 class="auth-title">{{ tr('See what Sumkora returns', '看看 Sumkora 会给出什么') }}</h2>
+  <p class="auth-subtitle">{{ tr('This illustrative example uses synthetic work, but shows the same question, mark, feedback, and progress structure as a real analysis.', '此示例使用合成答卷，但题目、得分、反馈和学习进度结构与真实分析一致。') }}</p>
+
+  <section class="sample-work" aria-label="{{ tr('Example handwritten mathematics work', '手写数学答题示例') }}">
+    <p><strong>Q1(a)</strong> x² − x − 6 ≥ 0</p>
+    <div class="sample-handwriting">(x - 3)(x + 2) ≥ 0<br>therefore x ≤ -2 or x ≥ 3</div>
+  </section>
+
+  <div class="sample-summary">
+    <div><span>{{ tr('Detected', '已识别') }}</span><strong>Q1(a)</strong></div>
+    <div><span>{{ tr('Mark', '得分') }}</span><strong>3 / 3</strong></div>
+    <div><span>{{ tr('Confidence', '置信度') }}</span><strong>96%</strong></div>
+  </div>
+
+  <section class="sample-feedback sample-feedback-correct">
+    <p class="section-kicker">{{ tr('Why this earned full marks', '为什么获得满分') }}</p>
+    <p>{{ tr('The quadratic was factorised correctly and both valid intervals were stated.', '二次式因式分解正确，并写出了两个有效区间。') }}</p>
+  </section>
+  <section class="sample-feedback sample-feedback-improve">
+    <p class="section-kicker">{{ tr('Example lost-mark feedback', '失分反馈示例') }}</p>
+    <p>{{ tr('On a later trigonometry part, the method was correct but one solution outside the required interval was included. Check the domain before the final line.', '在后面的三角函数小题中，方法正确，但包含了一个不在规定区间内的解。写最终答案前应再次核对定义域。') }}</p>
+  </section>
+
+  <div class="sample-insight">
+    <div><span>{{ tr('Algebra mastery', '代数掌握度') }}</span><strong>78%</strong></div>
+    <div class="sample-insight-track"><span style="width: 78%"></span></div>
+    <p>{{ tr('With more papers, Sumkora shows whether each topic is improving over time.', '分析更多试卷后，Sumkora 会展示各知识点是否持续进步。') }}</p>
+  </div>
+
+  <div class="public-demo-actions">
+    <a class="button button-primary" href="/trial">{{ tr('Try one real question', '真实试做一道题') }}</a>
+    <a class="button button-secondary" href="/signup">{{ tr('Create account', '创建账号') }}</a>
+  </div>
+  <p class="auth-switch"><a href="/login">{{ tr('Back to login', '返回登录') }}</a></p>
+</div>
+{% endblock %}

@@ -1,6 +1,29 @@
 # Sumkora release-candidate status
 
-Updated: 27 July 2026
+Updated: 4 August 2026
+
+## Activation, mobile and curriculum boundary - 4 August 2026
+
+- Added a public synthetic sample analysis and a rate-limited real
+  one-question vision trial. Trial images are removed immediately after the
+  response and are not added to progress data.
+- Kept the dashboard structure unchanged. The paper screen now makes the
+  answer-photos-only workflow explicit and links to the sample result.
+- Added a separate rear-camera action while preserving gallery multi-select,
+  plus page replacement, low-resolution warnings, touch-sized controls,
+  network upload progress, retained selections, and retry.
+- Completed the initial PWA layer with a root-scoped service worker, offline
+  explanation page, install prompt integration, and refined manifest. Private
+  student pages and documents are never precached.
+- Added a guarded curriculum registry. Cambridge IGCSE Additional Mathematics
+  0606 remains the only verified/selectable module; planned curricula are
+  visible but disabled. The reverted general-mathematics pathway remains
+  inactive.
+- Real `Paper.pdf` completed-work-only benchmark: 55/80 point estimate,
+  49-61 range, all 20 question parts, exact 80-mark coverage, one provider
+  attempt, and 258.1 seconds total. Expected result was approximately 56/80.
+- Full automated suite: 73 tests passed. Regression checks and demo flow
+  passed; sample/upload browser checks had no console errors.
 
 ## Starting state and safety checkpoint
 

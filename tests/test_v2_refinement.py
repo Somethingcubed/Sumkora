@@ -65,7 +65,11 @@ def test_student_can_upload_multiple_gallery_pages():
     page = client.get("/student/analyse")
     assert 'name="answer_script"' in page.text
     assert "multiple" in page.text
-    assert "capture=" not in page.text
+    # Gallery multi-select remains the default; a separate optional camera
+    # input adds pages without forcing camera capture for every upload.
+    assert 'data-multi-page-input' in page.text
+    assert 'data-camera-input' in page.text
+    assert 'capture="environment"' in page.text
     assert "/static/multi-page-upload.js" in page.text
     assert "img-src 'self' data: blob:" in page.headers["content-security-policy"]
 

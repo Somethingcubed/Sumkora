@@ -3,15 +3,20 @@
   "short_name": "Sumkora",
   "description": "Private mathematics paper analysis and progress evidence for students.",
   "start_url": "/",
+  "id": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#f8fafc",
   "theme_color": "#312e81",
   "icons": [
     {
       "src": "/static/favicon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["education", "productivity"]
 }

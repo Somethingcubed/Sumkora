@@ -6,13 +6,32 @@
     <div>
       <p class="eyebrow">{{ tr('New paper analysis', '新试卷分析') }}</p>
       <h1>{{ tr('Analyse a paper', '分析试卷') }}</h1>
-      <p>{{ tr('Upload your completed work. Add a mark scheme when you want detailed marking.', '上传你已完成的答卷；如需详细批改，可再添加评分标准。') }}</p>
+      <p>{{ tr('Upload photos of your completed answers. No question paper or mark scheme is required.', '上传你已完成答案的照片。无需试题卷或评分标准。') }}</p>
     </div>
   </div>
 
   {% if error %}<div class="form-message form-message-error mb-6" role="alert">{{ error }}</div>{% endif %}
 
   <form method="post" action="/student/analyse" enctype="multipart/form-data" class="surface" data-upload-form>
+    <section class="upload-guide" aria-label="{{ tr('What to upload', '上传说明') }}">
+      <div><strong>{{ tr('Only your answers are needed', '只需上传你的答案') }}</strong><span>{{ tr('Sumkora identifies the questions automatically. A mark scheme is optional for more detailed marking.', 'Sumkora 会自动识别题目。评分标准为选填，上传后可获得更详细的批改。') }}</span></div>
+      <a href="/sample">{{ tr('See a sample result', '查看示例结果') }} →</a>
+    </section>
+
+    <div class="mb-6">
+      <label class="form-label max-w-xl" for="curriculum">
+        {{ tr('Curriculum', '课程') }}
+        <select class="field" id="curriculum" name="curriculum">
+          {% for item in curricula %}
+          <option value="{{ item.id }}" {% if item.id == default_curriculum_id %}selected{% endif %} {% if item.status != 'verified' %}disabled{% endif %}>
+            {{ item.name }}{% if item.code %} · {{ item.code }}{% endif %}{% if item.status != 'verified' %} — {{ tr('coming later', '即将支持') }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="text-xs text-slate-500 mt-2">{{ tr('0606 is the currently verified marking and practice module. Other curricula are shown only as planned support.', '0606 是当前已验证的批改与练习模块。其他课程仅表示未来计划支持。') }}</p>
+    </div>
+
     <div class="mb-6">
       <label class="form-label max-w-xl" for="paper-name">
         {{ tr('Paper name', '试卷名称') }}
@@ -46,7 +65,11 @@
         data-preparing="{{ tr('Preparing page', '正在处理第') }}"
         data-preparing-suffix="{{ tr('of', '页，共') }}"
         data-prepare-error="{{ tr('One of the images could not be prepared.', '其中一张图片无法处理。') }}"
+        data-image-warning="{{ tr('This photo may be too small or blurry. Retake it in good light before submitting.', '这张照片可能过小或模糊。请在光线充足处重新拍摄后再提交。') }}"
+        data-uploading="{{ tr('Uploading completed work…', '正在上传答卷…') }}"
+        data-upload-failed="{{ tr('The upload was interrupted. Your selected pages are still here.', '上传中断。你选择的页面仍然保留。') }}"
         data-remove="{{ tr('Remove page', '删除页面') }}"
+        data-replace="{{ tr('Replace page', '替换页面') }}"
         data-rotate="{{ tr('Rotate page', '旋转页面') }}"
         data-move-earlier="{{ tr('Move page earlier', '前移页面') }}"
         data-move-later="{{ tr('Move page later', '后移页面') }}"
@@ -54,6 +77,11 @@
         <span class="upload-number">1</span>
         <span class="font-semibold">{{ tr('Completed work', '已完成的答卷') }}</span>
         <span class="text-sm text-slate-500 mt-1">{{ tr('Choose one PDF or select up to 30 page photos from your gallery.', '请选择一个 PDF，或从相册中选择最多 30 张答卷照片。') }}</span>
+        <div class="camera-actions">
+          <label class="button button-primary camera-button" for="answer-camera">{{ tr('Take a page photo', '拍摄一页答卷') }}</label>
+          <span>{{ tr('or choose existing photos below', '或在下方选择已有照片') }}</span>
+          <input id="answer-camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-camera-input>
+        </div>
         <input
           id="answer_script"
           type="file"
@@ -108,6 +136,11 @@
     </div>
 
     <div class="mt-6 pt-5 border-t border-slate-200">
+      <div class="upload-progress" data-upload-progress hidden>
+        <div class="upload-progress-copy"><span data-upload-progress-label>{{ tr('Preparing upload…', '正在准备上传…') }}</span><strong data-upload-progress-value>0%</strong></div>
+        <div class="upload-progress-track"><span data-upload-progress-fill style="width:0%"></span></div>
+        <button type="button" class="button button-secondary" data-upload-retry hidden>{{ tr('Retry upload', '重试上传') }}</button>
+      </div>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="text-xs text-slate-500">{{ tr('No question paper is required. Completed-work uploads are limited to 25 MB after preparation.', '无需上传试题卷。作答文件处理后的总大小上限为 25 MB。') }}</p>
         <button type="submit" class="button button-primary" data-submit-button>{{ tr('Start analysis', '开始分析') }}</button>
@@ -115,5 +148,5 @@
     </div>
   </form>
 </div>
-<script src="/static/multi-page-upload.js?v=20260727-1" defer></script>
+<script src="/static/multi-page-upload.js?v=20260804-1" defer></script>
 {% endblock %}

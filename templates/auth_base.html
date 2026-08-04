@@ -16,7 +16,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/static/site.webmanifest">
   <link rel="stylesheet" href="/static/tailwind.css?v=20260726-2">
-  <link rel="stylesheet" href="/static/style.css?v=20260728-3">
+  <link rel="stylesheet" href="/static/style.css?v=20260804-1">
 </head>
 <body class="auth-page">
   <main class="auth-layout">
@@ -30,7 +30,7 @@
         <h1>{{ tr('Understand every paper. Build on every result.', '读懂每一份试卷，在每次结果上进步。') }}</h1>
         <p>{{ tr('Upload your work, see where marks were lost, and follow your progress over time.', '上传答卷，了解失分原因，并持续追踪学习进步。') }}</p>
       </div>
-      <p class="auth-footnote">Cambridge IGCSE Additional Mathematics · 0606</p>
+      <p class="auth-footnote">{{ tr('Mathematics paper analysis · 0606 currently verified', '数学试卷分析 · 当前已验证 0606') }}</p>
     </section>
     <section class="auth-panel">
       <nav class="auth-language language-switcher" aria-label="{{ tr('Language', '语言') }}">
@@ -41,6 +41,7 @@
       <div class="auth-card">
         {% block auth_content %}{% endblock %}
       </div>
+      <button type="button" class="auth-install" data-install-app hidden>{{ tr('Install Sumkora', '安装 Sumkora') }}</button>
     </section>
   </main>
   <script>
@@ -63,5 +64,6 @@
       });
     });
   </script>
+  <script defer src="/static/pwa.js?v=20260804-1"></script>
 </body>
 </html>

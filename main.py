@@ -31,6 +31,7 @@ from accounts import (
     validate_password,
     validate_username,
 )
+from curricula import DEFAULT_CURRICULUM_ID, curriculum_options, verified_curriculum
 from assessment import (
     compare_papers,
     marks_lost_breakdown,
@@ -174,10 +175,10 @@ for warning in getattr(config, "CONFIG_WARNINGS", []):
     print(f"CONFIG WARNING: {warning}")
 
 app = FastAPI(
-    title="Sumkora - Cambridge IGCSE Additional Mathematics 0606",
+    title="Sumkora - AI mathematics paper analysis",
     description=(
-        "Private paper analysis and progress evidence for Cambridge IGCSE "
-        "Additional Mathematics students."
+        "Private mathematics paper analysis, worked feedback, and progress "
+        "evidence for students."
     ),
 )
 templates = Jinja2Templates(directory="templates")
@@ -186,6 +187,15 @@ mimetypes.add_type("font/woff", ".woff")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+@app.get("/service-worker.js", include_in_schema=False)
+def service_worker():
+    return FileResponse(
+        "static/service-worker.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 
 def rate_limited(
@@ -252,7 +262,7 @@ async def security_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'unsafe-inline'; "
@@ -283,6 +293,8 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "skill_status_label": lambda status: skill_status_label(lang, status),
         "question_type_label": lambda key: question_type_label(lang, key),
         "count_label": count_label,
+        "curricula": curriculum_options(),
+        "default_curriculum_id": DEFAULT_CURRICULUM_ID,
         "student_explanation": student_explanation,
         "skill_url": skill_url,
         "current_path": request.url.path,
@@ -465,6 +477,91 @@ def login_page(request: Request):
             "identifier": "",
             "success": request.query_params.get("success"),
         },
+    )
+
+
+@app.get("/sample", response_class=HTMLResponse)
+def sample_analysis_page(request: Request):
+    return render(
+        request,
+        "sample_analysis.html",
+        {"user": get_current_user(request)},
+    )
+
+
+@app.get("/trial", response_class=HTMLResponse)
+def public_trial_page(request: Request):
+    return render(
+        request,
+        "trial.html",
+        {"user": get_current_user(request), "error": None, "result": None},
+    )
+
+
+@app.post("/trial", response_class=HTMLResponse)
+def public_trial_submit(request: Request, image: UploadFile = File(...)):
+    user = get_current_user(request)
+    if rate_limited(request, "public_trial", limit=3, window_seconds=3600):
+        message = (
+            "本小时的体验次数已用完。请稍后再试，或创建账号继续使用。"
+            if get_lang(request) == "zh"
+            else "The hourly trial limit has been reached. Try later or create an account."
+        )
+        return render(
+            request,
+            "trial.html",
+            {"user": user, "error": message, "result": None},
+            status_code=429,
+        )
+    suffixes = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }
+    content = image.file.read(config.MAX_UPLOAD_BYTES + 1)
+    if (
+        not content
+        or len(content) > config.MAX_UPLOAD_BYTES
+        or image.content_type not in suffixes
+    ):
+        message = (
+            "请选择不超过上传限制的 JPEG、PNG 或 WebP 图片。"
+            if get_lang(request) == "zh"
+            else "Choose a JPEG, PNG, or WebP image under the upload limit."
+        )
+        return render(
+            request,
+            "trial.html",
+            {"user": user, "error": message, "result": None},
+            status_code=400,
+        )
+    path = save_upload(
+        f"trial-{uuid.uuid4().hex}{suffixes[image.content_type]}",
+        content,
+    )
+    try:
+        result = solve_question_image(path)
+    except Exception:
+        message = (
+            "这次未能完成解答。请确认整道题清晰可见后重试。"
+            if get_lang(request) == "zh"
+            else "The solver could not finish this time. Check that the complete question is clear and try again."
+        )
+        return render(
+            request,
+            "trial.html",
+            {"user": user, "error": message, "result": None},
+            status_code=502,
+        )
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return render(
+        request,
+        "trial.html",
+        {"user": user, "error": None, "result": result},
     )
 
 
@@ -851,11 +948,13 @@ async def student_analyse_upload(
     mark_scheme: UploadFile = File(None),
     paper_name: str = Form(""),
     maximum_marks: str = Form(""),
+    curriculum: str = Form(DEFAULT_CURRICULUM_ID),
 ):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
     try:
+        selected_curriculum = verified_curriculum(curriculum)
         expected_maximum_marks = _parse_expected_maximum_marks(maximum_marks)
     except ValueError as exc:
         return render(
@@ -958,6 +1057,7 @@ async def student_analyse_upload(
                     "analysis_version_id": version_id,
                     "expected_maximum_marks": expected_maximum_marks,
                     "paper_name": paper_name.strip() or None,
+                    "curriculum": selected_curriculum["id"],
                 }
             ),
             datetime.now().isoformat(),

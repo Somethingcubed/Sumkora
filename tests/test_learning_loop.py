@@ -206,7 +206,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
 
     cookies = login(email)
     dashboard = client.get("/student", cookies=cookies)
-    assert "/static/style.css?v=20260728-3" in dashboard.text
+    assert "/static/style.css?v=20260804-1" in dashboard.text
     assert 'width="24" height="24" fill="none"' in dashboard.text
     assert client.get(
         "/student/skills/detail?skill=trigonometric%20graphs", cookies=cookies

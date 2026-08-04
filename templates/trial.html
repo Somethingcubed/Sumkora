@@ -1,0 +1,47 @@
+{% extends "auth_base.html" %}
+{% block title %}{{ tr('Try one question', '试做一道题') }} — Sumkora{% endblock %}
+{% block meta_description %}{{ tr('Upload one mathematics question and test the real Sumkora solver.', '上传一道数学题，体验真实的 Sumkora 解题流程。') }}{% endblock %}
+{% block auth_content %}
+<div class="public-demo">
+  <p class="eyebrow">{{ tr('Real one-question trial', '真实单题体验') }}</p>
+  <h2 class="auth-title">{{ tr('Photograph one complete question', '拍摄一道完整题目') }}</h2>
+  <p class="auth-subtitle">{{ tr('This uses the same vision model as the student solver. Include every diagram, table, restriction, and question part.', '这会使用与学生端相同的视觉模型。请完整拍入图表、条件、取值范围和所有小题。') }}</p>
+
+  {% if error %}<div class="form-message form-message-error" role="alert">{{ error }}</div>{% endif %}
+  {% if result %}
+  <section class="trial-result">
+    <p class="section-kicker">{{ tr('Final answer', '最终答案') }}</p>
+    <div class="solve-final math-copy">{{ result.final_answer_zh if lang == 'zh' else result.final_answer }}</div>
+    <h3>{{ tr('Worked method', '详细解法') }}</h3>
+    <div class="math-copy whitespace-pre-line">{{ result.solution_zh if lang == 'zh' else result.solution_en }}</div>
+  </section>
+  <p class="trial-privacy">{{ tr('The trial image was deleted after processing. Create an account to save questions and build your progress record.', '体验图片已在处理后删除。创建账号后可保存题目并建立学习进度记录。') }}</p>
+  {% endif %}
+
+  <form method="post" action="/trial" enctype="multipart/form-data" class="form-stack" data-trial-form>
+    <label class="trial-dropzone" for="trial-image">
+      <strong>{{ tr('Take or choose a photo', '拍摄或选择照片') }}</strong>
+      <span>{{ tr('JPEG, PNG, or WebP · one complete question', 'JPEG、PNG 或 WebP · 一道完整题目') }}</span>
+      <input id="trial-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required>
+    </label>
+    <button class="button button-primary button-block" type="submit" data-trial-submit>{{ tr('Solve this question', '解答这道题') }}</button>
+    <p class="solve-timer hidden" role="status" aria-live="polite" data-trial-timer>{{ tr('Reading and solving…', '正在读取并解答…') }} <span>0</span>s</p>
+  </form>
+  <p class="auth-switch"><a href="/sample">{{ tr('View sample analysis', '查看示例分析') }}</a> · <a href="/signup">{{ tr('Create account', '创建账号') }}</a></p>
+</div>
+<script>
+(() => {
+  const form = document.querySelector('[data-trial-form]');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    const button = form.querySelector('[data-trial-submit]');
+    const timer = form.querySelector('[data-trial-timer]');
+    button.disabled = true;
+    button.textContent = {{ tr('Solving…', '正在解答…')|tojson }};
+    timer.classList.remove('hidden');
+    let seconds = 0;
+    window.setInterval(() => { timer.querySelector('span').textContent = String(++seconds); }, 1000);
+  });
+})();
+</script>
+{% endblock %}
