@@ -7,6 +7,7 @@
 
   let installPrompt = null;
   const buttons = Array.from(document.querySelectorAll("[data-install-app]"));
+  const nudges = Array.from(document.querySelectorAll("[data-install-nudge]"));
   const help = document.querySelector("[data-install-help]");
   const helpCloseButtons = Array.from(document.querySelectorAll("[data-install-help-close]"));
   const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
@@ -27,6 +28,7 @@
 
   if (isStandalone) {
     buttons.forEach((button) => { button.hidden = true; });
+    nudges.forEach((nudge) => { nudge.hidden = true; });
   }
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -60,5 +62,6 @@
     installPrompt = null;
     hideInstallHelp();
     buttons.forEach((button) => { button.hidden = true; });
+    nudges.forEach((nudge) => { nudge.hidden = true; });
   });
 })();

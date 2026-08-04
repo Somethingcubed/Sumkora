@@ -105,6 +105,9 @@ def test_pwa_assets_have_root_scope_and_private_pages_are_not_precached():
     assert "Install app" in dashboard.text
     assert "data-install-always" in dashboard.text
     assert "Add to Home Screen" in dashboard.text
+    assert "Add Sumkora to your Home Screen" in dashboard.text
+    assert "It takes about 10 seconds" in dashboard.text
+    assert "data-install-nudge" in dashboard.text
 
     settings = client.get("/student/settings")
     assert "Install or view instructions" in settings.text

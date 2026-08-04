@@ -3,6 +3,15 @@
 {% block content %}
 {% if notice %}<div class="form-message form-message-success mb-6" role="status">{{ notice }}</div>{% endif %}
 
+<aside class="dashboard-install-nudge" data-install-nudge aria-label="{{ tr('Install Sumkora', '安装 Sumkora') }}">
+  <span class="dashboard-install-icon" aria-hidden="true">S</span>
+  <div>
+    <strong>{{ tr('Add Sumkora to your Home Screen', '将 Sumkora 添加到主屏幕') }}</strong>
+    <p>{{ tr('Open it in one tap, just like an app. It takes about 10 seconds.', '像应用一样一键打开，安装大约只需 10 秒。') }}</p>
+  </div>
+  <button type="button" class="button button-secondary" data-install-app data-install-always>{{ tr('Add to Home Screen', '添加到主屏幕') }}</button>
+</aside>
+
 <section class="dashboard-quick-actions" aria-label="{{ tr('Quick actions', '快捷操作') }}">
   <a href="/student/solve" class="quick-action quick-action-solve">
     <span class="quick-action-icon" aria-hidden="true">?</span>

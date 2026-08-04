@@ -1025,6 +1025,55 @@ textarea.field {
   gap: 2rem;
 }
 
+.dashboard-install-nudge {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #dcd9ff;
+  border-radius: var(--radius);
+  background: linear-gradient(105deg, #faf9ff, #f5f7ff);
+  box-shadow: var(--shadow-sm);
+  gap: 0.8rem;
+}
+
+.dashboard-install-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  color: white;
+  border-radius: 0.7rem;
+  background: var(--brand-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.dashboard-install-nudge strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.dashboard-install-nudge p {
+  margin: 0.14rem 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.dashboard-install-nudge .button {
+  padding: 0.55rem 0.75rem;
+  white-space: nowrap;
+}
+
+@media (display-mode: standalone) {
+  .dashboard-install-nudge {
+    display: none;
+  }
+}
+
 .dashboard-quick-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2558,6 +2607,15 @@ details[open] > summary {
   }
 
   .dashboard-intro .button {
+    width: 100%;
+  }
+
+  .dashboard-install-nudge {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .dashboard-install-nudge .button {
+    grid-column: 1 / -1;
     width: 100%;
   }
 
