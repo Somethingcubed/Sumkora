@@ -2141,11 +2141,76 @@ details[open] > summary {
   text-align: center;
 }
 
+.trial-dropzone:hover {
+  border-color: var(--brand);
+  background: #f7f5ff;
+}
+
+.trial-dropzone.is-selected {
+  place-items: stretch;
+  border-style: solid;
+  border-color: #75c69a;
+  background: #f6fef9;
+}
+
 .trial-dropzone input {
   position: absolute;
   width: 1px;
   height: 1px;
   opacity: 0;
+}
+
+.trial-empty-state {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.trial-selected-state {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  gap: 0.9rem;
+  text-align: left;
+}
+
+.trial-selected-state img {
+  width: 5rem;
+  height: 5rem;
+  object-fit: cover;
+  border: 1px solid #b7e4c9;
+  border-radius: 0.7rem;
+  background: white;
+}
+
+.trial-selected-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.18rem;
+}
+
+.trial-selected-copy strong {
+  color: #157347;
+}
+
+.trial-selected-copy > span,
+.trial-selected-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trial-selection-status {
+  margin: -0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+[data-trial-submit]:disabled {
+  cursor: not-allowed;
 }
 
 .auth-preview-links {

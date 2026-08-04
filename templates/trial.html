@@ -29,12 +29,23 @@
   {% endif %}
 
   <form method="post" action="/trial" enctype="multipart/form-data" class="form-stack" data-trial-form>
-    <label class="trial-dropzone" for="trial-image">
-      <strong>{{ tr('Photograph or choose the unanswered question', '拍摄或选择未作答的题目') }}</strong>
-      <span>{{ tr('Question only — no completed work or answer needed', '只需题目——无需完成答题或提供答案') }}</span>
+    <label class="trial-dropzone" for="trial-image" data-trial-dropzone>
+      <span class="trial-empty-state" data-trial-empty>
+        <strong>{{ tr('Photograph or choose the unanswered question', '拍摄或选择未作答的题目') }}</strong>
+        <span>{{ tr('Question only — no completed work or answer needed', '只需题目——无需完成答题或提供答案') }}</span>
+      </span>
+      <span class="trial-selected-state hidden" data-trial-selected>
+        <img alt="" data-trial-preview>
+        <span class="trial-selected-copy">
+          <strong><span aria-hidden="true">✓</span> {{ tr('Question selected', '已选择题目') }}</strong>
+          <span data-trial-filename></span>
+          <small>{{ tr('Tap here to replace this image', '点击此处可更换图片') }}</small>
+        </span>
+      </span>
       <input id="trial-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required>
     </label>
-    <button class="button button-primary button-block" type="submit" data-trial-submit>{{ tr('Solve this question', '解答这道题') }}</button>
+    <p class="trial-selection-status" role="status" aria-live="polite" data-trial-selection-status>{{ tr('No question selected yet.', '尚未选择题目。') }}</p>
+    <button class="button button-primary button-block" type="submit" data-trial-submit disabled>{{ tr('Choose a question first', '请先选择题目') }}</button>
     <p class="solve-timer hidden" role="status" aria-live="polite" data-trial-timer>{{ tr('Reading and solving…', '正在读取并解答…') }} <span>0</span>s</p>
   </form>
   <p class="auth-switch"><a href="/sample">{{ tr('View sample analysis', '查看示例分析') }}</a> · <a href="/signup">{{ tr('Create account', '创建账号') }}</a></p>
@@ -43,8 +54,43 @@
 (() => {
   const form = document.querySelector('[data-trial-form]');
   if (!form) return;
+  const input = form.querySelector('#trial-image');
+  const dropzone = form.querySelector('[data-trial-dropzone]');
+  const emptyState = form.querySelector('[data-trial-empty]');
+  const selectedState = form.querySelector('[data-trial-selected]');
+  const preview = form.querySelector('[data-trial-preview]');
+  const filename = form.querySelector('[data-trial-filename]');
+  const selectionStatus = form.querySelector('[data-trial-selection-status]');
+  const button = form.querySelector('[data-trial-submit]');
+  let previewUrl = null;
+
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+    if (!file) {
+      dropzone.classList.remove('is-selected');
+      emptyState.classList.remove('hidden');
+      selectedState.classList.add('hidden');
+      preview.removeAttribute('src');
+      filename.textContent = '';
+      selectionStatus.textContent = {{ tr('No question selected yet.', '尚未选择题目。')|tojson }};
+      button.textContent = {{ tr('Choose a question first', '请先选择题目')|tojson }};
+      button.disabled = true;
+      return;
+    }
+    previewUrl = URL.createObjectURL(file);
+    preview.src = previewUrl;
+    filename.textContent = file.name;
+    dropzone.classList.add('is-selected');
+    emptyState.classList.add('hidden');
+    selectedState.classList.remove('hidden');
+    selectionStatus.textContent = {{ tr('Question selected. You can now ask Sumkora to solve it.', '题目已选择，现在可以请 Sumkora 解答。')|tojson }};
+    button.textContent = {{ tr('Solve this question', '解答这道题')|tojson }};
+    button.disabled = false;
+  });
+
   form.addEventListener('submit', () => {
-    const button = form.querySelector('[data-trial-submit]');
     const timer = form.querySelector('[data-trial-timer]');
     button.disabled = true;
     button.textContent = {{ tr('Solving…', '正在解答…')|tojson }};

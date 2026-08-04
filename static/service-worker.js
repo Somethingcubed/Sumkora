@@ -1,6 +1,6 @@
-const CACHE_NAME = "sumkora-shell-v2";
+const CACHE_NAME = "sumkora-shell-v3";
 const SHELL = [
-  "/static/style.css?v=20260804-2",
+  "/static/style.css?v=20260804-3",
   "/static/tailwind.css?v=20260726-2",
   "/static/favicon.svg",
   "/static/site.webmanifest",

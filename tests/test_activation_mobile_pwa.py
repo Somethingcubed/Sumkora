@@ -46,6 +46,14 @@ def test_public_sample_and_real_trial_are_available_before_signup(monkeypatch):
     assert "no completed work or answer needed" in trial.text
     assert "deleted after processing" in trial.text
 
+    picker = client.get("/trial")
+    assert "No question selected yet." in picker.text
+    assert "Choose a question first" in picker.text
+    assert "Question selected. You can now ask Sumkora to solve it." in picker.text
+    assert "data-trial-preview" in picker.text
+    assert "data-trial-filename" in picker.text
+    assert 'data-trial-submit disabled' in picker.text
+
 
 def test_upload_is_phone_ready_and_only_verified_curriculum_is_selectable():
     login_student()
