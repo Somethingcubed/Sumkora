@@ -33,6 +33,49 @@
   {% endif %}
 </section>
 
+{% if companion.enabled %}
+<section class="justin-companion stage-{{ companion.stage_index }}" id="justin-companion" aria-labelledby="justin-companion-title">
+  <div class="companion-photo-wrap">
+    <img src="/static/images/justin-bieber-2015.jpg" alt="{{ tr('Justin Bieber performing in 2015', '贾斯汀·比伯在 2015 年演出') }}" width="639" height="426">
+    <span class="companion-level">{{ tr('Stage', '阶段') }} {{ companion.stage_index + 1 }}</span>
+  </div>
+  <div class="companion-main">
+    <div class="companion-heading">
+      <div>
+        <p class="eyebrow">{{ tr('Your daily companion', '你的每日伙伴') }}</p>
+        <h2 id="justin-companion-title">{{ tr('Justin Bieber companion', '贾斯汀·比伯伙伴') }}</h2>
+      </div>
+      <a href="/student/settings#companion-settings" class="companion-settings-link">{{ tr('Settings', '设置') }}</a>
+    </div>
+    <p class="companion-stage-name">{{ companion.stage.name_zh if lang == 'zh' else companion.stage.name_en }}</p>
+    <div class="companion-stats" aria-label="{{ tr('Companion progress', '伙伴进度') }}">
+      <span><strong>{{ companion.streak_count }}</strong> {{ tr('day streak', '天连续') }}</span>
+      <span><strong>{{ companion.feed_count }}</strong> {{ tr('times fed', '次喂养') }}</span>
+    </div>
+    <div class="companion-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ companion.progress }}">
+      <span style="width: {{ companion.progress }}%"></span>
+    </div>
+    {% if companion.next_stage %}
+    <p class="companion-next">{{ tr(companion.feeds_to_next ~ ' more feeds to ' ~ companion.next_stage.name_en, '再喂养 ' ~ companion.feeds_to_next ~ ' 次即可达到“' ~ companion.next_stage.name_zh ~ '”') }}</p>
+    {% else %}
+    <p class="companion-next">{{ tr('Highest stage unlocked.', '已解锁最高阶段。') }}</p>
+    {% endif %}
+  </div>
+  <div class="companion-action">
+    {% if companion.fed_today %}
+    <button class="button companion-feed-button" type="button" disabled aria-disabled="true">{{ tr('Fed for today ✓', '今天已喂养 ✓') }}</button>
+    <small>{{ tr('Come back tomorrow to continue the streak.', '明天再来继续保持连续记录。') }}</small>
+    {% else %}
+    <form method="post" action="/student/companion/feed">
+      <button class="button companion-feed-button" type="submit">{{ tr('Give a snack', '喂一个零食') }}</button>
+    </form>
+    <small>{{ tr('Available once each day', '每天可以喂养一次') }}</small>
+    {% endif %}
+  </div>
+  <p class="companion-legal">{{ tr('Unofficial fan feature. Not endorsed by Justin Bieber.', '非官方粉丝功能，未获贾斯汀·比伯代言。') }} {{ tr('Photo', '照片') }}: <a href="https://commons.wikimedia.org/wiki/File:Justin_Bieber_in_2015.jpg" target="_blank" rel="noopener noreferrer">Lou Stejskal</a>, <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noopener noreferrer">CC BY 2.0</a>.</p>
+</section>
+{% endif %}
+
 {% if not direct.papers %}
 <section class="surface welcome-surface max-w-4xl mx-auto overflow-hidden">
   <div class="grid md:grid-cols-[1.2fr_0.8fr] gap-8 items-center py-4 md:py-8">

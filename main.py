@@ -63,6 +63,7 @@ from db import (
     verify_password,
     weak_topics,
 )
+from companion import companion_state, feed_companion, set_companion_enabled
 from grading import ensure_grade_rows, finalize_submission, reset_grade_rows, run_grading_job
 from i18n import (
     get_lang,
@@ -307,6 +308,8 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
             and user_has_role(context["user"]["id"], "owner")
         ),
     }
+    if context.get("user") and context["user"]["role"] == "student":
+        context["companion"] = companion_state(context["user"]["id"])
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
 
@@ -2487,6 +2490,34 @@ def student_settings_exam(
         ),
     )
     return RedirectResponse("/student/settings?success=exam", status_code=303)
+
+
+@app.post("/student/settings/companion")
+def student_settings_companion(
+    request: Request,
+    companion_enabled: str = Form("0"),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    set_companion_enabled(user["id"], companion_enabled == "1")
+    return RedirectResponse(
+        "/student/settings?success=companion",
+        status_code=303,
+    )
+
+
+@app.post("/student/companion/feed")
+def student_companion_feed(request: Request):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    state = feed_companion(user["id"])
+    result = "fed" if state["fed_today"] else "disabled"
+    return RedirectResponse(
+        f"/student?companion={result}#justin-companion",
+        status_code=303,
+    )
 
 
 @app.post("/student/settings/password", response_class=HTMLResponse)

@@ -637,6 +637,17 @@ def init_db():
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS student_companions (
+            student_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0, 1)),
+            feed_count INTEGER NOT NULL DEFAULT 0,
+            streak_count INTEGER NOT NULL DEFAULT 0,
+            longest_streak INTEGER NOT NULL DEFAULT 0,
+            last_fed_date TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS taxonomy_versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version TEXT NOT NULL UNIQUE,

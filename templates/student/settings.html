@@ -13,6 +13,7 @@
 {% if success == 'profile' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your display name has been updated.', '显示名称已更新。') }}</div>{% endif %}
 {% if success == 'password' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your password has been updated.', '密码已更新。') }}</div>{% endif %}
 {% if success == 'exam' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your exam countdown has been updated.', '考试倒计时已更新。') }}</div>{% endif %}
+{% if success == 'companion' %}<div class="form-message form-message-success mb-6" role="status">{{ tr('Your companion preference has been saved.', '你的伙伴设置已保存。') }}</div>{% endif %}
 
 <div class="settings-grid">
   <section class="surface" id="exam-settings">
@@ -55,6 +56,25 @@
       <input class="field" id="new-password-confirmation" type="password" name="password_confirmation" minlength="8" maxlength="128" autocomplete="new-password" required>
       <button class="button button-secondary" type="submit">{{ tr('Update password', '更新密码') }}</button>
     </form>
+  </section>
+
+  <section class="surface companion-settings-card" id="companion-settings">
+    <img src="/static/images/justin-bieber-2015.jpg" alt="{{ tr('Justin Bieber performing in 2015', '贾斯汀·比伯在 2015 年演出') }}" width="639" height="426">
+    <div>
+      <p class="eyebrow">{{ tr('Optional prototype', '可选原型功能') }}</p>
+      <h2>{{ tr('Justin Bieber companion', '贾斯汀·比伯伙伴') }}</h2>
+      <p class="text-sm text-slate-500 mt-2">{{ tr('Feed the companion once a day, build a streak, and unlock new stages. There is no chat.', '每天喂养一次，保持连续记录并解锁新阶段。此功能不包含聊天。') }}</p>
+      <form method="post" action="/student/settings/companion" class="form-stack mt-5">
+        <input type="hidden" name="companion_enabled" value="0">
+        <label class="check-row">
+          <input type="checkbox" name="companion_enabled" value="1" {% if companion.enabled %}checked{% endif %}>
+          <span>{{ tr('Show this companion on my dashboard', '在我的主页显示此伙伴') }}</span>
+        </label>
+        <button class="button button-secondary" type="submit">{{ tr('Save companion setting', '保存伙伴设置') }}</button>
+      </form>
+      <p class="companion-disclaimer">{{ tr('Unofficial fan feature. Not affiliated with or endorsed by Justin Bieber.', '非官方粉丝功能，与贾斯汀·比伯无关联，也未获其代言。') }}</p>
+      <p class="companion-credit">{{ tr('Photo', '照片') }}: <a href="https://commons.wikimedia.org/wiki/File:Justin_Bieber_in_2015.jpg" target="_blank" rel="noopener noreferrer">Lou Stejskal</a> · <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noopener noreferrer">CC BY 2.0</a></p>
+    </div>
   </section>
 
   <section class="surface install-settings-card">
