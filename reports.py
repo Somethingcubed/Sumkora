@@ -21,6 +21,7 @@ from reportlab.platypus import (
 )
 
 from accounts import student_explanation
+from curricula import profile_from_user
 
 from analytics import (
     analytics_practice,
@@ -244,6 +245,9 @@ def assessment_rows(submission_id):
 
 def active_profile_data(student_id):
     """Read profile evidence from the current self-service paper system."""
+    curriculum = profile_from_user(
+        query_one("SELECT * FROM users WHERE id = ?", (student_id,))
+    )
     score_history = [
         dict(row)
         for row in query_all(
@@ -263,11 +267,12 @@ def active_profile_data(student_id):
               ON pav.paper_id = sp.id
              AND pav.version_number = sp.latest_version_number
             WHERE sp.student_id = ?
+              AND sp.curriculum_id = ? AND sp.curriculum_level = ?
               AND sp.status = 'completed'
               AND pav.status = 'completed'
             ORDER BY analysed_at, sp.id
             """,
-            (student_id,),
+            (student_id, curriculum["id"], curriculum["level"]),
         )
     ]
     if not score_history:
@@ -295,11 +300,12 @@ def active_profile_data(student_id):
         JOIN analysis_question_results aqr
           ON aqr.analysis_version_id = pav.id
         WHERE sp.student_id = ?
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
           AND sp.status = 'completed'
           AND pav.status = 'completed'
         ORDER BY sp.updated_at DESC, aqr.id
         """,
-        (student_id,),
+        (student_id, curriculum["id"], curriculum["level"]),
     )
     review_questions = []
     for raw in question_rows:
@@ -324,11 +330,12 @@ def active_profile_data(student_id):
             """
             SELECT title, topic, actual_count, created_at
             FROM practice_sets
-            WHERE student_id = ? AND status != 'archived'
+            WHERE student_id = ? AND curriculum_id = ?
+              AND curriculum_level = ? AND status != 'archived'
             ORDER BY created_at DESC
             LIMIT 5
             """,
-            (student_id,),
+            (student_id, curriculum["id"], curriculum["level"]),
         )
     ]
     return {
@@ -336,6 +343,7 @@ def active_profile_data(student_id):
         "topic_states": profile["topic_states"],
         "review_questions": review_questions,
         "recent_practice": recent_practice,
+        "curriculum": curriculum,
     }
 
 
@@ -348,7 +356,17 @@ def active_profile_report(student, data, lang="en", variant="student"):
     identity_line = f"{t['student']}: {student['name']}"
     if variant == "teacher":
         identity_line += f" | {t['class']}: {student['class_name'] or '-'}"
-    identity_line += f" | {t['generated']}: {datetime.now().strftime('%Y-%m-%d')}"
+    curriculum = data["curriculum"]
+    curriculum_name = (
+        curriculum["name_zh"] if lang == "zh" else curriculum["name"]
+    )
+    level_name = (
+        curriculum["level_name_zh"] if lang == "zh" else curriculum["level_name"]
+    )
+    identity_line += (
+        f" | {curriculum_name} · {level_name}"
+        f" | {t['generated']}: {datetime.now().strftime('%Y-%m-%d')}"
+    )
     story.extend([p(identity_line, styles["small"]), Spacer(1, 8)])
 
     history = data["score_history"]

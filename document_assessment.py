@@ -20,6 +20,7 @@ from typing import Any, Callable
 import fitz
 
 import config
+from curricula import curriculum_prompt_context
 from ocr import api_post_json, cxsee_api_base
 
 
@@ -302,6 +303,7 @@ def _prompt(
     mode: str,
     repair_errors: list[str] | None = None,
     expected_maximum_marks: float | None = None,
+    curriculum: dict[str, Any] | None = None,
 ) -> str:
     mode_instruction = (
         """
@@ -345,12 +347,34 @@ and ensure the sum of question maximum_marks and total_max_marks both equal
 {expected_maximum_marks:g}. If the document genuinely contradicts this value,
 explain the discrepancy in warnings without inventing questions or marks.
 """
+    subject = str((curriculum or {}).get("subject") or "mathematics")
+    curriculum_instruction = (
+        curriculum_prompt_context(curriculum)
+        if curriculum
+        else "Use Cambridge IGCSE Additional Mathematics 0606 terminology."
+    )
+    subject_rules = (
+        """
+Physics-specific rules:
+- Check formula choice, substitution, units, significant figures, graphs,
+  vector/scalar meaning, and scientific explanations.
+- Distinguish knowledge, calculation, explanation, and experimental skills.
+- For practical work, evaluate variables, apparatus, method, tables, graphs,
+  uncertainty, conclusions, and improvements.
+"""
+        if subject == "physics"
+        else ""
+    )
     return rf"""
-You are Sumkora's senior Cambridge IGCSE mathematics assessor. Assess the
+You are Sumkora's senior {subject} assessor. Assess the
 documents as a whole. Work question by question internally, but do not rely on
 an external OCR mapper or assume one answer page per question.
 
 {mode_instruction}
+
+Curriculum boundary:
+{curriculum_instruction}
+{subject_rules}
 
 Rules:
 - Read every page. Page numbers in evidence_pages refer to the completed-work
@@ -1004,11 +1028,20 @@ def _ensure_question_display_fields(
     return result
 
 
-def _document_context_prompt(assessment: dict[str, Any]) -> str:
+def _document_context_prompt(
+    assessment: dict[str, Any],
+    curriculum: dict[str, Any] | None = None,
+) -> str:
     targets = _context_targets(assessment)
+    subject = str((curriculum or {}).get("subject") or "mathematics")
+    boundary = (
+        curriculum_prompt_context(curriculum)
+        if curriculum
+        else "Cambridge IGCSE Additional Mathematics 0606."
+    )
     return rf"""
 You are transcribing only the lost-mark questions from the same complete
-student mathematics paper that has already been marked. Read the attached PDF
+student {subject} paper that has already been marked. Read the attached PDF
 visually and return exactly one item for each target label below, in the same
 order. Do not mark or recalculate anything.
 
@@ -1021,7 +1054,9 @@ matrices, and set notation. Keep prose outside TeX delimiters.
 
 For evidence_quote, briefly transcribe the exact visible student step or final
 answer relevant to the lost mark. Use an empty string only when no work is
-visible. skill must be a concise mathematical skill name.
+visible. skill must be a concise {subject} skill name.
+
+Curriculum boundary: {boundary}
 
 Target labels and already-verified page hints:
 {json.dumps(targets, ensure_ascii=False)}
@@ -1085,6 +1120,7 @@ def _enrich_document_context(
     model: str,
     document_paths: list[str],
     timeout_seconds: int | None = None,
+    curriculum: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     targets = _context_targets(assessment)
     if not targets:
@@ -1092,7 +1128,7 @@ def _enrich_document_context(
     started = time.monotonic()
     response_text, response_metadata = _call_structured_document_model(
         model=model,
-        prompt=_document_context_prompt(assessment),
+        prompt=_document_context_prompt(assessment, curriculum),
         schema=document_context_schema(),
         document_paths=document_paths,
         reasoning_effort="low",
@@ -1112,7 +1148,10 @@ def _enrich_document_context(
     }
 
 
-def _feedback_prompt(assessment: dict[str, Any]) -> str:
+def _feedback_prompt(
+    assessment: dict[str, Any],
+    curriculum: dict[str, Any] | None = None,
+) -> str:
     source = {
         "assessment_mode": assessment["assessment_mode"],
         "total_max_marks": assessment["total_max_marks"],
@@ -1131,8 +1170,9 @@ def _feedback_prompt(assessment: dict[str, Any]) -> str:
         ],
         "warnings": assessment.get("warnings") or [],
     }
+    subject = str((curriculum or {}).get("subject") or "mathematics")
     return f"""
-You are Sumkora's bilingual mathematics learning coach. The marks below have
+You are Sumkora's bilingual {subject} learning coach. The marks below have
 already been validated and are immutable. Do not recalculate, reinterpret, or
 change any mark.
 
@@ -1210,11 +1250,12 @@ def _enrich_feedback(
     *,
     model: str,
     timeout_seconds: int | None = None,
+    curriculum: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     started = time.monotonic()
     response_text, response_metadata = _call_structured_document_model(
         model=model,
-        prompt=_feedback_prompt(assessment),
+        prompt=_feedback_prompt(assessment, curriculum),
         schema=feedback_schema(),
         document_paths=[],
         reasoning_effort="low",
@@ -1280,7 +1321,10 @@ def audit_schema() -> dict[str, Any]:
     }
 
 
-def _audit_prompt(assessment: dict[str, Any]) -> str:
+def _audit_prompt(
+    assessment: dict[str, Any],
+    curriculum: dict[str, Any] | None = None,
+) -> str:
     prior = {
         "questions": [
             {
@@ -1299,9 +1343,13 @@ def _audit_prompt(assessment: dict[str, Any]) -> str:
             for item in assessment["questions"]
         ]
     }
+    curriculum_name = str(
+        (curriculum or {}).get("name")
+        or "Cambridge IGCSE Additional Mathematics"
+    )
     return f"""
-You are the independent senior examiner auditing a proposed Cambridge IGCSE
-mathematics assessment. You receive the same complete worked-paper PDF and
+You are the independent senior examiner auditing a proposed {curriculum_name}
+assessment. You receive the same complete worked-paper PDF and
 complete official mark-scheme PDF used by the first assessor.
 
 Independently verify every proposed question mark. Do not defer to the prior
@@ -1425,11 +1473,12 @@ def _audit_detailed_assessment(
     mark_scheme_path: str,
     *,
     completed_work_pages: int,
+    curriculum: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     started = time.monotonic()
     response_text, response_metadata = _call_structured_document_model(
         model=config.WHOLE_DOCUMENT_AUDIT_MODEL,
-        prompt=_audit_prompt(assessment),
+        prompt=_audit_prompt(assessment, curriculum),
         schema=audit_schema(),
         document_paths=[completed_work_path, mark_scheme_path],
         reasoning_effort=config.WHOLE_DOCUMENT_AUDIT_REASONING_EFFORT,
@@ -1468,6 +1517,7 @@ def assess_documents(
     completed_work_text: str | None = None,
     mark_scheme_text: str | None = None,
     progress_callback: ProgressCallback | None = None,
+    curriculum: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not config.CXSEE_API_KEY:
         raise RuntimeError("The assessment API key is not configured.")
@@ -1561,6 +1611,7 @@ def assess_documents(
                             mode,
                             repair_errors,
                             expected_maximum_marks=expected_maximum_marks,
+                            curriculum=curriculum,
                         ),
                         schema=assessment_schema(),
                         document_paths=document_paths,
@@ -1621,6 +1672,7 @@ def assess_documents(
                 "primary_timeout_seconds": primary_timeout,
                 "transport_attempts": transport_attempt + 1,
                 "transport_timeouts": transport_timeouts,
+                "curriculum_id": (curriculum or {}).get("id"),
             }
             if (
                 mode == "detailed"
@@ -1637,6 +1689,7 @@ def assess_documents(
                     completed_work_path,
                     mark_scheme_path,
                     completed_work_pages=pages,
+                    curriculum=curriculum,
                 )
                 provider_metadata["audit"] = audit_metadata
                 provider_metadata["duration_ms"] = int(
@@ -1685,6 +1738,7 @@ def assess_documents(
                             model=selected_model,
                             document_paths=[completed_work_path],
                             timeout_seconds=context_timeout,
+                            curriculum=curriculum,
                         )
                         provider_metadata["document_context"] = context_metadata
                     except Exception as exc:
@@ -1736,6 +1790,7 @@ def assess_documents(
                             validated,
                             model=selected_model,
                             timeout_seconds=feedback_timeout,
+                            curriculum=curriculum,
                         )
                         provider_metadata["feedback"] = feedback_metadata
                     except Exception as exc:

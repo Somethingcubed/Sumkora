@@ -9,13 +9,18 @@ import re
 from pathlib import Path
 
 import config
+from curricula import curriculum_prompt_context
 from document_assessment import (
     _extract_response_text,
     _parse_provider_json,
     _strip_json_fence,
 )
 from ocr import api_post_json, cxsee_api_base
-from taxonomy import canonical_skill, canonical_topic
+from taxonomy import (
+    canonical_skill,
+    canonical_topic,
+    canonical_topic_for_curriculum,
+)
 
 
 SOLUTION_SCHEMA = {
@@ -67,9 +72,8 @@ TEXT_SOLUTIONS_SCHEMA = {
 }
 
 
-PROMPT = """You are Sumkora's mathematics tutor. Read the single question image
-directly and solve it. The image may come from any mathematics source, not an
-IGCSE paper. Preserve every relevant instruction, table, diagram label,
+PROMPT = """You are Sumkora's subject tutor. Read the single question image
+directly and solve it. Preserve every relevant instruction, table, diagram label,
 definition, domain restriction, unit, and question part in the transcription.
 Do not silently repair or discard context.
 
@@ -87,12 +91,10 @@ equation in \\[ ... \\]. Never leave LaTeX commands such as \\frac, \\sqrt,
 \\theta, or superscript notation outside MathJax delimiters. Keep ordinary
 sentences outside the delimiters.
 
-Check the algebra, signs, domain, exact/approximate form, and units before
+Check the reasoning, calculations, signs, domain, exact/approximate form, and units before
 returning. The final_answer fields MUST exactly agree with the final line of
 the corresponding worked solution; copy the same result rather than
-recalculating or simplifying it differently. Use one of these broad topics when appropriate: Algebra, Functions
-and graphs, Coordinate geometry, Geometry, Trigonometry, Calculus, Sequences
-and series, Vectors. Return only the required JSON object."""
+recalculating or simplifying it differently. Return only the required JSON object."""
 
 TEXT_SOLUTIONS_PROMPT = """You are Sumkora's mathematics tutor. Produce a
 concise, complete worked solution for every mathematics question in the JSON
@@ -182,7 +184,22 @@ def _enforce_solution_consistency(parsed: dict) -> None:
             parsed[final_key] = conclusion
 
 
-def solve_question_image(path: str) -> dict:
+def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
+    curriculum_instruction = (
+        curriculum_prompt_context(curriculum)
+        if curriculum
+        else (
+            "Subject: mathematics. The source may be any curriculum. "
+            "Use a clear broad topic and a precise skill."
+        )
+    )
+    physics_instruction = (
+        "Check equations, units, significant figures, directions, diagrams, "
+        "and experimental reasoning before returning."
+        if curriculum and curriculum.get("subject") == "physics"
+        else ""
+    )
+    prompt = f"{PROMPT}\n\n{curriculum_instruction}\n{physics_instruction}"
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -191,7 +208,7 @@ def solve_question_image(path: str) -> dict:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": PROMPT},
+                        {"type": "input_text", "text": prompt},
                         {"type": "input_image", "image_url": _image_data_url(path)},
                     ],
                 }
@@ -216,10 +233,19 @@ def solve_question_image(path: str) -> dict:
         _strip_json_fence(_extract_response_text(result))
     )
     _enforce_solution_consistency(parsed)
-    parsed["topic"] = canonical_topic(
-        parsed.get("topic", ""),
-        parsed.get("skill", ""),
-        parsed.get("transcription", ""),
+    parsed["topic"] = (
+        canonical_topic_for_curriculum(
+            curriculum["id"],
+            parsed.get("topic", ""),
+            parsed.get("skill", ""),
+            parsed.get("transcription", ""),
+        )
+        if curriculum
+        else canonical_topic(
+            parsed.get("topic", ""),
+            parsed.get("skill", ""),
+            parsed.get("transcription", ""),
+        )
     )
     parsed["skill"] = canonical_skill(parsed.get("skill", ""), parsed["topic"])
     parsed["classification_confidence"] = max(

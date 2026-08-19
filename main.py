@@ -31,7 +31,13 @@ from accounts import (
     validate_password,
     validate_username,
 )
-from curricula import DEFAULT_CURRICULUM_ID, curriculum_options, verified_curriculum
+from curricula import (
+    DEFAULT_CURRICULUM_ID,
+    curriculum_options,
+    curriculum_profile,
+    normalise_study_language,
+    profile_from_user,
+)
 from assessment import (
     compare_papers,
     marks_lost_breakdown,
@@ -89,6 +95,7 @@ from reports import (
     self_service_assessment_report,
 )
 from learning import (
+    create_generated_practice_set,
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
@@ -280,6 +287,11 @@ def redirect_login():
 
 def render(request: Request, name: str, context: dict, status_code: int = 200):
     lang = get_lang(request)
+    active_curriculum = (
+        profile_from_user(context.get("user"))
+        if context.get("user") and context["user"]["role"] == "student"
+        else None
+    )
     context = {
         **context,
         "lang": lang,
@@ -296,6 +308,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "count_label": count_label,
         "curricula": curriculum_options(),
         "default_curriculum_id": DEFAULT_CURRICULUM_ID,
+        "active_curriculum": active_curriculum,
         "student_explanation": student_explanation,
         "skill_url": skill_url,
         "current_path": request.url.path,
@@ -617,6 +630,7 @@ def login_submit(
 def signup_page(request: Request):
     if get_current_user(request):
         return RedirectResponse("/", status_code=303)
+    selected_curriculum = curriculum_profile(DEFAULT_CURRICULUM_ID)
     return render(
         request,
         "signup.html",
@@ -626,6 +640,8 @@ def signup_page(request: Request):
             "error_field": None,
             "username": "",
             "display_name": "",
+            "selected_curriculum_id": selected_curriculum["id"],
+            "selected_curriculum": selected_curriculum,
         },
     )
 
@@ -637,11 +653,19 @@ def signup_submit(
     password: str = Form(...),
     password_confirmation: str = Form(...),
     display_name: str = Form(""),
+    curriculum_id: str = Form(DEFAULT_CURRICULUM_ID),
+    curriculum_level: str = Form(""),
 ):
+    try:
+        selected_curriculum = curriculum_profile(curriculum_id, curriculum_level)
+    except ValueError:
+        selected_curriculum = curriculum_profile(DEFAULT_CURRICULUM_ID)
     form_context = {
         "user": None,
         "username": username.strip(),
         "display_name": display_name.strip(),
+        "selected_curriculum_id": selected_curriculum["id"],
+        "selected_curriculum": selected_curriculum,
     }
     if rate_limited(request, "signup", limit=20):
         return render(
@@ -712,8 +736,9 @@ def signup_submit(
             """
             INSERT INTO users
             (email, username, username_normalized, password_hash, name, role,
-             recovery_code_hash)
-            VALUES (?, ?, ?, ?, ?, 'student', ?)
+             recovery_code_hash, curriculum_id, curriculum_level,
+             study_language)
+            VALUES (?, ?, ?, ?, ?, 'student', ?, ?, ?, 'auto')
             """,
             (
                 internal_email,
@@ -722,6 +747,8 @@ def signup_submit(
                 hash_password(password),
                 safe_display_name,
                 recovery_code_hash(recovery_code),
+                selected_curriculum["id"],
+                selected_curriculum["level"],
             ),
         )
     except sqlite3.IntegrityError:
@@ -951,13 +978,20 @@ async def student_analyse_upload(
     mark_scheme: UploadFile = File(None),
     paper_name: str = Form(""),
     maximum_marks: str = Form(""),
-    curriculum: str = Form(DEFAULT_CURRICULUM_ID),
+    curriculum: str = Form(""),
+    curriculum_level: str = Form(""),
+    study_language: str = Form("auto"),
 ):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
     try:
-        selected_curriculum = verified_curriculum(curriculum)
+        current_profile = profile_from_user(user)
+        selected_curriculum = curriculum_profile(
+            curriculum or current_profile["id"],
+            curriculum_level or current_profile["level"],
+            study_language or current_profile["study_language"],
+        )
         expected_maximum_marks = _parse_expected_maximum_marks(maximum_marks)
     except ValueError as exc:
         return render(
@@ -1026,6 +1060,9 @@ async def student_analyse_upload(
             scheme_content,
             expected_maximum_marks=expected_maximum_marks,
             paper_name=paper_name,
+            curriculum_id=selected_curriculum["id"],
+            curriculum_level=selected_curriculum["level"],
+            study_language=selected_curriculum["study_language"],
         )
     except ValueError as exc:
         return render(
@@ -1061,6 +1098,8 @@ async def student_analyse_upload(
                     "expected_maximum_marks": expected_maximum_marks,
                     "paper_name": paper_name.strip() or None,
                     "curriculum": selected_curriculum["id"],
+                    "curriculum_level": selected_curriculum["level"],
+                    "subject": selected_curriculum["subject"],
                 }
             ),
             datetime.now().isoformat(),
@@ -2450,6 +2489,49 @@ def student_settings_profile(
     )
 
 
+@app.post("/student/settings/curriculum")
+def student_settings_curriculum(
+    request: Request,
+    curriculum_id: str = Form(...),
+    curriculum_level: str = Form(""),
+    study_language: str = Form("auto"),
+):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    try:
+        profile = curriculum_profile(
+            curriculum_id,
+            curriculum_level,
+            normalise_study_language(study_language),
+        )
+    except ValueError as exc:
+        return render(
+            request,
+            "student/settings.html",
+            {"user": user, "error": str(exc), "success": None},
+            status_code=400,
+        )
+    execute(
+        """
+        UPDATE users
+        SET curriculum_id = ?, curriculum_level = ?, study_language = ?
+        WHERE id = ?
+        """,
+        (
+            profile["id"],
+            profile["level"],
+            profile["study_language"],
+            user["id"],
+        ),
+    )
+    rebuild_student_profile(user["id"])
+    return RedirectResponse(
+        "/student/settings?success=curriculum",
+        status_code=303,
+    )
+
+
 @app.post("/student/settings/exam")
 def student_settings_exam(
     request: Request,
@@ -2586,6 +2668,7 @@ def student_solve_question(
     user = require_role(request, "student")
     if not user:
         return redirect_login()
+    curriculum = profile_from_user(user)
     content = image.file.read(config.MAX_UPLOAD_BYTES + 1)
     allowed_types = {"image/jpeg", "image/png", "image/webp"}
     if (
@@ -2609,13 +2692,23 @@ def student_solve_question(
     question_id = execute(
         """
         INSERT INTO student_help_questions
-        (student_id, image_path, original_filename, status, created_at, updated_at)
-        VALUES (?, ?, ?, 'processing', ?, ?)
+        (student_id, curriculum_id, curriculum_level, subject,
+         image_path, original_filename, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)
         """,
-        (user["id"], path, image.filename or "", now, now),
+        (
+            user["id"],
+            curriculum["id"],
+            curriculum["level"],
+            curriculum["subject"],
+            path,
+            image.filename or "",
+            now,
+            now,
+        ),
     )
     try:
-        solution = solve_question_image(path)
+        solution = solve_question_image(path, curriculum=curriculum)
         duration_ms = int((monotonic() - started) * 1000)
         execute(
             """
@@ -3079,6 +3172,7 @@ def student_practice(request: Request):
     user = require_role(request, "student")
     if not user:
         return redirect_login()
+    curriculum = profile_from_user(user)
     return render(
         request,
         "student/practice.html",
@@ -3086,6 +3180,9 @@ def student_practice(request: Request):
             "user": user,
             "sets": practice_sets(user["id"]),
             "bank": question_bank_inventory(),
+            "curriculum": curriculum,
+            "available_topics": curriculum["topics"],
+            "error": request.query_params.get("error"),
         },
     )
 
@@ -3102,15 +3199,27 @@ def student_create_practice(
     user = require_role(request, "student")
     if not user:
         return redirect_login()
-    set_id = create_practice_set(
-        user["id"],
-        count=count,
-        selection_mode=selection_mode,
-        topic=topic,
-        difficulty=difficulty,
-        calculator_policy=calculator_policy,
-        lang=get_lang(request),
-    )
+    curriculum = profile_from_user(user)
+    try:
+        creator = (
+            create_practice_set
+            if curriculum["practice_source"] == "bank"
+            else create_generated_practice_set
+        )
+        set_id = creator(
+            user["id"],
+            count=count,
+            selection_mode=selection_mode,
+            topic=topic,
+            difficulty=difficulty,
+            calculator_policy=calculator_policy,
+            lang=get_lang(request),
+        )
+    except (ValueError, RuntimeError):
+        return RedirectResponse(
+            "/student/practice?error=generation_failed",
+            status_code=303,
+        )
     return RedirectResponse(f"/student/practice/{set_id}", status_code=303)
 
 

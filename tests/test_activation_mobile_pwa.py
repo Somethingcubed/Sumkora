@@ -55,7 +55,7 @@ def test_public_sample_and_real_trial_are_available_before_signup(monkeypatch):
     assert 'data-trial-submit disabled' in picker.text
 
 
-def test_upload_is_phone_ready_and_only_verified_curriculum_is_selectable():
+def test_upload_is_phone_ready_and_available_curricula_are_selectable():
     login_student()
     page = client.get("/student/analyse")
     assert page.status_code == 200
@@ -65,11 +65,14 @@ def test_upload_is_phone_ready_and_only_verified_curriculum_is_selectable():
     assert 'name="curriculum"' in page.text
     assert DEFAULT_CURRICULUM_ID in page.text
     assert "General Mathematics" in page.text
-    assert "coming later" in page.text
+    assert "Cambridge IGCSE Physics" in page.text
+    assert 'name="curriculum_level"' in page.text
+    assert 'name="study_language"' in page.text
 
     options = curriculum_options()
     assert sum(item["status"] == "verified" for item in options) == 1
     assert verified_curriculum(DEFAULT_CURRICULUM_ID)["code"] == "0606"
+    assert verified_curriculum("general-mathematics")["status"] == "beta"
 
     rejected = client.post(
         "/student/analyse",
@@ -77,7 +80,7 @@ def test_upload_is_phone_ready_and_only_verified_curriculum_is_selectable():
         files={"answer_script": ("work.pdf", b"%PDF-invalid", "application/pdf")},
     )
     assert rejected.status_code == 400
-    assert "not yet available" in rejected.text
+    assert "not yet available" not in rejected.text
 
 
 def test_pwa_assets_have_root_scope_and_private_pages_are_not_precached():

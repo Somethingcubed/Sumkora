@@ -19,3 +19,4 @@ output/
 htmlcov/
 .venv/
 node_modules/
+.playwright-cli/

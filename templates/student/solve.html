@@ -6,6 +6,7 @@
     <p class="eyebrow">{{ tr('Quick help', '快速辅导') }}</p>
     <h1>{{ tr('Solve one question', '解答一道题') }}</h1>
     <p>{{ tr('Upload one clear photo. Sumkora will read the complete context and return a bilingual worked solution.', '上传一张清晰照片。Sumkora 会读取完整题目内容，并提供中英双语的详细解答。') }}</p>
+    <p class="text-xs text-slate-500 mt-2"><span class="badge badge-completed">{{ active_curriculum.name_zh if lang == 'zh' else active_curriculum.name }}</span> <a href="/student/settings#curriculum-settings" class="text-indigo-700">{{ tr('Change pathway', '更改课程') }}</a></p>
   </div>
 </div>
 

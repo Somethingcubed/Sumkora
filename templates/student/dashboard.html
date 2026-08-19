@@ -3,6 +3,11 @@
 {% block content %}
 {% if notice %}<div class="form-message form-message-success mb-6" role="status">{{ notice }}</div>{% endif %}
 
+<div class="flex flex-wrap items-center justify-between gap-3 mb-5 text-sm">
+  <div><span class="badge badge-completed">{{ active_curriculum.name_zh if lang == 'zh' else active_curriculum.name }} · {{ active_curriculum.level_name_zh if lang == 'zh' else active_curriculum.level_name }}</span><span class="text-slate-500 ml-2">{{ tr('Progress includes observed topics only.', '学习进度只包含已有作答证据的知识点。') }}</span></div>
+  <a href="/student/settings#curriculum-settings" class="text-indigo-700 font-medium">{{ tr('Change learning pathway', '更改学习课程') }} →</a>
+</div>
+
 <aside class="dashboard-install-nudge" data-install-nudge aria-label="{{ tr('Install Sumkora', '安装 Sumkora') }}">
   <span class="dashboard-install-icon" aria-hidden="true">S</span>
   <div>

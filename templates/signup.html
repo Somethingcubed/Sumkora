@@ -54,6 +54,22 @@
   </div>
   <p class="field-help" id="password-help">{{ tr('At least 8 characters.', '至少 8 个字符。') }}</p>
 
+  <div class="signup-pathway" data-signup-curriculum>
+    <label class="form-label" for="curriculum-id">{{ tr('What are you studying?', '你正在学习什么？') }}</label>
+    <select class="field" id="curriculum-id" name="curriculum_id" data-curriculum-select>
+      {% for item in curricula %}
+      <option value="{{ item.id }}" {% if item.id == selected_curriculum_id %}selected{% endif %}>{% if item.code in ['0606', '0580', '0625'] %}{{ item.code }} · {% endif %}{{ item.name_zh if lang == 'zh' else item.name }}{% if item.status == 'beta' %} · {{ tr('Beta', '测试版') }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <label class="form-label" for="curriculum-level">{{ tr('Grade, tier, or level', '年级、层级或级别') }}</label>
+    <select class="field" id="curriculum-level" name="curriculum_level" data-level-select>
+      {% for item in selected_curriculum.levels %}
+      <option value="{{ item.id }}" {% if item.id == selected_curriculum.level %}selected{% endif %}>{{ item.name_zh if lang == 'zh' else item.name }}</option>
+      {% endfor %}
+    </select>
+    <p class="field-help">{{ tr('You can change this later in Settings. Topics you have not attempted are not counted as weaknesses.', '之后可在设置中更改。未作答的知识点不会被计为薄弱项。') }}</p>
+  </div>
+
   <label class="form-label" for="password-confirmation">{{ tr('Confirm password', '确认密码') }}</label>
   <div class="password-field">
     <input
@@ -72,6 +88,28 @@
 
   <button type="submit" class="button button-primary button-block">{{ tr('Create account', '创建账号') }}</button>
 </form>
+
+<script>
+(() => {
+  const curricula = {{ curricula | tojson }};
+  const wrapper = document.querySelector('[data-signup-curriculum]');
+  if (!wrapper) return;
+  const curriculumSelect = wrapper.querySelector('[data-curriculum-select]');
+  const levelSelect = wrapper.querySelector('[data-level-select]');
+  curriculumSelect.addEventListener('change', () => {
+    const curriculum = curricula.find((item) => item.id === curriculumSelect.value);
+    if (!curriculum) return;
+    levelSelect.innerHTML = '';
+    curriculum.levels.forEach((level) => {
+      const option = document.createElement('option');
+      option.value = level.id;
+      option.textContent = {{ "level.name_zh" if lang == "zh" else "level.name" }};
+      if (level.id === curriculum.default_level) option.selected = true;
+      levelSelect.appendChild(option);
+    });
+  });
+})();
+</script>
 
 <p class="auth-switch">{{ tr('Already have an account?', '已有账号？') }} <a href="/login">{{ tr('Log in', '登录') }}</a></p>
 <p class="auth-switch auth-preview-links"><a href="/sample">{{ tr('See a sample first', '先查看示例') }}</a> · <a href="/trial">{{ tr('Try one question', '试做一道题') }}</a></p>

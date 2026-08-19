@@ -246,7 +246,8 @@ def test_three_paper_longitudinal_scenario_and_comparison():
     assert state["evidence_count"] == 3
 
     profile = student_skill_profile(student)
-    assert any(item["skill"] == "integration" for item in profile["untested"])
+    assert profile["untested"] == []
+    assert profile["untested_topics"] == []
     comparison = compare_papers(student, [first, third])
     assert len(comparison["papers"]) == 2
     assert comparison["papers"][0]["percentage"] == 0

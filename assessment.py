@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from db import execute, query_all, query_one
-from taxonomy import CANONICAL_TOPICS, canonical_skill, canonical_topic
+from curricula import DEFAULT_CURRICULUM_ID, topics_for_curriculum
+from taxonomy import (
+    canonical_skill,
+    canonical_topic,
+    canonical_topic_for_curriculum,
+)
 
 
 RECENCY_HALF_LIFE_DAYS = 25.0
@@ -387,6 +392,14 @@ def _state_for_observations(rows: Iterable) -> dict:
 
 
 def rebuild_student_profile(student_id: int) -> list[dict]:
+    user = query_one(
+        "SELECT curriculum_id, curriculum_level FROM users WHERE id = ?",
+        (student_id,),
+    )
+    curriculum_id = (
+        user["curriculum_id"] if user and user["curriculum_id"] else DEFAULT_CURRICULUM_ID
+    )
+    curriculum_level = user["curriculum_level"] if user else "standard"
     rows = query_all(
         """
         SELECT so.id, so.student_id, so.submission_id, so.observed_at,
@@ -398,6 +411,7 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
         JOIN submissions s ON s.id = so.submission_id
         JOIN assignments a ON a.id = s.assignment_id
         WHERE so.student_id = ? AND a.syllabus_code = '0606'
+          AND ? = 'cambridge-igcse-additional-mathematics-0606'
         UNION ALL
         SELECT 1000000000 + aso.id AS id, aso.student_id,
                1000000000 + aso.paper_id AS submission_id, aso.observed_at,
@@ -406,15 +420,27 @@ def rebuild_student_profile(student_id: int) -> list[dict]:
                aso.grading_confidence, aso.extraction_confidence,
                aso.evidence_weight
         FROM analysis_skill_observations aso
+        JOIN student_papers sp ON sp.id = aso.paper_id
         WHERE aso.student_id = ? AND aso.is_current = 1
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
         ORDER BY skill, observed_at, id
         """,
-        (student_id, student_id),
+        (
+            student_id,
+            curriculum_id,
+            student_id,
+            curriculum_id,
+            curriculum_level,
+        ),
     )
     grouped = defaultdict(list)
     for row in rows:
         normalised = dict(row)
-        normalised["topic"] = canonical_topic(row["topic"], row["skill"])
+        normalised["topic"] = canonical_topic_for_curriculum(
+            curriculum_id,
+            row["topic"],
+            row["skill"],
+        )
         normalised["skill"] = canonical_skill(row["skill"], normalised["topic"])
         grouped[normalised["skill"]].append(normalised)
     execute("DELETE FROM student_skill_states WHERE student_id = ?", (student_id,))
@@ -482,6 +508,14 @@ def refresh_outdated_student_profiles() -> int:
 
 
 def student_skill_profile(student_id: int) -> dict:
+    user = query_one(
+        "SELECT curriculum_id, curriculum_level FROM users WHERE id = ?",
+        (student_id,),
+    )
+    curriculum_id = (
+        user["curriculum_id"] if user and user["curriculum_id"] else DEFAULT_CURRICULUM_ID
+    )
+    curriculum_level = user["curriculum_level"] if user else "standard"
     states = [dict(row) for row in query_all(
         """
         SELECT * FROM student_skill_states
@@ -490,12 +524,9 @@ def student_skill_profile(student_id: int) -> dict:
         """,
         (student_id,),
     )]
-    observed = {row["skill"].lower() for row in states}
-    untested = [
-        {"topic": topic, "skill": skill, "status": "untested"}
-        for topic, skill in CORE_0606_SKILLS
-        if skill.lower() not in observed
-    ]
+    # Missing curriculum topics are deliberately not represented as weakness.
+    # The product shows only skills for which the student supplied evidence.
+    untested = []
     strengths = [
         row for row in states
         if row["status"] in {"strong", "secure", "improving"}
@@ -515,27 +546,44 @@ def student_skill_profile(student_id: int) -> dict:
             JOIN submissions s ON s.id = so.submission_id
             JOIN assignments a ON a.id = s.assignment_id
             WHERE so.student_id = ? AND a.syllabus_code = '0606'
+              AND ? = 'cambridge-igcse-additional-mathematics-0606'
             UNION ALL
             SELECT 1000000000 + aso.id, 1000000000 + aso.paper_id,
                    aso.observed_at, aso.topic, aso.skill, aso.marks_earned,
                    aso.marks_available, aso.success_fraction, aso.evidence_weight
             FROM analysis_skill_observations aso
+            JOIN student_papers sp ON sp.id = aso.paper_id
             WHERE aso.student_id = ? AND aso.is_current = 1
+              AND sp.curriculum_id = ? AND sp.curriculum_level = ?
             UNION ALL
             SELECT 2000000000 + shq.id, 2000000000 + shq.id, shq.created_at,
                    shq.topic, shq.skill, 0.0, 2.0, 0.0,
                    MAX(0.5, 2.0 * shq.classification_confidence)
             FROM student_help_questions shq
             WHERE shq.student_id = ? AND shq.status = 'completed'
+              AND shq.curriculum_id = ? AND shq.curriculum_level = ?
         )
         ORDER BY observed_at, observation_id
         """,
-        (student_id, student_id, student_id),
+        (
+            student_id,
+            curriculum_id,
+            student_id,
+            curriculum_id,
+            curriculum_level,
+            student_id,
+            curriculum_id,
+            curriculum_level,
+        ),
     )
     grouped_topics = defaultdict(list)
     for raw in topic_rows:
         item = dict(raw)
-        item["topic"] = canonical_topic(item["topic"], item["skill"])
+        item["topic"] = canonical_topic_for_curriculum(
+            curriculum_id,
+            item["topic"],
+            item["skill"],
+        )
         grouped_topics[item["topic"]].append(item)
     topic_states = []
     for topic_name, observations in grouped_topics.items():
@@ -558,12 +606,7 @@ def student_skill_profile(student_id: int) -> dict:
             }
         )
     topic_states.sort(key=lambda row: (row["current_estimate"], -row["evidence_count"], row["topic"]))
-    tested_topics = {row["topic"] for row in topic_states}
-    untested_topics = [
-        {"topic": topic, "status": "untested"}
-        for topic in CANONICAL_TOPICS
-        if topic not in tested_topics
-    ]
+    untested_topics = []
     return {
         "states": states,
         "strengths": strengths,
@@ -572,6 +615,9 @@ def student_skill_profile(student_id: int) -> dict:
         "topic_states": topic_states,
         "untested_topics": untested_topics,
         "calculation_version": CALCULATION_VERSION,
+        "curriculum_id": curriculum_id,
+        "curriculum_level": curriculum_level,
+        "curriculum_topics": topics_for_curriculum(curriculum_id),
     }
 
 

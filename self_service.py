@@ -18,11 +18,13 @@ from pathlib import Path
 import fitz
 
 import config
+from curricula import curriculum_profile, profile_from_user
 from db import execute, query_all, query_one
 from document_assessment import ASSESSMENT_PROMPT_VERSION, assess_documents
 from grading import grade_question
 from ocr import cxsee_vl_ocr_detailed
 from pdf_utils import get_page_image_base64, is_valid_pdf, save_upload
+from taxonomy import canonical_skill, canonical_topic_for_curriculum
 
 
 logger = logging.getLogger(__name__)
@@ -650,7 +652,15 @@ def create_student_paper_draft(
     mark_scheme_content: bytes | None = None,
     expected_maximum_marks: float | None = None,
     paper_name: str | None = None,
+    curriculum_id: str | None = None,
+    curriculum_level: str | None = None,
+    study_language: str | None = None,
 ) -> tuple[int, int]:
+    profile = curriculum_profile(
+        curriculum_id,
+        curriculum_level,
+        study_language,
+    )
     answer_filename, answer_content = normalize_answer_upload(
         answer_filename, answer_content
     )
@@ -677,7 +687,7 @@ def create_student_paper_draft(
             Path(answer_filename).stem,
         ),
         "title_source": "student" if str(paper_name or "").strip() else "filename",
-        "syllabus_code": "Mathematics",
+        "syllabus_code": profile["code"],
         "paper_number": "",
         "paper_year": None,
         "examination_session": "",
@@ -690,14 +700,19 @@ def create_student_paper_draft(
     paper_id = execute(
         """
         INSERT INTO student_papers
-        (student_id, title, syllabus_code, paper_number, paper_year,
+        (student_id, title, curriculum_id, curriculum_level, subject,
+         study_language, syllabus_code, paper_number, paper_year,
          examination_session, calculator_policy, maximum_marks, source_type,
          status, latest_version_number, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?)
         """,
         (
             student_id,
             metadata["title"],
+            profile["id"],
+            profile["level"],
+            profile["subject"],
+            profile["study_language"],
             metadata["syllabus_code"],
             metadata["paper_number"],
             metadata["paper_year"],
@@ -1211,7 +1226,8 @@ def _run_legacy_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
         SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
-               sp.title AS paper_title
+               sp.title AS paper_title, sp.curriculum_id,
+               sp.curriculum_level, sp.subject, sp.study_language
         FROM paper_analysis_versions pav
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE pav.id = ?
@@ -1221,6 +1237,11 @@ def _run_legacy_self_service_analysis(version_id: int) -> dict:
     if not version:
         return {"status": "failed", "error": "Version was not found."}
     try:
+        profile = curriculum_profile(
+            version["curriculum_id"],
+            version["curriculum_level"],
+            version["study_language"],
+        )
         for path in (
             version["question_paper_path"],
             version["answer_script_path"],
@@ -1493,7 +1514,8 @@ def run_self_service_analysis(version_id: int) -> dict:
     version = query_one(
         """
         SELECT pav.*, sp.student_id, sp.id AS student_paper_id,
-               sp.title AS paper_title
+               sp.title AS paper_title, sp.curriculum_id,
+               sp.curriculum_level, sp.subject, sp.study_language
         FROM paper_analysis_versions pav
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE pav.id = ?
@@ -1503,6 +1525,11 @@ def run_self_service_analysis(version_id: int) -> dict:
     if not version:
         return {"status": "failed", "error": "Version was not found."}
     try:
+        profile = curriculum_profile(
+            version["curriculum_id"],
+            version["curriculum_level"],
+            version["study_language"],
+        )
         if version["status"] == "failed":
             execute(
                 """
@@ -1558,10 +1585,22 @@ def run_self_service_analysis(version_id: int) -> dict:
                 scheme_path,
                 expected_maximum_marks=version["expected_maximum_marks"],
                 progress_callback=_reasoning_progress_callback(version_id),
+                curriculum=profile,
             )
         _update_version(version_id, "result_validation", 3)
 
         questions = assessment["questions"]
+        for item in questions:
+            item["topic"] = canonical_topic_for_curriculum(
+                profile["id"],
+                item.get("topic") or "",
+                item.get("skill") or "",
+                item.get("question_text") or "",
+            )
+            item["skill"] = canonical_skill(
+                item.get("skill") or "",
+                item["topic"],
+            )
         draft_metadata = parse_json(version["detected_metadata"], {})
         metadata = {
             "title": (
@@ -1570,7 +1609,7 @@ def run_self_service_analysis(version_id: int) -> dict:
                 else assessment.get("paper_title") or version["paper_title"]
             ),
             "title_source": draft_metadata.get("title_source", "filename"),
-            "syllabus_code": assessment.get("syllabus_code") or "Mathematics",
+            "syllabus_code": profile["code"],
             "paper_number": assessment.get("paper_reference") or "",
             "paper_year": None,
             "examination_session": "",
@@ -1987,6 +2026,9 @@ def analysis_result(student_id: int, paper_id: int, version_id: int | None = Non
 
 
 def direct_profile_rows(student_id: int):
+    curriculum = profile_from_user(
+        query_one("SELECT * FROM users WHERE id = ?", (student_id,))
+    )
     return query_all(
         """
         SELECT aso.*, sp.title AS paper_title, pav.version_number
@@ -1994,14 +2036,23 @@ def direct_profile_rows(student_id: int):
         JOIN student_papers sp ON sp.id = aso.paper_id
         JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
         WHERE aso.student_id = ? AND aso.is_current = 1
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
         ORDER BY aso.observed_at
         """,
-        (student_id,),
+        (student_id, curriculum["id"], curriculum["level"]),
     )
 
 
 def direct_summary(student_id: int) -> dict:
-    papers = student_owned_papers(student_id)
+    curriculum = profile_from_user(
+        query_one("SELECT * FROM users WHERE id = ?", (student_id,))
+    )
+    papers = [
+        row
+        for row in student_owned_papers(student_id)
+        if row["curriculum_id"] == curriculum["id"]
+        and row["curriculum_level"] == curriculum["level"]
+    ]
     completed = [row for row in papers if row["analysis_status"] == "completed"]
     percentages = []
     for row in completed:

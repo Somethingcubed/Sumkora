@@ -1,6 +1,39 @@
 # Sumkora release-candidate status
 
-Updated: 4 August 2026
+Updated: 19 August 2026
+
+## Multi-curriculum beta - 19 August 2026
+
+- Created the non-invasive checkpoint branch
+  `backup/pre-multicurriculum-20260819` at commit `b4c5f9b` before editing.
+- Preserved Cambridge IGCSE Additional Mathematics 0606 as the only verified
+  path and kept its existing marking and curated-practice logic intact.
+- Added selectable beta profiles for General Mathematics Grades 1–12,
+  Chinese National Mathematics Grades 1–12, Cambridge 0580 Core/Extended,
+  AP Precalculus, AP Calculus AB/BC, AP Statistics, Cambridge Physics 0625
+  Core/Extended, and Scottish Higher Physics.
+- Added curriculum and level selection at signup, in Settings, and per paper
+  upload. Question/feedback language remains a separate English, Chinese, or
+  automatic choice.
+- Papers, one-question help, practice sets, mastery, mistake review, and
+  reports are isolated by curriculum and level. Historical records are not
+  rewritten when a student switches pathway, and topics without evidence are
+  omitted rather than reported as weaknesses.
+- Added curriculum-aware mathematics/physics prompts. Physics checks formula
+  choice, substitution, units, significant figures, graphs, vectors/scalars,
+  and experimental reasoning.
+- Added original 10–50 question AI worksheets for curricula without a bank.
+  A separate model pass solves and validates every question; incomplete or
+  partially validated worksheets are refused. Question and worked-answer PDFs
+  remain separate and generated material is never labelled as an official
+  past paper.
+- Live Grade 7 Algebra test: 10/10 questions generated and independently
+  validated by GPT-5.5 in 99.8 seconds; all prompts and worked solutions were
+  complete in English and Simplified Chinese.
+- Mobile browser checks passed at 390 px for signup, pathway settings,
+  dashboard, and practice. No browser console errors remained.
+- Full automated suite: 84 tests passed. This implementation is not yet
+  deployed to Railway.
 
 ## Activation, mobile and curriculum boundary - 4 August 2026
 

@@ -17,6 +17,9 @@ from urllib.parse import quote
 import fitz
 
 from db import execute, query_all, query_one
+from curricula import profile_from_user
+from i18n import topic_label
+from practice_generator import generate_validated_practice_questions
 from taxonomy import canonical_topic
 
 
@@ -35,11 +38,18 @@ def _display_skill(value: str) -> str:
     return (value or "Unclassified").replace("_", " ").strip()
 
 
+def _student_curriculum(student_id: int) -> dict:
+    return profile_from_user(
+        query_one("SELECT * FROM users WHERE id = ?", (student_id,))
+    )
+
+
 def skill_url(skill: str) -> str:
     return f"/student/skills/detail?skill={quote(skill or '', safe='')}"
 
 
 def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | None:
+    curriculum = _student_curriculum(student_id)
     state = None
     if topic:
         from assessment import student_skill_profile
@@ -73,10 +83,11 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
         JOIN paper_analysis_versions pav ON pav.id = aso.analysis_version_id
         JOIN analysis_question_results aqr ON aqr.id = aso.question_result_id
         WHERE aso.student_id = ? AND aso.is_current = 1
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
           AND (? != '' OR lower(aso.skill) = lower(?))
         ORDER BY aso.observed_at, aso.id
         """,
-        (student_id, topic, skill),
+        (student_id, curriculum["id"], curriculum["level"], topic, skill),
     )
     legacy = query_all(
         """
@@ -92,10 +103,12 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
         LEFT JOIN questions q ON q.id = so.question_id
         LEFT JOIN grade_drafts gd
           ON gd.submission_id = s.id AND gd.question_id = q.id
-        WHERE so.student_id = ? AND (? != '' OR lower(so.skill) = lower(?))
+        WHERE so.student_id = ?
+          AND ? = 'cambridge-igcse-additional-mathematics-0606'
+          AND (? != '' OR lower(so.skill) = lower(?))
         ORDER BY so.observed_at, so.id
         """,
-        (student_id, topic, skill),
+        (student_id, curriculum["id"], topic, skill),
     )
     rows = [dict(row) for row in observations] + [dict(row) for row in legacy]
     if topic:
@@ -191,6 +204,7 @@ def skill_detail(student_id: int, skill: str = "", topic: str = "") -> dict | No
 
 def sync_mistake_book(student_id: int) -> int:
     """Materialize current lost-mark results without duplicating entries."""
+    curriculum = _student_curriculum(student_id)
     rows = query_all(
         """
         SELECT aqr.id, aqr.paper_question_id,
@@ -205,10 +219,11 @@ def sync_mistake_book(student_id: int) -> int:
         JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE sp.student_id = ?
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
           AND pav.version_number = sp.latest_version_number
           AND pav.status = 'completed'
         """,
-        (student_id,),
+        (student_id, curriculum["id"], curriculum["level"]),
     )
     now = _now()
     added = 0
@@ -365,6 +380,7 @@ def mistake_book(
     status: str = "",
 ) -> dict:
     sync_mistake_book(student_id)
+    curriculum = _student_curriculum(student_id)
     rows = query_all(
         """
         SELECT mbe.*, aqr.id AS question_result_id,
@@ -391,9 +407,10 @@ def mistake_book(
         JOIN student_papers sp ON sp.id = pav.paper_id
         LEFT JOIN paper_questions pq ON pq.id = mbe.paper_question_id
         WHERE mbe.student_id = ?
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
         ORDER BY sp.updated_at DESC, aqr.id
         """,
-        (student_id,),
+        (student_id, curriculum["id"], curriculum["level"]),
     )
     sibling_rows = query_all(
         """
@@ -403,9 +420,10 @@ def mistake_book(
         JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
         JOIN student_papers sp ON sp.id = pav.paper_id
         WHERE sp.student_id = ?
+          AND sp.curriculum_id = ? AND sp.curriculum_level = ?
         ORDER BY aqr.analysis_version_id, aqr.id
         """,
-        (student_id,),
+        (student_id, curriculum["id"], curriculum["level"]),
     )
     sibling_groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
     for sibling in sibling_rows:
@@ -882,16 +900,167 @@ def create_practice_set(
     return set_id
 
 
+def create_generated_practice_set(
+    student_id: int,
+    *,
+    count: int,
+    selection_mode: str,
+    topic: str,
+    difficulty: str,
+    calculator_policy: str,
+    lang: str,
+) -> int:
+    """Create an original worksheet only after every item is validated."""
+    curriculum = _student_curriculum(student_id)
+    count = max(10, min(int(count), 50))
+    if selection_mode not in {"weaknesses", "topic", "mixed"}:
+        selection_mode = "weaknesses"
+    if difficulty not in {"mixed", "standard", "challenging"}:
+        difficulty = "mixed"
+    if calculator_policy not in {"any", "calculator", "non-calculator"}:
+        calculator_policy = "any"
+
+    allowed_topics = set(curriculum["topics"])
+    selected_topic = ""
+    if selection_mode == "topic":
+        selected_topic = str(topic or "").strip()
+        if selected_topic not in allowed_topics:
+            raise ValueError("Choose a valid topic for this curriculum.")
+    elif selection_mode == "weaknesses":
+        from assessment import student_skill_profile
+
+        previous = query_one(
+            """
+            SELECT topic FROM practice_sets
+            WHERE student_id = ? AND curriculum_id = ?
+              AND curriculum_level = ? AND source_mode = 'generated'
+              AND selection_mode = 'weaknesses' AND topic != ''
+            ORDER BY created_at DESC, id DESC LIMIT 1
+            """,
+            (student_id, curriculum["id"], curriculum["level"]),
+        )
+        selected_topic = _choose_weak_topic(
+            student_skill_profile(student_id)["topic_states"],
+            allowed_topics,
+            previous["topic"] if previous else "",
+        )
+        # No observed topic means there is no defensible weakness yet.  The
+        # generator receives a balanced diagnostic request instead.
+        if not selected_topic:
+            selection_mode = "mixed"
+
+    questions, model_info = generate_validated_practice_questions(
+        curriculum=curriculum,
+        topic=selected_topic,
+        count=count,
+        difficulty=difficulty,
+        calculator_policy=calculator_policy,
+    )
+    if len(questions) != count:
+        raise RuntimeError(
+            "The worksheet could not be fully generated and independently checked."
+        )
+
+    topic_name = selected_topic or "Mixed curriculum review"
+    title_en = (
+        f"{topic_name} targeted practice"
+        if selected_topic
+        else f"{curriculum['name']} diagnostic practice"
+    )
+    title_zh = (
+        f"{topic_label('zh', topic_name)} 专项练习"
+        if selected_topic
+        else f"{curriculum['name_zh']}综合诊断练习"
+    )
+    explanation_en = (
+        f"{count} original {curriculum['name']} questions were generated, "
+        "solved independently, and checked before being saved."
+    )
+    explanation_zh = (
+        f"已生成 {count} 道原创{curriculum['name_zh']}题目，并在保存前完成独立解答与校验。"
+    )
+    now = _now()
+    model_label = "/".join(
+        value
+        for value in (
+            model_info.get("generation_model"),
+            model_info.get("validation_model"),
+        )
+        if value
+    )
+    set_id = execute(
+        """
+        INSERT INTO practice_sets
+        (student_id, title, selection_mode, requested_count, actual_count,
+         topic, difficulty, calculator_policy, language, status,
+         selection_explanation, source_mode, generation_model,
+         curriculum_id, curriculum_level, subject, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, 'generated', ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            student_id,
+            title_zh if lang == "zh" else title_en,
+            selection_mode,
+            count,
+            count,
+            selected_topic,
+            difficulty,
+            calculator_policy,
+            lang,
+            explanation_zh if lang == "zh" else explanation_en,
+            model_label,
+            curriculum["id"],
+            curriculum["level"],
+            curriculum["subject"],
+            now,
+            now,
+        ),
+    )
+    for item in questions:
+        execute(
+            """
+            INSERT INTO generated_practice_questions
+            (practice_set_id, order_index, topic, skill, difficulty,
+             calculator_policy, prompt_en, prompt_zh, solution_en, solution_zh,
+             final_answer_en, final_answer_zh, maximum_marks,
+             validation_notes, generation_model, validation_model,
+             validation_status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'validated', ?)
+            """,
+            (
+                set_id,
+                item["order"],
+                item["topic"],
+                item["skill"],
+                item["difficulty"],
+                calculator_policy,
+                item["prompt_en"],
+                item["prompt_zh"],
+                item["solution_en"],
+                item["solution_zh"],
+                item["final_answer_en"],
+                item["final_answer_zh"],
+                item["maximum_marks"],
+                item.get("validation_notes") or "",
+                model_info.get("generation_model") or "",
+                model_info.get("validation_model") or "",
+                now,
+            ),
+        )
+    return set_id
+
+
 def practice_sets(student_id: int) -> list[dict]:
+    curriculum = _student_curriculum(student_id)
     return [
         dict(row)
         for row in query_all(
             """
             SELECT * FROM practice_sets
-            WHERE student_id = ?
+            WHERE student_id = ? AND curriculum_id = ? AND curriculum_level = ?
             ORDER BY created_at DESC
             """,
-            (student_id,),
+            (student_id, curriculum["id"], curriculum["level"]),
         )
     ]
 
@@ -903,6 +1072,17 @@ def practice_set_detail(student_id: int, set_id: int) -> dict | None:
     )
     if not practice:
         return None
+    if practice["source_mode"] == "generated":
+        generated = query_all(
+            """
+            SELECT *, order_index AS generated_order
+            FROM generated_practice_questions
+            WHERE practice_set_id = ? AND validation_status = 'validated'
+            ORDER BY order_index
+            """,
+            (set_id,),
+        )
+        return {"set": dict(practice), "items": [dict(row) for row in generated]}
     items = query_all(
         """
         SELECT psi.*, pq.*, pp.year, pp.examination_session, pp.component,
@@ -1209,6 +1389,28 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
         )
     flow = _PdfFlow(title=title, subtitle=subtitle, lang=lang)
     for item in detail["items"]:
+        if practice.get("source_mode") == "generated":
+            label = f"{item['order_index']}. {item['topic']}"
+            source = (
+                "AI-generated practice · independently solved and validated"
+                if lang == "en"
+                else "AI 生成练习 · 已独立解答并校验"
+            )
+            if kind == "questions":
+                body = item["prompt_zh"] if lang == "zh" else item["prompt_en"]
+            else:
+                solution = (
+                    item["solution_zh"] if lang == "zh" else item["solution_en"]
+                )
+                final_answer = (
+                    item["final_answer_zh"]
+                    if lang == "zh"
+                    else item["final_answer_en"]
+                )
+                final_label = "最终答案" if lang == "zh" else "Final answer"
+                body = f"{solution}\n\n{final_label}: {final_answer}"
+            flow.add_text(label=label, body=body, source_label=source)
+            continue
         source = (
             f"{item['syllabus_code']} {item['examination_session']} "
             f"{item['year']} / {item['component']} / {item['question_number']}"

@@ -18,19 +18,31 @@
       <a href="/sample">{{ tr('See a sample result', '查看示例结果') }} →</a>
     </section>
 
-    <div class="mb-6">
-      <label class="form-label max-w-xl" for="curriculum">
+    <div class="grid md:grid-cols-3 gap-4 mb-6" data-analysis-curriculum>
+      <label class="form-label" for="curriculum">
         {{ tr('Curriculum', '课程') }}
-        <select class="field" id="curriculum" name="curriculum">
+        <select class="field" id="curriculum" name="curriculum" data-curriculum-select>
           {% for item in curricula %}
-          <option value="{{ item.id }}" {% if item.id == default_curriculum_id %}selected{% endif %} {% if item.status != 'verified' %}disabled{% endif %}>
-            {{ item.name }}{% if item.code %} · {{ item.code }}{% endif %}{% if item.status != 'verified' %} — {{ tr('coming later', '即将支持') }}{% endif %}
+          <option value="{{ item.id }}" {% if item.id == active_curriculum.id %}selected{% endif %}>
+            {% if item.code in ['0606', '0580', '0625'] %}{{ item.code }} · {% endif %}{{ item.name_zh if lang == 'zh' else item.name }}{% if item.status == 'beta' %} · {{ tr('Beta', '测试版') }}{% endif %}
           </option>
           {% endfor %}
         </select>
       </label>
-      <p class="text-xs text-slate-500 mt-2">{{ tr('0606 is the currently verified marking and practice module. Other curricula are shown only as planned support.', '0606 是当前已验证的批改与练习模块。其他课程仅表示未来计划支持。') }}</p>
+      <label class="form-label" for="curriculum-level">{{ tr('Grade, tier, or level', '年级、层级或级别') }}
+        <select class="field" id="curriculum-level" name="curriculum_level" data-level-select>
+          {% for item in active_curriculum.levels %}<option value="{{ item.id }}" {% if item.id == active_curriculum.level %}selected{% endif %}>{{ item.name_zh if lang == 'zh' else item.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="form-label" for="study-language">{{ tr('Question language', '题目语言') }}
+        <select class="field" id="study-language" name="study_language">
+          <option value="auto" {% if active_curriculum.study_language == 'auto' %}selected{% endif %}>{{ tr('Detect automatically', '自动识别') }}</option>
+          <option value="en" {% if active_curriculum.study_language == 'en' %}selected{% endif %}>English</option>
+          <option value="zh" {% if active_curriculum.study_language == 'zh' %}selected{% endif %}>中文</option>
+        </select>
+      </label>
     </div>
+    <p class="text-xs text-slate-500 -mt-4 mb-6">{{ tr('The verified 0606 pathway is unchanged. New curricula use curriculum-aware beta classification.', '已验证的 0606 路径保持不变。新课程使用课程感知的测试版分类。') }}</p>
 
     <div class="mb-6">
       <label class="form-label max-w-xl" for="paper-name">
@@ -148,5 +160,26 @@
     </div>
   </form>
 </div>
+<script>
+(() => {
+  const curricula = {{ curricula | tojson }};
+  const wrapper = document.querySelector('[data-analysis-curriculum]');
+  if (!wrapper) return;
+  const curriculumSelect = wrapper.querySelector('[data-curriculum-select]');
+  const levelSelect = wrapper.querySelector('[data-level-select]');
+  curriculumSelect.addEventListener('change', () => {
+    const curriculum = curricula.find((item) => item.id === curriculumSelect.value);
+    if (!curriculum) return;
+    levelSelect.innerHTML = '';
+    curriculum.levels.forEach((level) => {
+      const option = document.createElement('option');
+      option.value = level.id;
+      option.textContent = {{ "level.name_zh" if lang == "zh" else "level.name" }};
+      if (level.id === curriculum.default_level) option.selected = true;
+      levelSelect.appendChild(option);
+    });
+  });
+})();
+</script>
 <script src="/static/multi-page-upload.js?v=20260804-1" defer></script>
 {% endblock %}
