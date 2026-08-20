@@ -1100,6 +1100,7 @@ def practice_set_detail(student_id: int, set_id: int) -> dict | None:
 
 
 _CJK_FONT_BUFFER = None
+_LATIN_FONT_BUFFER = None
 
 
 def _font_name(page: fitz.Page, lang: str) -> str:
@@ -1113,7 +1114,26 @@ def _font_name(page: fitz.Page, lang: str) -> str:
     return font_name
 
 
+def _latin_font_buffer() -> bytes:
+    """Load the bundled Latin/math font once per process."""
+    global _LATIN_FONT_BUFFER
+    if _LATIN_FONT_BUFFER is None:
+        from matplotlib import get_data_path
+
+        font_path = os.path.join(get_data_path(), "fonts", "ttf", "DejaVuSans.ttf")
+        _LATIN_FONT_BUFFER = fitz.Font(fontfile=font_path).buffer
+    return _LATIN_FONT_BUFFER
+
+
+def _latin_font_name(page: fitz.Page) -> str:
+    """Embed a Latin/math font with reliable super/subscript glyphs."""
+    font_name = "sumkoralatin"
+    page.insert_font(fontname=font_name, fontbuffer=_latin_font_buffer())
+    return font_name
+
+
 _SUPERSCRIPTS = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
+_SUBSCRIPTS = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
 
 
 def _plain_math(value: str) -> str:
@@ -1168,7 +1188,6 @@ def _plain_math(value: str) -> str:
     # printable booklet even when the richer renderer cannot parse it.
     text = re.sub(r"\\(?:dfrac|tfrac|frac)", " / ", text)
     text = text.replace(r"\%", "%")
-    text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
     text = re.sub(r"\\text\{([^{}]*)\}", r"\1", text)
     text = re.sub(
         r"\^\{([0-9+\-=()]+)\}",
@@ -1180,6 +1199,22 @@ def _plain_math(value: str) -> str:
         lambda match: match.group(1).translate(_SUPERSCRIPTS),
         text,
     )
+    text = re.sub(
+        r"_\{([0-9+\-=()]+)\}",
+        lambda match: match.group(1).translate(_SUBSCRIPTS),
+        text,
+    )
+    text = re.sub(
+        r"_([0-9])",
+        lambda match: match.group(1).translate(_SUBSCRIPTS),
+        text,
+    )
+    # Script conversion can remove the nested braces that initially prevented
+    # these wrappers from matching (for example L\,mol^{-1}).
+    text = re.sub(r"\\(?:text|mathrm|mathbf)\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
+    text = re.sub(r"\b(L|mol)\s*[−-]1\b", r"\1⁻¹", text)
+    text = re.sub(r"\b(cm|dm|m)3\b", r"\1³", text)
     text = text.replace("{", "").replace("}", "")
     return re.sub(r"[ \t]+", " ", text).strip()
 
@@ -1207,6 +1242,18 @@ def _math_image(expression: str) -> tuple[bytes, float, float] | None:
     # Matplotlib's math font cannot display CJK glyphs.  Let the PDF's
     # embedded Simplified-Chinese font handle mixed prose/math instead.
     if re.search(r"[\u3400-\u9fff]", value):
+        return None
+    # Quantities, units, elementary powers and chemical formulae are sharper
+    # as native PDF text.  Tiny transparent images for strings such as
+    # ``0.65\,\mathrm{g}`` can acquire overlapping glyphs in Safari's PDF
+    # renderer.  Reserve MathText images for notation that genuinely needs a
+    # mathematical compositor.
+    complex_math = re.search(
+        r"\\(?:dfrac|tfrac|frac|sqrt|lim|sum|int|prod|binom|begin|overline|vec)(?![A-Za-z])",
+        value,
+    )
+    symbolic_script = re.search(r"[_^]\{[^0-9+\-=()\\,\s]+\}", value)
+    if not complex_math and not symbolic_script:
         return None
     cached = _MATH_IMAGE_CACHE.get(value)
     if cached:
@@ -1253,11 +1300,16 @@ class _PdfFlow:
         self.font_metrics = fitz.Font(
             fontname="china-s" if lang == "zh" else "helv"
         )
+        self.latin_metrics = fitz.Font(fontbuffer=_latin_font_buffer())
+        self.latin_font = "helv"
         self.y = 0.0
         self._new_page(first=True)
 
     def _text_width(self, value: str, size: float) -> float:
         return self.font_metrics.text_length(str(value), fontsize=size)
+
+    def _latin_width(self, value: str, size: float) -> float:
+        return self.latin_metrics.text_length(str(value), fontsize=size)
 
     def _new_page(self, *, first: bool = False) -> None:
         self.page = self.document.new_page(
@@ -1265,7 +1317,14 @@ class _PdfFlow:
             height=fitz.paper_rect("a4").height,
         )
         self.font = _font_name(self.page, self.lang)
+        self.latin_font = _latin_font_name(self.page)
         if first:
+            self.page.draw_rect(
+                fitz.Rect(self.margin_x, 28, self.margin_x + 24, 31),
+                color=(0.35, 0.30, 0.91),
+                fill=(0.35, 0.30, 0.91),
+                width=0,
+            )
             self.page.insert_text(
                 (self.margin_x, 48),
                 self.title,
@@ -1288,8 +1347,8 @@ class _PdfFlow:
             self.page.draw_line(
                 (self.margin_x, 94),
                 (self.page.rect.width - self.margin_x, 94),
-                color=(0.88, 0.89, 0.92),
-                width=0.7,
+                color=(0.84, 0.83, 0.96),
+                width=0.8,
             )
             self.y = 112
         else:
@@ -1446,20 +1505,26 @@ class _PdfFlow:
                 if continuation
                 else label
             )
+            self.page.draw_rect(
+                fitz.Rect(self.margin_x, self.y + 1, self.margin_x + 3, self.y + 15),
+                color=(0.35, 0.30, 0.91),
+                fill=(0.35, 0.30, 0.91),
+                width=0,
+            )
             self.page.insert_text(
-                (self.margin_x, self.y + 10),
+                (self.margin_x + 10, self.y + 11),
                 heading,
                 fontname=self.font,
-                fontsize=10.5,
-                color=(0.10, 0.12, 0.20),
+                fontsize=10.8,
+                color=(0.18, 0.16, 0.39),
             )
-            self.y += 23
+            self.y += 25
 
         self._ensure(58)
         add_heading()
         line: list[tuple[str, object, float, float]] = []
         line_width = 0.0
-        line_height = 14.0
+        line_height = 15.0
 
         def new_continuation_page() -> None:
             nonlocal continuation
@@ -1476,7 +1541,7 @@ class _PdfFlow:
             if self.y + line_height + 5 > self.bottom:
                 new_continuation_page()
             x = self.margin_x
-            baseline = self.y + max(10.5, (line_height + 9.0) / 2)
+            baseline = self.y + max(10.8, (line_height + 9.3) / 2)
             for kind, value, width, height in line:
                 if kind == "math":
                     top = self.y + max(0.0, (line_height - height) / 2)
@@ -1489,15 +1554,15 @@ class _PdfFlow:
                     self.page.insert_text(
                         (x, baseline),
                         str(value),
-                        fontname=self.font,
-                        fontsize=10.2,
+                        fontname=self.latin_font if kind == "latin" else self.font,
+                        fontsize=10.35,
                         color=(0.15, 0.17, 0.23),
                     )
                 x += width
-            self.y += line_height + (7 if paragraph_gap else 3)
+            self.y += line_height + (8 if paragraph_gap else 3.5)
             line = []
             line_width = 0.0
-            line_height = 14.0
+            line_height = 15.0
 
         def append_atom(kind: str, value: object, width: float, height: float) -> None:
             nonlocal line_width, line_height
@@ -1534,8 +1599,20 @@ class _PdfFlow:
                         if not line:
                             continue
                         token = " "
-                    width = self._text_width(token, 10.2)
-                    append_atom("text", token, width, 14.0)
+                    latin_token = bool(
+                        re.fullmatch(
+                            r"[\x20-\x7e⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎"
+                            r"≤≥≠×÷±∞θπ√Σ∴∈·→≈]+",
+                            token,
+                        )
+                    )
+                    kind = "latin" if latin_token else "text"
+                    width = (
+                        self._latin_width(token, 10.35)
+                        if latin_token
+                        else self._text_width(token, 10.35)
+                    )
+                    append_atom(kind, token, width, 15.0)
                 if segment_index < len(segments) - 1:
                     flush_line(paragraph_gap=not segment.strip())
         flush_line()
@@ -1548,7 +1625,7 @@ class _PdfFlow:
             fontsize=7.5,
             color=(0.46, 0.49, 0.56),
         )
-        self.y += 22
+        self.y += 26
 
     def finish(self) -> bytes:
         for page_number, page in enumerate(self.document, start=1):
@@ -1601,7 +1678,11 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
     flow = _PdfFlow(title=title, subtitle=subtitle, lang=lang)
     for item in detail["items"]:
         if practice.get("source_mode") == "generated":
-            label = f"{item['order_index']}. {topic_label(lang, item['topic'])}"
+            label = (
+                f"第 {item['order_index']} 题  ·  {topic_label(lang, item['topic'])}"
+                if lang == "zh"
+                else f"Question {item['order_index']}  ·  {topic_label(lang, item['topic'])}"
+            )
             source = (
                 "AI-generated practice · independently solved and validated"
                 if lang == "en"

@@ -12,6 +12,7 @@ from curricula import curriculum_profile, topics_for_curriculum
 from db import execute, hash_password, query_one
 from document_assessment import _prompt
 from learning import (
+    _plain_math,
     create_generated_practice_set,
     practice_pdf,
     practice_set_detail,
@@ -22,6 +23,13 @@ from taxonomy import canonical_topic_for_curriculum
 
 
 client = TestClient(app)
+
+
+def test_pdf_math_fallback_keeps_chemistry_quantities_readable():
+    assert _plain_math(r"\(0.65\,\mathrm{g}\)") == "0.65 g"
+    assert _plain_math(r"\(H_2+Cl_2\rightarrow 2HCl\)") == "H₂+Cl₂→ 2HCl"
+    assert _plain_math(r"\(22.4\,\mathrm{L\,mol^{-1}}\)") == "22.4 L mol⁻¹"
+    assert _plain_math("0.0200 mol L−1; 25.0 cm3") == "0.0200 mol L⁻¹; 25.0 cm³"
 
 
 def _now() -> str:
@@ -256,6 +264,7 @@ def test_generated_practice_is_saved_only_after_validation(monkeypatch):
         text = "".join(page.get_text() for page in document)
         assert "AI-generated practice" in text
         assert "Evaluate" in text
+        assert sum(len(page.get_images(full=True)) for page in document) >= 10
     with fitz.open(stream=practice_pdf(student_id, set_id, "answers", "en"), filetype="pdf") as document:
         text = "".join(page.get_text() for page in document)
         assert "By continuity" in text
@@ -268,7 +277,9 @@ def test_generated_practice_is_saved_only_after_validation(monkeypatch):
         assert "答案册" in text
         assert "由连续性可知" in text
         assert r"\lim" not in text
-        assert sum(len(page.get_images(full=True)) for page in document) >= 10
+        # Simple quantities stay as sharp, searchable native text. Complex
+        # notation such as the limits above still uses rendered equations.
+        assert sum(len(page.get_images(full=True)) for page in document) == 0
 
 
 def test_ten_question_generation_uses_timeout_safe_concurrent_batches(
