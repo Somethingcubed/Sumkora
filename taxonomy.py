@@ -88,15 +88,10 @@ _CURRICULUM_TOPIC_PATTERNS = {
         ("Electromagnetic induction", r"induction|faraday|lenz|inductance|电磁感应|法拉第|楞次"),
     ),
     "shanghai-education-grade-9-chemistry-2026": (
-        ("第1章 开启化学之门", r"化学科学|物理变化|化学变化|物理性质|化学性质|实验基本操作|实验安全|开启化学|chemical science|physical change|chemical change|laboratory safety"),
-        ("第2章 空气与水资源", r"空气|氧气|氮气|稀有气体|水的组成|水的净化|电解水|制取氧气|air|oxygen|nitrogen|water purification|electrolysis of water"),
-        ("第3章 物质构成的奥秘", r"分子|原子|离子|元素|元素符号|化学式|相对原子质量|相对分子质量|化合价|\b(?:molecule|atom|ion|element|chemical formula|relative atomic mass|valency)\b"),
-        ("第4章 认识化学反应", r"反应条件|质量守恒|化学方程式|燃烧条件|化学反应|mass conservation|chemical equation|reaction condition|combustion condition"),
-        ("第5章 奇妙的二氧化碳", r"二氧化碳|碳循环|温室效应|实验室制取.*二氧化碳|carbon dioxide|carbon cycle|greenhouse effect"),
-        ("第6章 金属资源综合利用", r"金属|合金|铁的冶炼|金属活动性|金属腐蚀|金属防护|废金属|metal|alloy|iron extraction|reactivity series|corrosion"),
-        ("第8章 酸、碱、盐及其应用", r"酸碱性|酸|碱|盐|pH|指示剂|中和反应|复分解|acid|alkali|base|salt|indicator|neutralisation|neutralization"),
-        ("第7章 探索溶解现象", r"溶液|溶质|溶剂|溶解度|饱和溶液|不饱和溶液|溶质质量分数|结晶|solution|solute|solvent|solubility|saturated|mass fraction|crystalli[sz]ation"),
-        ("第9章 化学与社会可持续发展", r"人类健康|营养素|能源|材料|环境污染|可持续发展|health|nutrient|energy resource|material|pollution|sustainable development"),
+        ("专题8 酸、碱、盐", r"酸碱性|酸|碱|盐|pH|指示剂|中和反应|复分解|土壤酸碱|营养元素|化肥|acid|alkali|base|salt|indicator|neutralisation|neutralization|soil pH|fertili[sz]er"),
+        ("专题7 溶液", r"溶液|溶质|溶剂|溶解度|溶解性|饱和溶液|不饱和溶液|溶质质量分数|结晶|solution|solute|solvent|solubility|saturated|mass fraction|crystalli[sz]ation"),
+        ("专题9 化学反应的调控", r"燃烧|燃料|灭火|反应条件|金属腐蚀|金属锈蚀|金属防护|防锈|combustion|fuel|extinguish|reaction condition|metal corrosion|rust|corrosion prevention"),
+        ("专题10 化学与人类社会进步", r"新能源|氢能|健康生活|营养素|材料|合成材料|环境|社会进步|new energy|hydrogen energy|health|nutrient|material|polymer|environment|social progress"),
     ),
 }
 

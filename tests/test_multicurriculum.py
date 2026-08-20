@@ -82,10 +82,14 @@ def test_curriculum_registry_covers_requested_subjects_and_levels():
         "shanghai-education-grade-9-chemistry-2026", "grade-9", "zh"
     )
     assert chemistry["subject"] == "chemistry"
-    assert chemistry["name_zh"] == "沪教版九年级化学（2026新版）"
+    assert chemistry["name_zh"] == "沪科版（五四制）九年级化学（2026新版）"
     assert chemistry["level"] == "grade-9"
-    assert chemistry["topics"][0] == "第1章 开启化学之门"
-    assert chemistry["topics"][-1] == "第9章 化学与社会可持续发展"
+    assert chemistry["topics"] == (
+        "专题7 溶液",
+        "专题8 酸、碱、盐",
+        "专题9 化学反应的调控",
+        "专题10 化学与人类社会进步",
+    )
 
 
 def test_scottish_pre_release_profile_is_hidden_and_migrates_safely():
@@ -160,7 +164,7 @@ def test_chemistry_pathway_is_visible_and_uses_chemistry_specific_checks():
     client.cookies.set("lang", "zh")
     page = client.get("/signup")
     assert page.status_code == 200
-    assert "沪教版九年级化学（2026新版）" in page.text
+    assert "沪科版（五四制）九年级化学（2026新版）" in page.text
     client.cookies.delete("lang")
 
     chemistry = curriculum_profile(
@@ -170,20 +174,27 @@ def test_chemistry_pathway_is_visible_and_uses_chemistry_specific_checks():
     assert "senior chemistry assessor" in prompt
     assert "balanced symbol and ionic equations" in prompt
     assert "laboratory safety" in prompt
-    assert "第8章 酸、碱、盐及其应用" in prompt
+    assert "专题8 酸、碱、盐" in prompt
 
     assert canonical_topic_for_curriculum(
         chemistry["id"],
         "酸碱反应",
         "用指示剂判断溶液酸碱性",
         "向溶液中滴加紫色石蕊试液",
-    ) == "第8章 酸、碱、盐及其应用"
+    ) == "专题8 酸、碱、盐"
     assert canonical_topic_for_curriculum(
         chemistry["id"],
         "metal chemistry",
         "iron extraction",
         "冶炼铁并解释金属锈蚀",
-    ) == "第6章 金属资源综合利用"
+    ) == "专题9 化学反应的调控"
+
+    assert canonical_topic_for_curriculum(
+        chemistry["id"],
+        "新能源",
+        "氢能的开发",
+        "分析氢气作为清洁能源的优点",
+    ) == "专题10 化学与人类社会进步"
 
 
 def test_generated_practice_is_saved_only_after_validation(monkeypatch):

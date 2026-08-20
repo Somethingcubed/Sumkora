@@ -148,16 +148,11 @@ AP_PHYSICS_C_EM_TOPICS = (
     "Electromagnetic induction",
 )
 
-SHANGHAI_EDUCATION_GRADE_9_CHEMISTRY_TOPICS = (
-    "第1章 开启化学之门",
-    "第2章 空气与水资源",
-    "第3章 物质构成的奥秘",
-    "第4章 认识化学反应",
-    "第5章 奇妙的二氧化碳",
-    "第6章 金属资源综合利用",
-    "第7章 探索溶解现象",
-    "第8章 酸、碱、盐及其应用",
-    "第9章 化学与社会可持续发展",
+SHANGHAI_SCIENCE_TECH_GRADE_9_CHEMISTRY_TOPICS = (
+    "专题7 溶液",
+    "专题8 酸、碱、盐",
+    "专题9 化学反应的调控",
+    "专题10 化学与人类社会进步",
 )
 
 
@@ -367,17 +362,17 @@ CURRICULA = (
     },
     {
         "id": "shanghai-education-grade-9-chemistry-2026",
-        "code": "沪教版",
-        "name": "Shanghai Education Grade 9 Chemistry (2026 new edition)",
-        "name_zh": "沪教版九年级化学（2026新版）",
+        "code": "沪科版",
+        "name": "Shanghai Science and Technology Grade 9 Chemistry (Five-Four system, 2026 edition)",
+        "name_zh": "沪科版（五四制）九年级化学（2026新版）",
         "subject": "chemistry",
         "status": "beta",
-        "version": "2026-new-edition-2024-revision",
+        "version": "2026-five-four-system-2025-revision",
         "module": "generated-chemistry",
         "practice_source": "generated",
         "levels": _single_level("grade-9", "Grade 9", "九年级"),
         "default_level": "grade-9",
-        "topics": SHANGHAI_EDUCATION_GRADE_9_CHEMISTRY_TOPICS,
+        "topics": SHANGHAI_SCIENCE_TECH_GRADE_9_CHEMISTRY_TOPICS,
     },
 )
 
