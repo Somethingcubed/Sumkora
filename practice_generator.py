@@ -134,10 +134,11 @@ policy.
 
 When the supplied item is already fully correct, set replacement=null; do not
 repeat its question or solution text. Correct a fixable problem by returning
-the complete corrected item in replacement. Set valid=false when the question is
-ambiguous, impossible, outside the specified curriculum, depends on a missing
-diagram, has an unverifiable answer, or cannot be repaired without replacing
-its core task. For physics, independently check dimensions and physical
+the complete corrected item in replacement and set valid=true because the
+replacement is ready to use. Set valid=false and replacement=null only when the
+question is ambiguous, impossible, outside the specified curriculum, depends on
+a missing diagram, has an unverifiable answer, or cannot be repaired without
+replacing its core task. For physics, independently check dimensions and physical
 plausibility. For chemistry, independently check formulae, equation balancing,
 charges, states, conditions, observations, calculations, and laboratory safety.
 For statistics, verify the data and inference conditions. Return one compact
@@ -150,6 +151,15 @@ result for every supplied order and only the required JSON."""
 # window and are cheap to split if one provider call stalls.
 PRACTICE_BATCH_SIZE = 2
 PRACTICE_MAX_WORKERS = 6
+
+
+def _clean_model_text(value: object) -> str:
+    """Remove provider control-byte artifacts without changing real content."""
+    text = str(value or "")
+    # Some OpenAI-compatible gateways have returned DEL before numeric values
+    # and NUL + ``b0`` where a degree sign was intended.
+    text = text.replace("\x00b0", "°").replace("\x7f", "")
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text).strip()
 
 
 def _call_model(
@@ -202,7 +212,7 @@ def _normalise_question(item: dict, curriculum: dict) -> dict | None:
     except (TypeError, ValueError):
         return None
     values = {
-        key: str(item.get(key) or "").strip()
+        key: _clean_model_text(item.get(key))
         for key in (
             "prompt_en",
             "prompt_zh",
@@ -228,8 +238,10 @@ def _normalise_question(item: dict, curriculum: dict) -> dict | None:
     return {
         "order": order,
         "topic": topic,
-        "skill": canonical_skill(str(item.get("skill") or ""), topic),
-        "difficulty": str(item.get("difficulty") or "standard").strip().lower(),
+        "skill": canonical_skill(_clean_model_text(item.get("skill")), topic),
+        "difficulty": _clean_model_text(
+            item.get("difficulty") or "standard"
+        ).lower(),
         **values,
         "maximum_marks": max(1.0, min(15.0, maximum_marks)),
         "valid": bool(item.get("valid", True)),
@@ -311,10 +323,20 @@ def _validate_batch(
         except (AttributeError, TypeError, ValueError):
             continue
         original = originals.get(order)
-        if not original or not bool(check.get("valid")):
+        if not original:
             continue
         replacement = check.get("replacement")
-        candidate = dict(replacement) if isinstance(replacement, dict) else dict(original)
+        # Validators sometimes describe the *original* as invalid while also
+        # supplying a complete, corrected replacement. The replacement is the
+        # authoritative outcome; only an unrepairable item (false + no
+        # replacement) should be discarded.
+        if not bool(check.get("valid")) and not isinstance(replacement, dict):
+            continue
+        candidate = (
+            dict(replacement)
+            if isinstance(replacement, dict)
+            else dict(original)
+        )
         candidate["order"] = order
         candidate["valid"] = True
         candidate["validation_notes"] = str(

@@ -539,7 +539,9 @@ def test_compact_validator_reuses_correct_items_and_applies_repairs(
                     },
                     {
                         "order": 2,
-                        "valid": True,
+                        # The provider is describing the original as invalid,
+                        # but the complete replacement below is usable.
+                        "valid": False,
                         "validation_notes": "Final wording repaired.",
                         "replacement": repaired,
                     },
@@ -562,3 +564,31 @@ def test_compact_validator_reuses_correct_items_and_applies_repairs(
     assert validated[0]["prompt_en"] == questions[0]["prompt_en"]
     assert validated[0]["validation_notes"] == "Correct as supplied."
     assert validated[1]["final_answer_en"] == "2 (checked)"
+
+
+def test_generated_questions_strip_gateway_control_bytes():
+    curriculum = curriculum_profile(
+        "shanghai-education-grade-9-chemistry-2026",
+        "grade-9",
+        "zh",
+    )
+    question = practice_generator._normalise_question(
+        {
+            "order": 1,
+            "topic": "专题9 化学反应的调控",
+            "skill": "比较反应速率",
+            "difficulty": "standard",
+            "prompt_en": "Compare \x7f20.0 mL at 40^\x00b0C in a complete experiment.",
+            "prompt_zh": "比较 \x7f20.0 mL 在 40^\x00b0C 时的完整实验。",
+            "solution_en": "The higher temperature gives the faster reaction.",
+            "solution_zh": "较高温度下反应更快。",
+            "final_answer_en": "The reaction at 40 °C is faster.",
+            "final_answer_zh": "40 °C 时反应更快。",
+            "maximum_marks": 2,
+        },
+        curriculum,
+    )
+    assert question is not None
+    assert "\x7f" not in question["prompt_en"]
+    assert "\x00" not in question["prompt_en"]
+    assert "40^°C" in question["prompt_en"]
