@@ -121,6 +121,13 @@ For statistics, verify the data and inference conditions. Return one result for
 every supplied order and only the required JSON."""
 
 
+# Five bilingual questions plus two worked solutions per item regularly push
+# the gateway past its upstream completion window. Three keeps each request
+# small enough to finish promptly while four workers still generate ten-item
+# worksheets in one concurrent wave.
+PRACTICE_BATCH_SIZE = 3
+
+
 def _call_model(prompt: str, schema: dict, schema_name: str, tokens: int) -> tuple[dict, str]:
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
@@ -279,9 +286,13 @@ def generate_validated_practice_questions(
 ) -> tuple[list[dict], dict]:
     """Generate, independently solve, repair, and return validated items."""
     count = max(10, min(int(count), 50))
+    # Generate a small reserve in the same worker waves. Previously one item
+    # rejected by the independent validator caused the entire worksheet to be
+    # discarded after several minutes of otherwise successful work.
+    generation_target = count + max(2, (count + 9) // 10)
     batch_specs = [
-        (start, min(5, count - start + 1))
-        for start in range(1, count + 1, 5)
+        (start, min(PRACTICE_BATCH_SIZE, generation_target - start + 1))
+        for start in range(1, generation_target + 1, PRACTICE_BATCH_SIZE)
     ]
     generated: list[dict] = []
     generation_models: list[str] = []
@@ -315,7 +326,10 @@ def generate_validated_practice_questions(
 
     validated: list[dict] = []
     validation_models: list[str] = []
-    batches = [unique[index:index + 5] for index in range(0, len(unique), 5)]
+    batches = [
+        unique[index:index + PRACTICE_BATCH_SIZE]
+        for index in range(0, len(unique), PRACTICE_BATCH_SIZE)
+    ]
     with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
         futures = [
             pool.submit(
@@ -333,6 +347,66 @@ def generate_validated_practice_questions(
             validation_models.append(model)
 
     validated.sort(key=lambda item: item["order"])
+    # A validator can legitimately reject more than the reserve. Make one
+    # bounded replacement pass instead of failing the whole worksheet.
+    if len(validated) < count:
+        replacement_count = (count - len(validated)) + 1
+        replacement_specs = [
+            (
+                generation_target + start,
+                min(PRACTICE_BATCH_SIZE, replacement_count - start + 1),
+            )
+            for start in range(1, replacement_count + 1, PRACTICE_BATCH_SIZE)
+        ]
+        replacements: list[dict] = []
+        with ThreadPoolExecutor(
+            max_workers=min(4, len(replacement_specs))
+        ) as pool:
+            futures = [
+                pool.submit(
+                    _generate_batch,
+                    curriculum=curriculum,
+                    topic=topic,
+                    count=batch_count,
+                    start_order=start_order,
+                    difficulty=difficulty,
+                    calculator_policy=calculator_policy,
+                    avoid=[item["prompt_en"] for item in generated][-20:],
+                )
+                for start_order, batch_count in replacement_specs
+            ]
+            for future in as_completed(futures):
+                questions, model = future.result()
+                generation_models.append(model)
+                for item in questions:
+                    if item["signature"] not in seen:
+                        seen.add(item["signature"])
+                        generated.append(item)
+                        replacements.append(item)
+        replacement_batches = [
+            replacements[index:index + PRACTICE_BATCH_SIZE]
+            for index in range(0, len(replacements), PRACTICE_BATCH_SIZE)
+        ]
+        if replacement_batches:
+            with ThreadPoolExecutor(
+                max_workers=min(4, len(replacement_batches))
+            ) as pool:
+                futures = [
+                    pool.submit(
+                        _validate_batch,
+                        batch,
+                        curriculum=curriculum,
+                        difficulty=difficulty,
+                        calculator_policy=calculator_policy,
+                    )
+                    for batch in replacement_batches
+                ]
+                for future in as_completed(futures):
+                    questions, model = future.result()
+                    validated.extend(questions)
+                    validation_models.append(model)
+        validated.sort(key=lambda item: item["order"])
+
     final = validated[:count]
     for order, item in enumerate(final, start=1):
         item["order"] = order

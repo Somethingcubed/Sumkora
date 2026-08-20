@@ -1014,6 +1014,46 @@ def init_db():
             conn.execute(
                 f"ALTER TABLE practice_sets ADD COLUMN {column} {definition}"
             )
+    generated_question_columns = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(generated_practice_questions)"
+        ).fetchall()
+    }
+    generated_question_column_defs = {
+        "generation_model": "TEXT NOT NULL DEFAULT ''",
+        "validation_model": "TEXT NOT NULL DEFAULT ''",
+        "validation_status": "TEXT NOT NULL DEFAULT 'validated'",
+    }
+    for column, definition in generated_question_column_defs.items():
+        if column not in generated_question_columns:
+            conn.execute(
+                "ALTER TABLE generated_practice_questions "
+                f"ADD COLUMN {column} {definition}"
+            )
+    # The reverted pre-release general-mathematics table used one `model`
+    # column. Preserve any existing provenance when upgrading that database.
+    if "model" in generated_question_columns:
+        conn.execute(
+            """
+            UPDATE generated_practice_questions
+            SET generation_model = model
+            WHERE generation_model = '' AND model IS NOT NULL AND model != ''
+            """
+        )
+    # Remove only the empty, ready-looking shells left by the production save
+    # crash. Real worksheets always have at least one generated question.
+    conn.execute(
+        """
+        DELETE FROM practice_sets
+        WHERE source_mode = 'generated'
+          AND status = 'ready'
+          AND NOT EXISTS (
+              SELECT 1 FROM generated_practice_questions gpq
+              WHERE gpq.practice_set_id = practice_sets.id
+          )
+        """
+    )
     mistake_book_columns = {
         row["name"]
         for row in conn.execute(

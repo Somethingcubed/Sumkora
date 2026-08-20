@@ -17,6 +17,7 @@ from learning import (
     practice_set_detail,
 )
 from main import app
+import practice_generator
 from taxonomy import canonical_topic_for_curriculum
 
 
@@ -259,3 +260,115 @@ def test_generated_practice_is_saved_only_after_validation(monkeypatch):
         text = "".join(page.get_text() for page in document)
         assert "By continuity" in text
         assert "Final answer" in text
+
+
+def test_ten_question_generation_uses_timeout_safe_concurrent_batches(
+    monkeypatch,
+):
+    curriculum = curriculum_profile("ap-calculus-ab", "course", "en")
+    generated_batch_sizes = []
+    validated_batch_sizes = []
+
+    def fake_generate_batch(**kwargs):
+        generated_batch_sizes.append(kwargs["count"])
+        questions = []
+        for offset in range(kwargs["count"]):
+            order = kwargs["start_order"] + offset
+            questions.append(
+                {
+                    "order": order,
+                    "topic": "Limits and continuity",
+                    "skill": "evaluating limits",
+                    "difficulty": "standard",
+                    "prompt_en": f"Evaluate the complete limit number {order}.",
+                    "prompt_zh": f"求第 {order} 个完整极限。",
+                    "solution_en": f"The limit is {order}.",
+                    "solution_zh": f"极限为 {order}。",
+                    "final_answer_en": str(order),
+                    "final_answer_zh": str(order),
+                    "maximum_marks": 1.0,
+                    "valid": True,
+                    "validation_notes": "",
+                    "signature": f"unique question {order}",
+                }
+            )
+        return questions, "generator-test"
+
+    def fake_validate_batch(questions, **_kwargs):
+        validated_batch_sizes.append(len(questions))
+        return questions, "validator-test"
+
+    monkeypatch.setattr(practice_generator, "_generate_batch", fake_generate_batch)
+    monkeypatch.setattr(practice_generator, "_validate_batch", fake_validate_batch)
+
+    questions, metadata = practice_generator.generate_validated_practice_questions(
+        curriculum=curriculum,
+        topic="Limits and continuity",
+        count=10,
+        difficulty="mixed",
+        calculator_policy="any",
+    )
+
+    assert sorted(generated_batch_sizes) == [3, 3, 3, 3]
+    assert sorted(validated_batch_sizes) == [3, 3, 3, 3]
+    assert len(questions) == 10
+    assert metadata["generated_count"] == 12
+    assert metadata["validated_count"] == 10
+
+
+def test_validator_rejections_receive_one_bounded_replacement_pass(
+    monkeypatch,
+):
+    curriculum = curriculum_profile("ap-calculus-ab", "course", "en")
+    generated_orders = []
+    validation_calls = 0
+
+    def fake_generate_batch(**kwargs):
+        questions = []
+        for offset in range(kwargs["count"]):
+            order = kwargs["start_order"] + offset
+            generated_orders.append(order)
+            questions.append(
+                {
+                    "order": order,
+                    "topic": "Limits and continuity",
+                    "skill": "evaluating limits",
+                    "difficulty": "standard",
+                    "prompt_en": f"Evaluate replacement-safe limit {order}.",
+                    "prompt_zh": f"求可替换极限 {order}。",
+                    "solution_en": f"The limit is {order}.",
+                    "solution_zh": f"极限为 {order}。",
+                    "final_answer_en": str(order),
+                    "final_answer_zh": str(order),
+                    "maximum_marks": 1.0,
+                    "valid": True,
+                    "validation_notes": "",
+                    "signature": f"replacement-safe {order}",
+                }
+            )
+        return questions, "generator-test"
+
+    def fake_validate_batch(questions, **_kwargs):
+        nonlocal validation_calls
+        validation_calls += 1
+        # Reject all but eight items from the initial reserve. The bounded
+        # pass must create enough fresh candidates to reach ten.
+        if max(item["order"] for item in questions) <= 12:
+            return [item for item in questions if item["order"] <= 8], "validator-test"
+        return questions, "validator-test"
+
+    monkeypatch.setattr(practice_generator, "_generate_batch", fake_generate_batch)
+    monkeypatch.setattr(practice_generator, "_validate_batch", fake_validate_batch)
+
+    questions, metadata = practice_generator.generate_validated_practice_questions(
+        curriculum=curriculum,
+        topic="Limits and continuity",
+        count=10,
+        difficulty="mixed",
+        calculator_policy="any",
+    )
+
+    assert len(questions) == 10
+    assert max(generated_orders) > 12
+    assert validation_calls > 4
+    assert metadata["validated_count"] == 10
