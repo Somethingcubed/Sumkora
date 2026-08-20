@@ -260,6 +260,15 @@ def test_generated_practice_is_saved_only_after_validation(monkeypatch):
         text = "".join(page.get_text() for page in document)
         assert "By continuity" in text
         assert "Final answer" in text
+    with fitz.open(
+        stream=practice_pdf(student_id, set_id, "answers", "zh"),
+        filetype="pdf",
+    ) as document:
+        text = "".join(page.get_text() for page in document)
+        assert "答案册" in text
+        assert "由连续性可知" in text
+        assert r"\lim" not in text
+        assert sum(len(page.get_images(full=True)) for page in document) >= 10
 
 
 def test_ten_question_generation_uses_timeout_safe_concurrent_batches(
@@ -309,8 +318,8 @@ def test_ten_question_generation_uses_timeout_safe_concurrent_batches(
         calculator_policy="any",
     )
 
-    assert sorted(generated_batch_sizes) == [3, 3, 3, 3]
-    assert sorted(validated_batch_sizes) == [3, 3, 3, 3]
+    assert sorted(generated_batch_sizes) == [2, 2, 2, 2, 2, 2]
+    assert sorted(validated_batch_sizes) == [2, 2, 2, 2, 2, 2]
     assert len(questions) == 10
     assert metadata["generated_count"] == 12
     assert metadata["validated_count"] == 10
@@ -388,7 +397,7 @@ def test_timed_out_batches_are_split_without_discarding_completed_work(
         generation_calls.append((kwargs["start_order"], kwargs["count"]))
         if (
             kwargs["start_order"] == 1
-            and kwargs["count"] == 3
+            and kwargs["count"] == 2
             and not failed_generation_batch
         ):
             failed_generation_batch = True
@@ -419,7 +428,7 @@ def test_timed_out_batches_are_split_without_discarding_completed_work(
     def fake_validate_batch(questions, **_kwargs):
         nonlocal failed_validation_batch
         validation_calls.append(len(questions))
-        if len(questions) == 3 and not failed_validation_batch:
+        if len(questions) == 2 and not failed_validation_batch:
             failed_validation_batch = True
             raise TimeoutError("validator read timed out")
         return questions, "validator-test"
@@ -438,7 +447,6 @@ def test_timed_out_batches_are_split_without_discarding_completed_work(
     assert len(questions) == 10
     assert (1, 1) in generation_calls
     assert (2, 1) in generation_calls
-    assert (3, 1) in generation_calls
     assert 1 in validation_calls
     assert metadata["validated_count"] == 10
 

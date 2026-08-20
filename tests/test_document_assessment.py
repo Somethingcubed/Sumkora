@@ -325,6 +325,7 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     result, metadata = document_assessment.assess_documents(
         str(answer),
         model="gpt-5.5",
+        reasoning_effort="medium",
         progress_callback=lambda stage, detail: progress.append((stage, detail)),
     )
 
@@ -402,6 +403,44 @@ def test_pdf_attachment_rejection_retries_as_complete_page_images(
     assert retry_content[2]["type"] == "input_image"
     assert metadata["provider"] == "cxsee_responses_images"
     assert metadata["transport_attempts"] == 2
+    assert result["estimated_score"] == 2
+
+
+def test_compact_paper_uses_low_reasoning_fast_path(tmp_path, monkeypatch):
+    answer = tmp_path / "compact-answer.pdf"
+    make_pdf(answer, "Q1 answer")
+    calls = []
+
+    def fake_post(_url, payload, **_kwargs):
+        calls.append(payload)
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "compact-response",
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_CONTEXT_ENABLED", False)
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="gpt-5.5",
+    )
+
+    assert calls[0]["reasoning"]["effort"] == "low"
+    assert metadata["compact_fast_path"] is True
+    assert metadata["reasoning_effort"] == "low"
     assert result["estimated_score"] == 2
 
 

@@ -1586,7 +1586,13 @@ def assess_documents(
             )
 
     selected_model = model or config.WHOLE_DOCUMENT_MODEL
-    effort = reasoning_effort or config.WHOLE_DOCUMENT_REASONING_EFFORT
+    compact_assessment = pages <= 5 and (
+        not mark_scheme_path or scheme_pages <= 5
+    )
+    effort = (
+        reasoning_effort
+        or ("low" if compact_assessment else config.WHOLE_DOCUMENT_REASONING_EFFORT)
+    )
     repair_errors: list[str] | None = None
     last_validation_error: AssessmentValidationError | None = None
     started = time.monotonic()
@@ -1725,6 +1731,7 @@ def assess_documents(
                 "transport_timeouts": transport_timeouts,
                 "transport_reasoning_efforts": transport_reasoning_efforts,
                 "curriculum_id": (curriculum or {}).get("id"),
+                "compact_fast_path": compact_assessment,
             }
             if (
                 mode == "detailed"

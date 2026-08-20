@@ -8,6 +8,7 @@ import os
 import random
 import re
 import textwrap
+from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -1120,9 +1121,16 @@ def _plain_math(value: str) -> str:
     text = str(value or "")
     text = text.replace(r"\(", "").replace(r"\)", "")
     text = text.replace(r"\[", "").replace(r"\]", "")
+    # Flatten textual subscripts before handling fractions so nested braces do
+    # not prevent a readable fallback such as m(溶质)/m(溶液).
+    text = re.sub(
+        r"_\{\\(?:text|mathrm|mathbf)\{([^{}]+)\}\}",
+        r"(\1)",
+        text,
+    )
     for _ in range(3):
         text = re.sub(
-            r"\\frac\{([^{}]+)\}\{([^{}]+)\}",
+            r"\\(?:dfrac|tfrac|frac)\{([^{}]+)\}\{([^{}]+)\}",
             r"(\1)/(\2)",
             text,
         )
@@ -1145,11 +1153,22 @@ def _plain_math(value: str) -> str:
         r"\therefore": "∴",
         r"\in": "∈",
         r"\cdot": "·",
+        r"\rightarrow": "→",
+        r"\to": "→",
+        r"\approx": "≈",
+        r"\,": " ",
+        r"\;": " ",
         r"\left": "",
         r"\right": "",
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    # A provider can occasionally return a malformed fraction whose braces or
+    # math delimiters do not balance.  Never expose raw TeX commands in a
+    # printable booklet even when the richer renderer cannot parse it.
+    text = re.sub(r"\\(?:dfrac|tfrac|frac)", " / ", text)
+    text = text.replace(r"\%", "%")
+    text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
     text = re.sub(r"\\text\{([^{}]*)\}", r"\1", text)
     text = re.sub(
         r"\^\{([0-9+\-=()]+)\}",
@@ -1165,6 +1184,60 @@ def _plain_math(value: str) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
+_MATH_IMAGE_CACHE: dict[str, tuple[bytes, float, float]] = {}
+_MATH_CHUNK_RE = re.compile(
+    r"(\\\[(?:.|\n)*?\\\]|\\\((?:.|\n)*?\\\)|\$\$(?:.|\n)*?\$\$|\$[^$\n]+\$)"
+)
+
+
+def _math_image(expression: str) -> tuple[bytes, float, float] | None:
+    """Render one TeX expression to a tightly cropped transparent PNG."""
+    value = expression.strip()
+    if value.startswith(r"\(") and value.endswith(r"\)"):
+        value = value[2:-2]
+    elif value.startswith(r"\[") and value.endswith(r"\]"):
+        value = value[2:-2]
+    elif value.startswith("$$") and value.endswith("$$"):
+        value = value[2:-2]
+    elif value.startswith("$") and value.endswith("$"):
+        value = value[1:-1]
+    value = value.strip()
+    if not value:
+        return None
+    # Matplotlib's math font cannot display CJK glyphs.  Let the PDF's
+    # embedded Simplified-Chinese font handle mixed prose/math instead.
+    if re.search(r"[\u3400-\u9fff]", value):
+        return None
+    cached = _MATH_IMAGE_CACHE.get(value)
+    if cached:
+        return cached
+    # MathText supports \mathrm but not the full LaTeX \text command.
+    normalised = re.sub(r"\\text\{([^{}]*)\}", r"\\mathrm{\1}", value)
+    try:
+        from matplotlib.mathtext import math_to_image
+
+        buffer = BytesIO()
+        dpi = 220
+        math_to_image(
+            f"${normalised}$",
+            buffer,
+            dpi=dpi,
+            format="png",
+            color="#202334",
+        )
+        payload = buffer.getvalue()
+        pixmap = fitz.Pixmap(payload)
+        rendered = (
+            payload,
+            max(7.0, pixmap.width * 72 / dpi),
+            max(7.0, pixmap.height * 72 / dpi),
+        )
+    except Exception:
+        return None
+    _MATH_IMAGE_CACHE[value] = rendered
+    return rendered
+
+
 class _PdfFlow:
     """Compact, vector-preserving A4 compositor for printable learning packs."""
 
@@ -1177,8 +1250,14 @@ class _PdfFlow:
         self.bottom = fitz.paper_rect("a4").height - 42
         self.page: fitz.Page | None = None
         self.font = "helv"
+        self.font_metrics = fitz.Font(
+            fontname="china-s" if lang == "zh" else "helv"
+        )
         self.y = 0.0
         self._new_page(first=True)
+
+    def _text_width(self, value: str, size: float) -> float:
+        return self.font_metrics.text_length(str(value), fontsize=size)
 
     def _new_page(self, *, first: bool = False) -> None:
         self.page = self.document.new_page(
@@ -1259,11 +1338,7 @@ class _PdfFlow:
                     fontsize=10.2,
                     color=(0.10, 0.12, 0.20),
                 )
-                source_width = fitz.get_text_length(
-                    source_label,
-                    fontname=self.font,
-                    fontsize=7.5,
-                )
+                source_width = self._text_width(source_label, 7.5)
                 self.page.insert_text(
                     (
                         max(
@@ -1354,6 +1429,127 @@ class _PdfFlow:
                 self.y += 18
             continuation = True
 
+    def add_rich_text(
+        self,
+        *,
+        label: str,
+        body: str,
+        source_label: str,
+    ) -> None:
+        """Lay out Chinese text and genuinely rendered TeX mathematics."""
+        max_width = self.page.rect.width - 2 * self.margin_x
+        continuation = False
+
+        def add_heading() -> None:
+            heading = (
+                f"{label} ({'continued' if self.lang == 'en' else '续'})"
+                if continuation
+                else label
+            )
+            self.page.insert_text(
+                (self.margin_x, self.y + 10),
+                heading,
+                fontname=self.font,
+                fontsize=10.5,
+                color=(0.10, 0.12, 0.20),
+            )
+            self.y += 23
+
+        self._ensure(58)
+        add_heading()
+        line: list[tuple[str, object, float, float]] = []
+        line_width = 0.0
+        line_height = 14.0
+
+        def new_continuation_page() -> None:
+            nonlocal continuation
+            continuation = True
+            self._new_page()
+            add_heading()
+
+        def flush_line(*, paragraph_gap: bool = False) -> None:
+            nonlocal line, line_width, line_height
+            if not line:
+                if paragraph_gap:
+                    self.y += 5
+                return
+            if self.y + line_height + 5 > self.bottom:
+                new_continuation_page()
+            x = self.margin_x
+            baseline = self.y + max(10.5, (line_height + 9.0) / 2)
+            for kind, value, width, height in line:
+                if kind == "math":
+                    top = self.y + max(0.0, (line_height - height) / 2)
+                    self.page.insert_image(
+                        fitz.Rect(x, top, x + width, top + height),
+                        stream=value,
+                        keep_proportion=True,
+                    )
+                else:
+                    self.page.insert_text(
+                        (x, baseline),
+                        str(value),
+                        fontname=self.font,
+                        fontsize=10.2,
+                        color=(0.15, 0.17, 0.23),
+                    )
+                x += width
+            self.y += line_height + (7 if paragraph_gap else 3)
+            line = []
+            line_width = 0.0
+            line_height = 14.0
+
+        def append_atom(kind: str, value: object, width: float, height: float) -> None:
+            nonlocal line_width, line_height
+            if line and line_width + width > max_width:
+                flush_line()
+            if width > max_width and kind == "math":
+                scale = max_width / width
+                width *= scale
+                height *= scale
+            line.append((kind, value, width, height))
+            line_width += width
+            line_height = max(line_height, height)
+
+        chunks = _MATH_CHUNK_RE.split(str(body or ""))
+        for chunk in chunks:
+            if not chunk:
+                continue
+            if _MATH_CHUNK_RE.fullmatch(chunk):
+                rendered = _math_image(chunk)
+                if rendered:
+                    payload, width, height = rendered
+                    append_atom("math", payload, width + 2, height)
+                    continue
+                chunk = _plain_math(chunk)
+            plain = _plain_math(chunk)
+            segments = plain.split("\n")
+            for segment_index, segment in enumerate(segments):
+                tokens = re.findall(
+                    r"[\u3400-\u9fff]|\s+|[^\s\u3400-\u9fff]+",
+                    segment,
+                )
+                for token in tokens:
+                    if token.isspace():
+                        if not line:
+                            continue
+                        token = " "
+                    width = self._text_width(token, 10.2)
+                    append_atom("text", token, width, 14.0)
+                if segment_index < len(segments) - 1:
+                    flush_line(paragraph_gap=not segment.strip())
+        flush_line()
+        if self.y + 18 > self.bottom:
+            new_continuation_page()
+        self.page.insert_text(
+            (self.margin_x, self.y + 8),
+            source_label,
+            fontname=self.font,
+            fontsize=7.5,
+            color=(0.46, 0.49, 0.56),
+        )
+        self.y += 22
+
     def finish(self) -> bytes:
         for page_number, page in enumerate(self.document, start=1):
             font = _font_name(page, self.lang)
@@ -1377,9 +1573,24 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
     practice = detail["set"]
     if lang == "zh":
         title = "Sumkora 练习题" if kind == "questions" else "Sumkora 答案册"
+        difficulty = {
+            "mixed": "混合",
+            "standard": "标准",
+            "challenging": "挑战",
+        }.get(practice["difficulty"], practice["difficulty"])
+        calculator = {
+            "any": "不限",
+            "calculator": "可使用",
+            "non-calculator": "不可使用",
+        }.get(practice["calculator_policy"], practice["calculator_policy"])
+        practice_title = (
+            f"{topic_label('zh', practice['topic'])}专项练习"
+            if practice.get("topic")
+            else "综合练习"
+        )
         subtitle = (
-            f"{practice['title']}  ·  共 {practice['actual_count']} 道题  ·  "
-            f"难度：{practice['difficulty']}  ·  计算器：{practice['calculator_policy']}"
+            f"{practice_title}  ·  共 {practice['actual_count']} 道题  ·  "
+            f"难度：{difficulty}  ·  计算器：{calculator}"
         )
     else:
         title = "Sumkora worksheet" if kind == "questions" else "Sumkora answer booklet"
@@ -1390,7 +1601,7 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
     flow = _PdfFlow(title=title, subtitle=subtitle, lang=lang)
     for item in detail["items"]:
         if practice.get("source_mode") == "generated":
-            label = f"{item['order_index']}. {item['topic']}"
+            label = f"{item['order_index']}. {topic_label(lang, item['topic'])}"
             source = (
                 "AI-generated practice · independently solved and validated"
                 if lang == "en"
@@ -1409,7 +1620,7 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
                 )
                 final_label = "最终答案" if lang == "zh" else "Final answer"
                 body = f"{solution}\n\n{final_label}: {final_answer}"
-            flow.add_text(label=label, body=body, source_label=source)
+            flow.add_rich_text(label=label, body=body, source_label=source)
             continue
         source = (
             f"{item['syllabus_code']} {item['examination_session']} "

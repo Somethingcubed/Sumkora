@@ -144,18 +144,26 @@ For statistics, verify the data and inference conditions. Return one compact
 result for every supplied order and only the required JSON."""
 
 
-# Five bilingual questions plus two worked solutions per item regularly push
-# the gateway past its upstream completion window. Three keeps each request
-# small enough to finish promptly while four workers still generate ten-item
-# worksheets in one concurrent wave.
-PRACTICE_BATCH_SIZE = 3
+# Keep every bilingual generation request small, then run enough requests in
+# parallel for a 10-question worksheet (plus two reserves) to fit in one wave.
+# Two-item batches consistently finish faster than the gateway's long-response
+# window and are cheap to split if one provider call stalls.
+PRACTICE_BATCH_SIZE = 2
+PRACTICE_MAX_WORKERS = 6
 
 
-def _call_model(prompt: str, schema: dict, schema_name: str, tokens: int) -> tuple[dict, str]:
+def _call_model(
+    prompt: str,
+    schema: dict,
+    schema_name: str,
+    tokens: int,
+    *,
+    model: str,
+) -> tuple[dict, str]:
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
-            "model": config.QUESTION_SOLVER_MODEL,
+            "model": model,
             "input": [
                 {
                     "role": "user",
@@ -184,7 +192,7 @@ def _call_model(prompt: str, schema: dict, schema_name: str, tokens: int) -> tup
     parsed = _parse_provider_json(
         _strip_json_fence(_extract_response_text(result))
     )
-    return parsed, str(result.get("model") or config.QUESTION_SOLVER_MODEL)
+    return parsed, str(result.get("model") or model)
 
 
 def _normalise_question(item: dict, curriculum: dict) -> dict | None:
@@ -256,6 +264,7 @@ def _generate_batch(
         GENERATION_SCHEMA,
         "sumkora_generated_practice",
         min(12000, max(4200, count * 1500)),
+        model=config.PRACTICE_GENERATION_MODEL,
     )
     questions = [
         question
@@ -292,6 +301,7 @@ def _validate_batch(
         VALIDATION_SCHEMA,
         "sumkora_validated_practice",
         min(12000, max(4200, len(payload) * 1600)),
+        model=config.PRACTICE_VALIDATION_MODEL,
     )
     originals = {item["order"]: item for item in questions}
     validated = []
@@ -335,7 +345,9 @@ def _generate_specs_resilient(
         questions: list[dict] = []
         models: list[str] = []
         failed: list[tuple[int, int]] = []
-        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+        with ThreadPoolExecutor(
+            max_workers=min(PRACTICE_MAX_WORKERS, len(pending))
+        ) as pool:
             futures = {
                 pool.submit(
                     _generate_batch,
@@ -400,7 +412,9 @@ def _validate_batches_resilient(
         validated: list[dict] = []
         models: list[str] = []
         failed: list[list[dict]] = []
-        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+        with ThreadPoolExecutor(
+            max_workers=min(PRACTICE_MAX_WORKERS, len(pending))
+        ) as pool:
             futures = {
                 pool.submit(
                     _validate_batch,

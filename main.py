@@ -3245,7 +3245,20 @@ def student_practice_pdf(request: Request, set_id: int, kind: str):
         return redirect_login()
     if kind not in {"questions", "answers"}:
         return JSONResponse({"detail": "Not found."}, status_code=404)
-    content = practice_pdf(user["id"], set_id, kind, get_lang(request))
+    requested_language = request.query_params.get("lang")
+    curriculum = profile_from_user(user)
+    if requested_language in {"en", "zh"}:
+        pdf_language = requested_language
+    elif curriculum["study_language"] in {"en", "zh"}:
+        pdf_language = curriculum["study_language"]
+    elif curriculum["id"] in {
+        "china-national-mathematics",
+        "shanghai-education-grade-9-chemistry-2026",
+    }:
+        pdf_language = "zh"
+    else:
+        pdf_language = get_lang(request)
+    content = practice_pdf(user["id"], set_id, kind, pdf_language)
     if not content:
         return JSONResponse({"detail": "Not found."}, status_code=404)
     record_student_activity(
