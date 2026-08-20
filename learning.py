@@ -1141,6 +1141,8 @@ def _plain_math(value: str) -> str:
     text = str(value or "")
     text = text.replace(r"\(", "").replace(r"\)", "")
     text = text.replace(r"\[", "").replace(r"\]", "")
+    text = text.replace("$$", "").replace(r"\$", "").replace("$", "")
+    text = text.replace("**", "").replace("`", "")
     # Flatten textual subscripts before handling fractions so nested braces do
     # not prevent a readable fallback such as m(溶质)/m(溶液).
     text = re.sub(
@@ -1176,6 +1178,7 @@ def _plain_math(value: str) -> str:
         r"\rightarrow": "→",
         r"\to": "→",
         r"\approx": "≈",
+        r"\circ": "°",
         r"\,": " ",
         r"\;": " ",
         r"\left": "",
@@ -1183,6 +1186,7 @@ def _plain_math(value: str) -> str:
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    text = re.sub(r"\^\{?°\}?", "°", text)
     # A provider can occasionally return a malformed fraction whose braces or
     # math delimiters do not balance.  Never expose raw TeX commands in a
     # printable booklet even when the richer renderer cannot parse it.
@@ -1214,9 +1218,75 @@ def _plain_math(value: str) -> str:
     text = re.sub(r"\\(?:text|mathrm|mathbf)\{([^{}]*)\}", r"\1", text)
     text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
     text = re.sub(r"\b(L|mol)\s*[−-]1\b", r"\1⁻¹", text)
+    text = re.sub(r"\b(cm|dm|m)\s*[−-]3\b", r"\1⁻³", text)
     text = re.sub(r"\b(cm|dm|m)3\b", r"\1³", text)
+    text = re.sub(
+        r"(?<=\d)(?=(?:cm³|dm³|m³|cm⁻³|dm⁻³|m⁻³|mol|g|L)\b)",
+        " ",
+        text,
+    )
+    text = re.sub(r"°\s*C\b", "°C", text)
     text = text.replace("{", "").replace("}", "")
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def _readable_markdown_tables(value: str, lang: str) -> str:
+    """Turn provider Markdown tables into compact, readable PDF rows."""
+    lines = str(value or "").splitlines()
+    output: list[str] = []
+    index = 0
+
+    def cells(line: str) -> list[str]:
+        return [part.strip() for part in line.strip().strip("|").split("|")]
+
+    def divider(line: str) -> bool:
+        parts = cells(line)
+        return bool(parts) and all(re.fullmatch(r":?-{3,}:?", part) for part in parts)
+
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if (
+            stripped.startswith("|")
+            and stripped.endswith("|")
+            and index + 1 < len(lines)
+            and divider(lines[index + 1].strip())
+        ):
+            headers = cells(stripped)
+            index += 2
+            if output and output[-1] != "":
+                output.append("")
+            while index < len(lines):
+                row_line = lines[index].strip()
+                if not (row_line.startswith("|") and row_line.endswith("|")):
+                    break
+                row = cells(row_line)
+                fields = []
+                for column, cell in enumerate(row):
+                    if not cell:
+                        continue
+                    header = headers[column] if column < len(headers) else ""
+                    if header:
+                        separator = "：" if lang == "zh" else ": "
+                        fields.append(f"{header}{separator}{cell}")
+                    else:
+                        fields.append(cell)
+                if fields:
+                    output.append("  ·  ".join(fields))
+                    # A blank line is intentional: PDF rich-text layout treats
+                    # adjacent non-empty source lines as one flowing paragraph.
+                    # Separating generated rows keeps each record visually
+                    # distinct and prevents the next row from touching it.
+                    output.append("")
+                index += 1
+            if output and output[-1] != "":
+                output.append("")
+            continue
+        if divider(stripped):
+            index += 1
+            continue
+        output.append(lines[index])
+        index += 1
+    return "\n".join(output)
 
 
 _MATH_IMAGE_CACHE: dict[str, tuple[bytes, float, float]] = {}
@@ -1576,7 +1646,8 @@ class _PdfFlow:
             line_width += width
             line_height = max(line_height, height)
 
-        chunks = _MATH_CHUNK_RE.split(str(body or ""))
+        prepared_body = _readable_markdown_tables(str(body or ""), self.lang)
+        chunks = _MATH_CHUNK_RE.split(prepared_body)
         for chunk in chunks:
             if not chunk:
                 continue

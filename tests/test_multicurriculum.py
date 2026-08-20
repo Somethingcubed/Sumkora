@@ -13,6 +13,7 @@ from db import execute, hash_password, query_one
 from document_assessment import _prompt
 from learning import (
     _plain_math,
+    _readable_markdown_tables,
     create_generated_practice_set,
     practice_pdf,
     practice_set_detail,
@@ -30,6 +31,23 @@ def test_pdf_math_fallback_keeps_chemistry_quantities_readable():
     assert _plain_math(r"\(H_2+Cl_2\rightarrow 2HCl\)") == "H₂+Cl₂→ 2HCl"
     assert _plain_math(r"\(22.4\,\mathrm{L\,mol^{-1}}\)") == "22.4 L mol⁻¹"
     assert _plain_math("0.0200 mol L−1; 25.0 cm3") == "0.0200 mol L⁻¹; 25.0 cm³"
+    assert _plain_math(r"$25.0\,cm^3$; $15\,^\circ C$") == "25.0 cm³; 15 °C"
+    assert _plain_math("0.40mol dm−3") == "0.40 mol dm⁻³"
+
+
+def test_markdown_tables_become_readable_rows_without_pipe_syntax():
+    source = """结果如下：
+
+| 温度 / $^\\circ C$ | 时间 / s |
+|---|---|
+| 15 | 84 |
+| 25 | 52 |
+| 35 | 31 |
+"""
+    readable = _readable_markdown_tables(source, "zh")
+    assert "|" not in readable
+    assert "温度 / $^\\circ C$：15  ·  时间 / s：84" in readable
+    assert "时间 / s：84\n\n温度 / $^\\circ C$：25" in readable
 
 
 def _now() -> str:
