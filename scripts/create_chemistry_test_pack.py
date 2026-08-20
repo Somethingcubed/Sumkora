@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -23,8 +24,11 @@ from reportlab.platypus import (
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output" / "pdf"
+TEMP_DIR = ROOT / "tmp" / "pdfs" / "chemistry-test-pack"
 COMPLETED_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-completed-test.pdf"
 GUIDE_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-checking-guide.pdf"
+COMPLETED_VECTOR_PATH = TEMP_DIR / "completed-vector.pdf"
+GUIDE_VECTOR_PATH = TEMP_DIR / "guide-vector.pdf"
 
 NAVY = colors.HexColor("#111827")
 SLATE = colors.HexColor("#64748B")
@@ -349,7 +353,9 @@ def build_completed(s):
             Spacer(1, 3.5 * mm),
         ]
         story.append(KeepTogether(block))
-    document(COMPLETED_PATH).build(story, onFirstPage=footer, onLaterPages=footer)
+    document(COMPLETED_VECTOR_PATH).build(
+        story, onFirstPage=footer, onLaterPages=footer
+    )
 
 
 def build_guide(s):
@@ -393,14 +399,40 @@ def build_guide(s):
             ),
         ]
     )
-    document(GUIDE_PATH).build(story, onFirstPage=footer, onLaterPages=footer)
+    document(GUIDE_VECTOR_PATH).build(
+        story, onFirstPage=footer, onLaterPages=footer
+    )
+
+
+def flatten_for_compatibility(source_path: Path, target_path: Path) -> None:
+    """Rasterise pages so browser PDF viewers cannot drop CID-font text."""
+    source = fitz.open(source_path)
+    target = fitz.open()
+    for source_page in source:
+        pixmap = source_page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+        page = target.new_page(width=source_page.rect.width, height=source_page.rect.height)
+        page.insert_image(page.rect, stream=pixmap.tobytes("png"))
+    target.set_metadata(
+        {
+            "title": "沪科版五四制九年级化学测试",
+            "author": "Sumkora",
+            "subject": "Original chemistry analysis benchmark",
+            "producer": "Sumkora compatible PDF renderer",
+        }
+    )
+    target.save(target_path, garbage=4, deflate=True)
+    target.close()
+    source.close()
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
     s = styles()
     build_completed(s)
     build_guide(s)
+    flatten_for_compatibility(COMPLETED_VECTOR_PATH, COMPLETED_PATH)
+    flatten_for_compatibility(GUIDE_VECTOR_PATH, GUIDE_PATH)
     print(COMPLETED_PATH)
     print(GUIDE_PATH)
 
