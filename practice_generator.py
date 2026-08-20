@@ -94,8 +94,14 @@ Requirements:
 
 For physics, use SI units unless the curriculum normally requires otherwise,
 state any constant not supplied by the course, and make data physically
-plausible. For statistics, provide the complete dataset or summary information
-and ask for conclusions in context. Return only the required JSON."""
+plausible. For chemistry, use correct formula subscripts and ionic charges,
+balance every equation, include state symbols or conditions when the skill
+requires them, describe observable results precisely, and keep experiments
+safe and feasible for Grade 9. Put every chemical formula and equation inside
+TeX delimiters and use supported notation such as \(\mathrm{H_2O}\), not
+plain H_2O or an unsupported chemistry extension. For statistics, provide the
+complete dataset or summary information and ask for conclusions in context.
+Return only the required JSON."""
 
 
 VALIDATION_PROMPT = r"""You are Sumkora's independent practice validator.
@@ -109,8 +115,10 @@ Correct a fixable problem directly. Set valid=false when the question is
 ambiguous, impossible, outside the specified curriculum, depends on a missing
 diagram, has an unverifiable answer, or cannot be repaired without replacing
 its core task. For physics, independently check dimensions and physical
-plausibility. For statistics, verify the data and inference conditions. Return
-one result for every supplied order and only the required JSON."""
+plausibility. For chemistry, independently check formulae, equation balancing,
+charges, states, conditions, observations, calculations, and laboratory safety.
+For statistics, verify the data and inference conditions. Return one result for
+every supplied order and only the required JSON."""
 
 
 def _call_model(prompt: str, schema: dict, schema_name: str, tokens: int) -> tuple[dict, str]:

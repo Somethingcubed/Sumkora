@@ -353,8 +353,9 @@ explain the discrepancy in warnings without inventing questions or marks.
         if curriculum
         else "Use Cambridge IGCSE Additional Mathematics 0606 terminology."
     )
-    subject_rules = (
-        """
+    subject_rules = ""
+    if subject == "physics":
+        subject_rules = """
 Physics-specific rules:
 - Check formula choice, substitution, units, significant figures, graphs,
   vector/scalar meaning, and scientific explanations.
@@ -362,9 +363,19 @@ Physics-specific rules:
 - For practical work, evaluate variables, apparatus, method, tables, graphs,
   uncertainty, conclusions, and improvements.
 """
-        if subject == "physics"
-        else ""
-    )
+    elif subject == "chemistry":
+        subject_rules = """
+Chemistry-specific rules:
+- Check chemical formulae, balanced symbol and ionic equations, state symbols,
+  reaction conditions, conservation of mass, mole or mass relationships, and
+  units before awarding calculation marks.
+- Distinguish an observed colour, precipitate, gas, temperature, or other
+  experimental result from the student's inference or explanation.
+- For practical work, check apparatus, reagents, sequence, laboratory safety,
+  variables, observations, conclusions, and improvements.
+- Stay within the selected Grade 9 curriculum; do not require senior-high
+  chemistry terminology or methods to earn credit.
+"""
     return rf"""
 You are Sumkora's senior {subject} assessor. Assess the
 documents as a whole. Work question by question internally, but do not rely on

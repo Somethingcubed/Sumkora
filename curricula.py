@@ -148,6 +148,18 @@ AP_PHYSICS_C_EM_TOPICS = (
     "Electromagnetic induction",
 )
 
+SHANGHAI_EDUCATION_GRADE_9_CHEMISTRY_TOPICS = (
+    "第1章 开启化学之门",
+    "第2章 空气与水资源",
+    "第3章 物质构成的奥秘",
+    "第4章 认识化学反应",
+    "第5章 奇妙的二氧化碳",
+    "第6章 金属资源综合利用",
+    "第7章 探索溶解现象",
+    "第8章 酸、碱、盐及其应用",
+    "第9章 化学与社会可持续发展",
+)
+
 
 def _grade_levels(start: int = 1, end: int = 12) -> tuple[dict, ...]:
     return tuple(
@@ -352,6 +364,20 @@ CURRICULA = (
         "levels": _single_level("course", "Full course", "完整课程"),
         "default_level": "course",
         "topics": AP_PHYSICS_C_EM_TOPICS,
+    },
+    {
+        "id": "shanghai-education-grade-9-chemistry-2026",
+        "code": "沪教版",
+        "name": "Shanghai Education Grade 9 Chemistry (2026 new edition)",
+        "name_zh": "沪教版九年级化学（2026新版）",
+        "subject": "chemistry",
+        "status": "beta",
+        "version": "2026-new-edition-2024-revision",
+        "module": "generated-chemistry",
+        "practice_source": "generated",
+        "levels": _single_level("grade-9", "Grade 9", "九年级"),
+        "default_level": "grade-9",
+        "topics": SHANGHAI_EDUCATION_GRADE_9_CHEMISTRY_TOPICS,
     },
 )
 

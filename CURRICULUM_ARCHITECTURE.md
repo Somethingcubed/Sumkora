@@ -31,6 +31,7 @@ not silently change a student's curriculum.
 | AP Physics 2: Algebra-Based | Full course | Beta | Generated and independently validated |
 | AP Physics C: Mechanics | Full course | Beta | Generated and independently validated |
 | AP Physics C: Electricity and Magnetism | Full course | Beta | Generated and independently validated |
+| 沪教版九年级化学（2026新版） | Grade 9 | Beta | Generated and independently validated |
 
 The existing 0606 analysis and bank-practice path remains unchanged. New
 pathways are visibly labelled beta until representative real-paper benchmarks
@@ -55,7 +56,9 @@ that solves them from scratch. A question is saved only when that check confirms
 that it is complete, in scope, appropriate for the selected level, and has a
 correct worked solution and final answer. Physics checks also cover formula
 choice, substitutions, units, significant figures, graphs, and experimental
-reasoning. A partial or unvalidated worksheet is refused rather than shown.
+reasoning. Chemistry checks cover formulae, equation balancing, ionic charges,
+state symbols, reaction conditions, observations, calculations, and laboratory
+safety. A partial or unvalidated worksheet is refused rather than shown.
 
 ## Curriculum references
 
@@ -78,6 +81,11 @@ They are grounded in the active official frameworks:
 - China compulsory mathematics curriculum (2022) and senior-high mathematics
   curriculum (2017 edition, revised 2020). The registry uses broad domains and
   exact grade selection because textbook sequencing can vary by edition.
+- Ministry of Education 2024 compulsory-education textbook catalogue (revised
+  for the 2022 curriculum standard), listing Wang Zuhao's Shanghai Education
+  Publishing House Grade 9 Chemistry volumes. The 2026 pathway uses the 2024
+  revised nine-chapter structure:
+  https://www.moe.gov.cn/srcsite/A26/s8001/202408/W020250418502592948423.pdf
 
 ## Adding or promoting a curriculum
 

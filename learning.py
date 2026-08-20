@@ -1471,7 +1471,9 @@ def _fallback_worked_solution(item: dict, lang: str) -> str:
     return "\n\n".join(parts)
 
 
-def prepare_mistake_worked_solutions(items: list[dict]) -> None:
+def prepare_mistake_worked_solutions(
+    items: list[dict], curriculum: dict | None = None
+) -> None:
     """Generate and cache worked solutions without changing assessment results."""
     pending = [
         item
@@ -1507,7 +1509,8 @@ def prepare_mistake_worked_solutions(items: list[dict]) -> None:
                     ),
                 }
                 for item in batch
-            ]
+            ],
+            curriculum=curriculum,
         )
 
     generated: list[dict] = []
@@ -1556,7 +1559,9 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
     data = mistake_book(student_id)
     is_questions = kind == "questions"
     if not is_questions:
-        prepare_mistake_worked_solutions(data["items"])
+        prepare_mistake_worked_solutions(
+            data["items"], curriculum=_student_curriculum(student_id)
+        )
     if lang == "zh":
         title = "Sumkora 错题本" if is_questions else "Sumkora 错题答案"
         subtitle = (

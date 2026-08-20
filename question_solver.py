@@ -96,11 +96,12 @@ returning. The final_answer fields MUST exactly agree with the final line of
 the corresponding worked solution; copy the same result rather than
 recalculating or simplifying it differently. Return only the required JSON object."""
 
-TEXT_SOLUTIONS_PROMPT = """You are Sumkora's mathematics tutor. Produce a
-concise, complete worked solution for every mathematics question in the JSON
-input. Each solution must show the mathematical process step by step and end
-with the final answer. Preserve exact values, units, domains, inequalities,
-and all question parts. Check the algebra and signs.
+TEXT_SOLUTIONS_PROMPT = """You are Sumkora's subject tutor. Produce a concise,
+complete worked solution for every question in the JSON input. Each solution
+must show the reasoning or calculation process step by step and end with the
+final answer. Preserve exact values, formulae, equations, units, domains,
+inequalities, experimental observations, and all question parts. Check all
+calculations, symbols, scientific claims, and signs.
 
 Some questions include a private reference answer. Use it only to verify
 accuracy. Do not mention a mark scheme, marking instructions, marks, examiner
@@ -193,13 +194,22 @@ def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
             "Use a clear broad topic and a precise skill."
         )
     )
-    physics_instruction = (
-        "Check equations, units, significant figures, directions, diagrams, "
-        "and experimental reasoning before returning."
-        if curriculum and curriculum.get("subject") == "physics"
-        else ""
-    )
-    prompt = f"{PROMPT}\n\n{curriculum_instruction}\n{physics_instruction}"
+    subject = str((curriculum or {}).get("subject") or "mathematics")
+    subject_instruction = ""
+    if subject == "physics":
+        subject_instruction = (
+            "Check equations, units, significant figures, directions, diagrams, "
+            "and experimental reasoning before returning."
+        )
+    elif subject == "chemistry":
+        subject_instruction = (
+            "Check chemical formulae, balanced equations, ionic charges, state "
+            "symbols, reaction conditions, calculations, observations, apparatus, "
+            "and laboratory safety. Preserve Chinese chemical terminology. Write "
+            "formulae with standard LaTeX subscripts and superscripts (for example "
+            "\\(\\mathrm{CO_2}\\)) rather than plain-text approximations."
+        )
+    prompt = f"{PROMPT}\n\n{curriculum_instruction}\n{subject_instruction}"
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -256,7 +266,9 @@ def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
     return parsed
 
 
-def solve_question_texts(questions: list[dict]) -> dict:
+def solve_question_texts(
+    questions: list[dict], curriculum: dict | None = None
+) -> dict:
     """Return bilingual worked solutions keyed by the supplied integer id."""
     if not questions:
         return {"solutions": [], "model": "", "usage": {}}
@@ -270,6 +282,18 @@ def solve_question_texts(questions: list[dict]) -> dict:
         }
         for item in questions
     ]
+    curriculum_instruction = (
+        curriculum_prompt_context(curriculum)
+        if curriculum
+        else "Subject: mathematics. Use an appropriate school-level method."
+    )
+    chemistry_instruction = (
+        "For chemistry, independently check every formula, balanced equation, "
+        "ionic charge, state symbol, condition, calculation, observation, and "
+        "laboratory-safety claim before returning."
+        if curriculum and curriculum.get("subject") == "chemistry"
+        else ""
+    )
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -282,6 +306,8 @@ def solve_question_texts(questions: list[dict]) -> dict:
                             "type": "input_text",
                             "text": (
                                 f"{TEXT_SOLUTIONS_PROMPT}\n\n"
+                                f"{curriculum_instruction}\n"
+                                f"{chemistry_instruction}\n\n"
                                 f"Questions:\n"
                                 f"{json.dumps(compact, ensure_ascii=False)}"
                             ),
