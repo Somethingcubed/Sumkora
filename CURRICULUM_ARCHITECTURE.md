@@ -1,6 +1,6 @@
 # Curriculum architecture
 
-Updated: 19 August 2026
+Updated: 20 August 2026
 
 ## Boundary
 
@@ -27,7 +27,10 @@ not silently change a student's curriculum.
 | AP Calculus BC | Full course | Beta | Generated and independently validated |
 | AP Statistics | Full course | Beta | Generated and independently validated |
 | Cambridge IGCSE Physics 0625 | Core, Extended | Beta | Generated and independently validated |
-| Scottish Higher Physics | Higher | Beta | Generated and independently validated |
+| AP Physics 1: Algebra-Based | Full course | Beta | Generated and independently validated |
+| AP Physics 2: Algebra-Based | Full course | Beta | Generated and independently validated |
+| AP Physics C: Mechanics | Full course | Beta | Generated and independently validated |
+| AP Physics C: Electricity and Magnetism | Full course | Beta | Generated and independently validated |
 
 The existing 0606 analysis and bank-practice path remains unchanged. New
 pathways are visibly labelled beta until representative real-paper benchmarks
@@ -67,8 +70,11 @@ They are grounded in the active official frameworks:
   https://www.cambridgeinternational.org/Images/697209-2026-2028-syllabus.pdf
 - College Board AP course frameworks:
   https://apcentral.collegeboard.org/courses
-- Qualifications Scotland Higher Physics, session 2026–27 onward:
-  https://www.sqa.org.uk/sqa/46507.html
+- College Board AP Physics course frameworks:
+  https://apcentral.collegeboard.org/courses/ap-physics-1
+  https://apcentral.collegeboard.org/courses/ap-physics-2
+  https://apcentral.collegeboard.org/courses/ap-physics-c-mechanics
+  https://apcentral.collegeboard.org/courses/ap-physics-c-electricity-and-magnetism
 - China compulsory mathematics curriculum (2022) and senior-high mathematics
   curriculum (2017 edition, revised 2020). The registry uses broad domains and
   exact grade selection because textbook sequencing can vary by edition.

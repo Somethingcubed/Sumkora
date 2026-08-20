@@ -108,11 +108,44 @@ IGCSE_PHYSICS_0625_TOPICS = (
     "Experimental skills and investigations",
 )
 
-HIGHER_PHYSICS_TOPICS = (
-    "Our dynamic Universe",
-    "Particles and waves",
-    "Electricity",
-    "Experimental and investigative skills",
+AP_PHYSICS_1_TOPICS = (
+    "Kinematics",
+    "Force and translational dynamics",
+    "Work, energy and power",
+    "Linear momentum",
+    "Torque and rotational dynamics",
+    "Energy and momentum of rotating systems",
+    "Oscillations",
+    "Fluids",
+)
+
+AP_PHYSICS_2_TOPICS = (
+    "Thermodynamics",
+    "Electric force, field and potential",
+    "Electric circuits",
+    "Magnetism and electromagnetism",
+    "Geometric optics",
+    "Waves, sound and physical optics",
+    "Modern physics",
+)
+
+AP_PHYSICS_C_MECHANICS_TOPICS = (
+    "Kinematics",
+    "Force and translational dynamics",
+    "Work, energy and power",
+    "Linear momentum",
+    "Torque and rotational dynamics",
+    "Energy and momentum of rotating systems",
+    "Oscillations",
+)
+
+AP_PHYSICS_C_EM_TOPICS = (
+    "Electric charges, fields and Gauss's law",
+    "Electric potential",
+    "Conductors and capacitors",
+    "Electric circuits",
+    "Magnetic fields and electromagnetism",
+    "Electromagnetic induction",
 )
 
 
@@ -265,23 +298,68 @@ CURRICULA = (
         "topics": IGCSE_PHYSICS_0625_TOPICS,
     },
     {
-        "id": "scottish-higher-physics",
-        "code": "Higher",
-        "name": "Scottish Higher Physics",
-        "name_zh": "苏格兰 Higher 物理",
+        "id": "ap-physics-1",
+        "code": "AP",
+        "name": "AP Physics 1: Algebra-Based",
+        "name_zh": "AP 物理 1（代数基础）",
         "subject": "physics",
         "status": "beta",
         "version": "2026-2027",
         "module": "generated-physics",
         "practice_source": "generated",
-        "levels": _single_level("higher", "Higher", "Higher"),
-        "default_level": "higher",
-        "topics": HIGHER_PHYSICS_TOPICS,
+        "levels": _single_level("course", "Full course", "完整课程"),
+        "default_level": "course",
+        "topics": AP_PHYSICS_1_TOPICS,
+    },
+    {
+        "id": "ap-physics-2",
+        "code": "AP",
+        "name": "AP Physics 2: Algebra-Based",
+        "name_zh": "AP 物理 2（代数基础）",
+        "subject": "physics",
+        "status": "beta",
+        "version": "2026-2027",
+        "module": "generated-physics",
+        "practice_source": "generated",
+        "levels": _single_level("course", "Full course", "完整课程"),
+        "default_level": "course",
+        "topics": AP_PHYSICS_2_TOPICS,
+    },
+    {
+        "id": "ap-physics-c-mechanics",
+        "code": "AP",
+        "name": "AP Physics C: Mechanics",
+        "name_zh": "AP 物理 C：力学",
+        "subject": "physics",
+        "status": "beta",
+        "version": "2026-2027",
+        "module": "generated-physics",
+        "practice_source": "generated",
+        "levels": _single_level("course", "Full course", "完整课程"),
+        "default_level": "course",
+        "topics": AP_PHYSICS_C_MECHANICS_TOPICS,
+    },
+    {
+        "id": "ap-physics-c-electricity-and-magnetism",
+        "code": "AP",
+        "name": "AP Physics C: Electricity and Magnetism",
+        "name_zh": "AP 物理 C：电磁学",
+        "subject": "physics",
+        "status": "beta",
+        "version": "2026-2027",
+        "module": "generated-physics",
+        "practice_source": "generated",
+        "levels": _single_level("course", "Full course", "完整课程"),
+        "default_level": "course",
+        "topics": AP_PHYSICS_C_EM_TOPICS,
     },
 )
 
 DEFAULT_CURRICULUM_ID = CURRICULA[0]["id"]
 DEFAULT_STUDY_LANGUAGE = "auto"
+LEGACY_CURRICULUM_ALIASES = {
+    "scottish-higher-physics": "ap-physics-1",
+}
 
 
 def curriculum_options() -> tuple[dict, ...]:
@@ -290,6 +368,7 @@ def curriculum_options() -> tuple[dict, ...]:
 
 def curriculum_by_id(curriculum_id: str | None) -> dict | None:
     selected = curriculum_id or DEFAULT_CURRICULUM_ID
+    selected = LEGACY_CURRICULUM_ALIASES.get(selected, selected)
     return next(
         (curriculum for curriculum in CURRICULA if curriculum["id"] == selected),
         None,

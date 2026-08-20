@@ -70,6 +70,24 @@ def test_curriculum_registry_covers_requested_subjects_and_levels():
     assert topics_for_curriculum("ap-calculus-bc")[-1] == (
         "Infinite sequences and series"
     )
+    assert topics_for_curriculum("ap-physics-1")[-1] == "Fluids"
+    assert "Modern physics" in topics_for_curriculum("ap-physics-2")
+    assert "Oscillations" in topics_for_curriculum("ap-physics-c-mechanics")
+    assert "Electromagnetic induction" in topics_for_curriculum(
+        "ap-physics-c-electricity-and-magnetism"
+    )
+
+
+def test_scottish_pre_release_profile_is_hidden_and_migrates_safely():
+    from curricula import curriculum_options
+
+    assert all(
+        item["id"] != "scottish-higher-physics"
+        for item in curriculum_options()
+    )
+    profile = curriculum_profile("scottish-higher-physics", "higher", "en")
+    assert profile["id"] == "ap-physics-1"
+    assert profile["level"] == "course"
 
 
 def test_signup_saves_the_selected_curriculum_and_level():

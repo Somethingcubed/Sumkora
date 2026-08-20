@@ -1,6 +1,6 @@
 # Sumkora release-candidate status
 
-Updated: 19 August 2026
+Updated: 20 August 2026
 
 ## Multi-curriculum beta - 19 August 2026
 
@@ -11,7 +11,7 @@ Updated: 19 August 2026
 - Added selectable beta profiles for General Mathematics Grades 1–12,
   Chinese National Mathematics Grades 1–12, Cambridge 0580 Core/Extended,
   AP Precalculus, AP Calculus AB/BC, AP Statistics, Cambridge Physics 0625
-  Core/Extended, and Scottish Higher Physics.
+  Core/Extended, AP Physics 1 and 2, and both AP Physics C courses.
 - Added curriculum and level selection at signup, in Settings, and per paper
   upload. Question/feedback language remains a separate English, Chinese, or
   automatic choice.
@@ -32,7 +32,7 @@ Updated: 19 August 2026
   complete in English and Simplified Chinese.
 - Mobile browser checks passed at 390 px for signup, pathway settings,
   dashboard, and practice. No browser console errors remained.
-- Full automated suite: 84 tests passed. This implementation is not yet
+- Full automated suite: 85 tests passed. This implementation is not yet
   deployed to Railway.
 
 ## Activation, mobile and curriculum boundary - 4 August 2026
