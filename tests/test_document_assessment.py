@@ -1,3 +1,4 @@
+import io
 import json
 import urllib.error
 
@@ -329,7 +330,9 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
 
     assert len(calls) == 2
     assert all(call[1]["retries"] == 0 for call in calls)
-    assert calls[0][0]["input"][0]["content"][1]["type"] == "input_file"
+    first_content = calls[0][0]["input"][0]["content"]
+    assert first_content[1]["type"] == "input_text"
+    assert first_content[2]["type"] == "input_image"
     retry_content = calls[1][0]["input"][0]["content"]
     assert retry_content[1]["type"] == "input_text"
     assert retry_content[2]["type"] == "input_image"
@@ -338,10 +341,80 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     )
     assert metadata["transport_attempts"] == 2
     assert len(metadata["transport_timeouts"]) == 2
+    assert metadata["transport_reasoning_efforts"] == ["medium", "low"]
+    assert calls[0][0]["reasoning"]["effort"] == "medium"
+    assert calls[1][0]["reasoning"]["effort"] == "low"
     assert metadata["provider"] == "cxsee_responses_images"
     assert metadata["render_dpi"] == 160
     assert any(stage == "provider_retry" for stage, _detail in progress)
     assert result["estimated_score"] == 2
+
+
+def test_pdf_attachment_rejection_retries_as_complete_page_images(
+    tmp_path, monkeypatch
+):
+    answer = tmp_path / "scanned-answer.pdf"
+    make_pdf(answer, "Q1 handwritten answer")
+    calls = []
+
+    def fake_post(_url, payload, **kwargs):
+        calls.append((payload, kwargs))
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                "https://provider.invalid/v1/responses",
+                400,
+                "Bad Request",
+                {},
+                io.BytesIO(
+                    b'{"error":{"message":"Invalid value: '
+                    b"'input_file'. Supported values are: 'input_text'."
+                    b'}}'
+                ),
+            )
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "response-after-image-fallback",
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+    monkeypatch.setattr(document_assessment.time, "sleep", lambda _seconds: None)
+
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="gpt-5.4-mini",
+    )
+
+    assert len(calls) == 2
+    assert calls[0][0]["input"][0]["content"][1]["type"] == "input_file"
+    retry_content = calls[1][0]["input"][0]["content"]
+    assert retry_content[1]["type"] == "input_text"
+    assert retry_content[2]["type"] == "input_image"
+    assert metadata["provider"] == "cxsee_responses_images"
+    assert metadata["transport_attempts"] == 2
+    assert result["estimated_score"] == 2
+
+
+def test_unrelated_bad_request_does_not_retry_document_transport():
+    error = urllib.error.HTTPError(
+        "https://provider.invalid/v1/responses",
+        400,
+        "Bad Request",
+        {},
+        io.BytesIO(b'{"error":{"message":"Invalid JSON schema"}}'),
+    )
+
+    assert document_assessment._retryable_provider_error(error) is False
 
 
 def test_qwen_receives_complete_ocr_transcript_without_rendered_images(

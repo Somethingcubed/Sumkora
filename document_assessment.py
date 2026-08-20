@@ -564,7 +564,31 @@ def _thinking_budget(effort: str) -> int:
 
 def _retryable_provider_error(error: Exception) -> bool:
     if isinstance(error, urllib.error.HTTPError):
-        return error.code in {408, 429, 500, 502, 503, 504}
+        if error.code in {408, 429, 500, 502, 503, 504}:
+            return True
+        if error.code == 400:
+            # Some OpenAI-compatible gateways expose the Responses API but
+            # temporarily reject native PDF parts for an otherwise
+            # vision-capable model. In that case the controlled recovery
+            # request below renders the same complete document as page
+            # images. Do not retry unrelated 400s (for example, a malformed
+            # schema), because changing the document transport cannot repair
+            # those requests.
+            try:
+                body = error.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            normalized = body.lower()
+            return "input_file" in normalized and any(
+                marker in normalized
+                for marker in (
+                    "invalid value",
+                    "not supported",
+                    "unsupported",
+                    "supported values",
+                )
+            )
+        return False
     return isinstance(
         error,
         (
@@ -592,6 +616,16 @@ def _call_structured_document_model(
     request_retries = (
         config.CXSEE_MAX_RETRIES if retries is None else max(0, retries)
     )
+    # CXSEE's current gpt-5.5 Responses route rejects native `input_file`
+    # parts even though the same vision model accepts `input_image`. Preserve
+    # whole-document assessment by sending every rendered page in order; this
+    # is model vision input, not OCR text or question-to-question mapping.
+    if (
+        model.strip().lower() == "gpt-5.5"
+        and document_paths
+        and not document_texts
+    ):
+        render_documents_as_images = True
     schema_instruction = (
         "\n\nYou must follow this exact JSON Schema yourself. Return every "
         "required field with the exact property names and enum values. "
@@ -1597,6 +1631,7 @@ def assess_documents(
         # recovery window, pause briefly, and always respect the total budget.
         transport_attempt = 0
         transport_timeouts: list[int] = []
+        transport_reasoning_efforts: list[str] = []
         while True:
             remaining = remaining_seconds()
             if remaining < 45:
@@ -1614,6 +1649,10 @@ def assess_documents(
                 ),
             )
             transport_timeouts.append(primary_timeout)
+            request_reasoning_effort = (
+                "low" if transport_attempt > 0 and effort != "low" else effort
+            )
+            transport_reasoning_efforts.append(request_reasoning_effort)
             try:
                 response_text, response_metadata = (
                     _call_structured_document_model(
@@ -1626,7 +1665,7 @@ def assess_documents(
                         ),
                         schema=assessment_schema(),
                         document_paths=document_paths,
-                        reasoning_effort=effort,
+                        reasoning_effort=request_reasoning_effort,
                         document_texts=document_texts,
                         timeout_seconds=primary_timeout,
                         retries=0,
@@ -1671,7 +1710,8 @@ def assess_documents(
                 "provider": response_metadata["provider"],
                 "model": selected_model,
                 "prompt_version": ASSESSMENT_PROMPT_VERSION,
-                "reasoning_effort": effort,
+                "reasoning_effort": transport_reasoning_efforts[-1],
+                "requested_reasoning_effort": effort,
                 "duration_ms": int((time.monotonic() - started) * 1000),
                 "attempts": attempt + 1,
                 "usage": response_metadata["usage"],
@@ -1683,6 +1723,7 @@ def assess_documents(
                 "primary_timeout_seconds": primary_timeout,
                 "transport_attempts": transport_attempt + 1,
                 "transport_timeouts": transport_timeouts,
+                "transport_reasoning_efforts": transport_reasoning_efforts,
                 "curriculum_id": (curriculum or {}).get("id"),
             }
             if (
