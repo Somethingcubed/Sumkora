@@ -25,8 +25,8 @@ from reportlab.platypus import (
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output" / "pdf"
 TEMP_DIR = ROOT / "tmp" / "pdfs" / "chemistry-test-pack"
-COMPLETED_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-completed-test.pdf"
-GUIDE_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-checking-guide.pdf"
+COMPLETED_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-completed-test-compatible.pdf"
+GUIDE_PATH = OUTPUT_DIR / "sumkora-huke-2026-chemistry-checking-guide-compatible.pdf"
 COMPLETED_VECTOR_PATH = TEMP_DIR / "completed-vector.pdf"
 GUIDE_VECTOR_PATH = TEMP_DIR / "guide-vector.pdf"
 
