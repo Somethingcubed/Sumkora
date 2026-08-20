@@ -372,3 +372,141 @@ def test_validator_rejections_receive_one_bounded_replacement_pass(
     assert max(generated_orders) > 12
     assert validation_calls > 4
     assert metadata["validated_count"] == 10
+
+
+def test_timed_out_batches_are_split_without_discarding_completed_work(
+    monkeypatch,
+):
+    curriculum = curriculum_profile("ap-calculus-ab", "course", "en")
+    generation_calls = []
+    validation_calls = []
+    failed_generation_batch = False
+    failed_validation_batch = False
+
+    def fake_generate_batch(**kwargs):
+        nonlocal failed_generation_batch
+        generation_calls.append((kwargs["start_order"], kwargs["count"]))
+        if (
+            kwargs["start_order"] == 1
+            and kwargs["count"] == 3
+            and not failed_generation_batch
+        ):
+            failed_generation_batch = True
+            raise TimeoutError("provider read timed out")
+        questions = []
+        for offset in range(kwargs["count"]):
+            order = kwargs["start_order"] + offset
+            questions.append(
+                {
+                    "order": order,
+                    "topic": "Limits and continuity",
+                    "skill": "evaluating limits",
+                    "difficulty": "standard",
+                    "prompt_en": f"Evaluate resilient limit {order} completely.",
+                    "prompt_zh": f"完整求可恢复极限 {order}。",
+                    "solution_en": f"The limit is {order}.",
+                    "solution_zh": f"极限为 {order}。",
+                    "final_answer_en": str(order),
+                    "final_answer_zh": str(order),
+                    "maximum_marks": 1.0,
+                    "valid": True,
+                    "validation_notes": "",
+                    "signature": f"resilient limit {order}",
+                }
+            )
+        return questions, "generator-test"
+
+    def fake_validate_batch(questions, **_kwargs):
+        nonlocal failed_validation_batch
+        validation_calls.append(len(questions))
+        if len(questions) == 3 and not failed_validation_batch:
+            failed_validation_batch = True
+            raise TimeoutError("validator read timed out")
+        return questions, "validator-test"
+
+    monkeypatch.setattr(practice_generator, "_generate_batch", fake_generate_batch)
+    monkeypatch.setattr(practice_generator, "_validate_batch", fake_validate_batch)
+
+    questions, metadata = practice_generator.generate_validated_practice_questions(
+        curriculum=curriculum,
+        topic="Limits and continuity",
+        count=10,
+        difficulty="mixed",
+        calculator_policy="any",
+    )
+
+    assert len(questions) == 10
+    assert (1, 1) in generation_calls
+    assert (2, 1) in generation_calls
+    assert (3, 1) in generation_calls
+    assert 1 in validation_calls
+    assert metadata["validated_count"] == 10
+
+
+def test_compact_validator_reuses_correct_items_and_applies_repairs(
+    monkeypatch,
+):
+    curriculum = curriculum_profile("ap-calculus-ab", "course", "en")
+    questions = []
+    for order in (1, 2):
+        questions.append(
+            {
+                "order": order,
+                "topic": "Limits and continuity",
+                "skill": "evaluating limits",
+                "difficulty": "standard",
+                "prompt_en": f"Evaluate compact limit {order} completely.",
+                "prompt_zh": f"完整求精简极限 {order}。",
+                "solution_en": f"The limit is {order}.",
+                "solution_zh": f"极限为 {order}。",
+                "final_answer_en": str(order),
+                "final_answer_zh": str(order),
+                "maximum_marks": 1.0,
+                "valid": True,
+                "validation_notes": "",
+                "signature": f"compact limit {order}",
+            }
+        )
+
+    repaired = {
+        key: value
+        for key, value in questions[1].items()
+        if key not in {"valid", "validation_notes", "signature"}
+    }
+    repaired["final_answer_en"] = "2 (checked)"
+
+    def fake_call_model(*_args, **_kwargs):
+        return (
+            {
+                "questions": [
+                    {
+                        "order": 1,
+                        "valid": True,
+                        "validation_notes": "Correct as supplied.",
+                        "replacement": None,
+                    },
+                    {
+                        "order": 2,
+                        "valid": True,
+                        "validation_notes": "Final wording repaired.",
+                        "replacement": repaired,
+                    },
+                ]
+            },
+            "validator-test",
+        )
+
+    monkeypatch.setattr(practice_generator, "_call_model", fake_call_model)
+
+    validated, model = practice_generator._validate_batch(
+        questions,
+        curriculum=curriculum,
+        difficulty="mixed",
+        calculator_policy="any",
+    )
+
+    assert model == "validator-test"
+    assert len(validated) == 2
+    assert validated[0]["prompt_en"] == questions[0]["prompt_en"]
+    assert validated[0]["validation_notes"] == "Correct as supplied."
+    assert validated[1]["final_answer_en"] == "2 (checked)"

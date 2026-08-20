@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -11,10 +12,14 @@ from curricula import curriculum_prompt_context
 from document_assessment import (
     _extract_response_text,
     _parse_provider_json,
+    _retryable_provider_error,
     _strip_json_fence,
 )
 from ocr import api_post_json, cxsee_api_base
 from taxonomy import canonical_skill, canonical_topic_for_curriculum
+
+
+logger = logging.getLogger(__name__)
 
 
 QUESTION_FIELDS = {
@@ -60,11 +65,27 @@ VALIDATION_SCHEMA = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": [*QUESTION_FIELDS, "valid", "validation_notes"],
+                "required": [
+                    "order",
+                    "valid",
+                    "validation_notes",
+                    "replacement",
+                ],
                 "properties": {
-                    **QUESTION_FIELDS,
+                    "order": {"type": "integer"},
                     "valid": {"type": "boolean"},
                     "validation_notes": {"type": "string"},
+                    "replacement": {
+                        "anyOf": [
+                            {"type": "null"},
+                            {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": list(QUESTION_FIELDS),
+                                "properties": QUESTION_FIELDS,
+                            },
+                        ]
+                    },
                 },
             },
         }
@@ -111,14 +132,16 @@ equivalence, mathematical or scientific consistency, units, significant
 figures, final answers, worked solutions, mark allocation, and calculator
 policy.
 
-Correct a fixable problem directly. Set valid=false when the question is
+When the supplied item is already fully correct, set replacement=null; do not
+repeat its question or solution text. Correct a fixable problem by returning
+the complete corrected item in replacement. Set valid=false when the question is
 ambiguous, impossible, outside the specified curriculum, depends on a missing
 diagram, has an unverifiable answer, or cannot be repaired without replacing
 its core task. For physics, independently check dimensions and physical
 plausibility. For chemistry, independently check formulae, equation balancing,
 charges, states, conditions, observations, calculations, and laboratory safety.
-For statistics, verify the data and inference conditions. Return one result for
-every supplied order and only the required JSON."""
+For statistics, verify the data and inference conditions. Return one compact
+result for every supplied order and only the required JSON."""
 
 
 # Five bilingual questions plus two worked solutions per item regularly push
@@ -153,7 +176,10 @@ def _call_model(prompt: str, schema: dict, schema_name: str, tokens: int) -> tup
         },
         headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
         timeout=max(config.QUESTION_SOLVER_TIMEOUT_SECONDS, 90),
-        retries=1,
+        # Recovery is handled at the worksheet-batch level below. Retrying an
+        # identical large request here can block for another 90 seconds and
+        # still throw away all the batches that already succeeded.
+        retries=0,
     )
     parsed = _parse_provider_json(
         _strip_json_fence(_extract_response_text(result))
@@ -267,13 +293,151 @@ def _validate_batch(
         "sumkora_validated_practice",
         min(12000, max(4200, len(payload) * 1600)),
     )
-    validated = [
-        question
-        for item in result.get("questions") or []
-        if (question := _normalise_question(item, curriculum))
-        and question["valid"]
-    ]
+    originals = {item["order"]: item for item in questions}
+    validated = []
+    for check in result.get("questions") or []:
+        try:
+            order = int(check.get("order"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        original = originals.get(order)
+        if not original or not bool(check.get("valid")):
+            continue
+        replacement = check.get("replacement")
+        candidate = dict(replacement) if isinstance(replacement, dict) else dict(original)
+        candidate["order"] = order
+        candidate["valid"] = True
+        candidate["validation_notes"] = str(
+            check.get("validation_notes") or "Independently solved and checked."
+        ).strip()
+        question = _normalise_question(candidate, curriculum)
+        if question and question["valid"]:
+            validated.append(question)
     return validated, model
+
+
+def _generate_specs_resilient(
+    specs: list[tuple[int, int]],
+    *,
+    curriculum: dict,
+    topic: str,
+    difficulty: str,
+    calculator_policy: str,
+    avoid: list[str],
+) -> tuple[list[dict], list[str]]:
+    """Keep successful batches and split timed-out batches into single items."""
+
+    def run(
+        pending: list[tuple[int, int]],
+    ) -> tuple[list[dict], list[str], list[tuple[int, int]]]:
+        if not pending:
+            return [], [], []
+        questions: list[dict] = []
+        models: list[str] = []
+        failed: list[tuple[int, int]] = []
+        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+            futures = {
+                pool.submit(
+                    _generate_batch,
+                    curriculum=curriculum,
+                    topic=topic,
+                    count=batch_count,
+                    start_order=start_order,
+                    difficulty=difficulty,
+                    calculator_policy=calculator_policy,
+                    avoid=avoid,
+                ): (start_order, batch_count)
+                for start_order, batch_count in pending
+            }
+            for future in as_completed(futures):
+                spec = futures[future]
+                try:
+                    batch_questions, model = future.result()
+                except Exception as exc:
+                    if not _retryable_provider_error(exc):
+                        raise
+                    logger.warning(
+                        "Practice generation batch start=%s count=%s failed; "
+                        "preserving completed batches",
+                        spec[0],
+                        spec[1],
+                    )
+                    failed.append(spec)
+                    continue
+                questions.extend(batch_questions)
+                models.append(model)
+        return questions, models, failed
+
+    questions, models, failed = run(specs)
+    single_item_retries = [
+        (start_order + offset, 1)
+        for start_order, batch_count in failed
+        for offset in range(batch_count)
+    ]
+    retry_questions, retry_models, retry_failures = run(single_item_retries)
+    if retry_failures:
+        logger.warning(
+            "%s single-question practice generation requests still failed",
+            len(retry_failures),
+        )
+    return questions + retry_questions, models + retry_models
+
+
+def _validate_batches_resilient(
+    batches: list[list[dict]],
+    *,
+    curriculum: dict,
+    difficulty: str,
+    calculator_policy: str,
+) -> tuple[list[dict], list[str]]:
+    """Validate every successful batch and retry only timed-out items."""
+
+    def run(
+        pending: list[list[dict]],
+    ) -> tuple[list[dict], list[str], list[list[dict]]]:
+        if not pending:
+            return [], [], []
+        validated: list[dict] = []
+        models: list[str] = []
+        failed: list[list[dict]] = []
+        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+            futures = {
+                pool.submit(
+                    _validate_batch,
+                    batch,
+                    curriculum=curriculum,
+                    difficulty=difficulty,
+                    calculator_policy=calculator_policy,
+                ): batch
+                for batch in pending
+            }
+            for future in as_completed(futures):
+                batch = futures[future]
+                try:
+                    batch_questions, model = future.result()
+                except Exception as exc:
+                    if not _retryable_provider_error(exc):
+                        raise
+                    logger.warning(
+                        "Practice validation batch count=%s failed; preserving "
+                        "completed batches",
+                        len(batch),
+                    )
+                    failed.append(batch)
+                    continue
+                validated.extend(batch_questions)
+                models.append(model)
+        return validated, models, failed
+
+    validated, models, failed = run(batches)
+    single_item_retries = [[item] for batch in failed for item in batch]
+    retry_validated, retry_models, retry_failures = run(single_item_retries)
+    if retry_failures:
+        logger.warning(
+            "%s single-question practice validation requests still failed",
+            len(retry_failures),
+        )
+    return validated + retry_validated, models + retry_models
 
 
 def generate_validated_practice_questions(
@@ -294,26 +458,14 @@ def generate_validated_practice_questions(
         (start, min(PRACTICE_BATCH_SIZE, generation_target - start + 1))
         for start in range(1, generation_target + 1, PRACTICE_BATCH_SIZE)
     ]
-    generated: list[dict] = []
-    generation_models: list[str] = []
-    with ThreadPoolExecutor(max_workers=min(4, len(batch_specs))) as pool:
-        futures = [
-            pool.submit(
-                _generate_batch,
-                curriculum=curriculum,
-                topic=topic,
-                count=batch_count,
-                start_order=start,
-                difficulty=difficulty,
-                calculator_policy=calculator_policy,
-                avoid=[],
-            )
-            for start, batch_count in batch_specs
-        ]
-        for future in as_completed(futures):
-            questions, model = future.result()
-            generated.extend(questions)
-            generation_models.append(model)
+    generated, generation_models = _generate_specs_resilient(
+        batch_specs,
+        curriculum=curriculum,
+        topic=topic,
+        difficulty=difficulty,
+        calculator_policy=calculator_policy,
+        avoid=[],
+    )
 
     generated.sort(key=lambda item: item["order"])
     unique: list[dict] = []
@@ -324,27 +476,16 @@ def generate_validated_practice_questions(
         seen.add(item["signature"])
         unique.append(item)
 
-    validated: list[dict] = []
-    validation_models: list[str] = []
     batches = [
         unique[index:index + PRACTICE_BATCH_SIZE]
         for index in range(0, len(unique), PRACTICE_BATCH_SIZE)
     ]
-    with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
-        futures = [
-            pool.submit(
-                _validate_batch,
-                batch,
-                curriculum=curriculum,
-                difficulty=difficulty,
-                calculator_policy=calculator_policy,
-            )
-            for batch in batches
-        ]
-        for future in as_completed(futures):
-            questions, model = future.result()
-            validated.extend(questions)
-            validation_models.append(model)
+    validated, validation_models = _validate_batches_resilient(
+        batches,
+        curriculum=curriculum,
+        difficulty=difficulty,
+        calculator_policy=calculator_policy,
+    )
 
     validated.sort(key=lambda item: item["order"])
     # A validator can legitimately reject more than the reserve. Make one
@@ -358,53 +499,35 @@ def generate_validated_practice_questions(
             )
             for start in range(1, replacement_count + 1, PRACTICE_BATCH_SIZE)
         ]
+        replacement_candidates, replacement_models = _generate_specs_resilient(
+            replacement_specs,
+            curriculum=curriculum,
+            topic=topic,
+            difficulty=difficulty,
+            calculator_policy=calculator_policy,
+            avoid=[item["prompt_en"] for item in generated][-20:],
+        )
+        generation_models.extend(replacement_models)
         replacements: list[dict] = []
-        with ThreadPoolExecutor(
-            max_workers=min(4, len(replacement_specs))
-        ) as pool:
-            futures = [
-                pool.submit(
-                    _generate_batch,
-                    curriculum=curriculum,
-                    topic=topic,
-                    count=batch_count,
-                    start_order=start_order,
-                    difficulty=difficulty,
-                    calculator_policy=calculator_policy,
-                    avoid=[item["prompt_en"] for item in generated][-20:],
-                )
-                for start_order, batch_count in replacement_specs
-            ]
-            for future in as_completed(futures):
-                questions, model = future.result()
-                generation_models.append(model)
-                for item in questions:
-                    if item["signature"] not in seen:
-                        seen.add(item["signature"])
-                        generated.append(item)
-                        replacements.append(item)
+        for item in replacement_candidates:
+            if item["signature"] not in seen:
+                seen.add(item["signature"])
+                generated.append(item)
+                replacements.append(item)
         replacement_batches = [
             replacements[index:index + PRACTICE_BATCH_SIZE]
             for index in range(0, len(replacements), PRACTICE_BATCH_SIZE)
         ]
-        if replacement_batches:
-            with ThreadPoolExecutor(
-                max_workers=min(4, len(replacement_batches))
-            ) as pool:
-                futures = [
-                    pool.submit(
-                        _validate_batch,
-                        batch,
-                        curriculum=curriculum,
-                        difficulty=difficulty,
-                        calculator_policy=calculator_policy,
-                    )
-                    for batch in replacement_batches
-                ]
-                for future in as_completed(futures):
-                    questions, model = future.result()
-                    validated.extend(questions)
-                    validation_models.append(model)
+        replacement_validated, replacement_validation_models = (
+            _validate_batches_resilient(
+                replacement_batches,
+                curriculum=curriculum,
+                difficulty=difficulty,
+                calculator_policy=calculator_policy,
+            )
+        )
+        validated.extend(replacement_validated)
+        validation_models.extend(replacement_validation_models)
         validated.sort(key=lambda item: item["order"])
 
     final = validated[:count]

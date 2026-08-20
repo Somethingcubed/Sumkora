@@ -3215,7 +3215,7 @@ def student_create_practice(
             calculator_policy=calculator_policy,
             lang=get_lang(request),
         )
-    except (ValueError, RuntimeError):
+    except (ValueError, RuntimeError, TimeoutError):
         return RedirectResponse(
             "/student/practice?error=generation_failed",
             status_code=303,
