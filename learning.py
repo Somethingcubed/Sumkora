@@ -1134,6 +1134,41 @@ def _latin_font_name(page: fitz.Page) -> str:
 
 _SUPERSCRIPTS = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
 _SUBSCRIPTS = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+_CHEMICAL_SUBSCRIPTS = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+_CHEMICAL_ELEMENTS = {
+    "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg",
+    "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr",
+    "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr",
+    "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
+    "In", "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd",
+    "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf",
+    "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po",
+    "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm",
+    "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs",
+    "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og",
+}
+
+
+def _plain_chemical_formulae(value: str) -> str:
+    """Use Unicode subscripts for bare, valid chemical formulae such as H2O2."""
+
+    def convert(match: re.Match[str]) -> str:
+        token = match.group(0)
+        core = re.sub(r"\((?:aq|s|l|g)\)$", "", token)
+        symbols = re.findall(r"[A-Z][a-z]?", core)
+        if not any(character.isdigit() for character in core):
+            return token
+        if not symbols or any(symbol not in _CHEMICAL_ELEMENTS for symbol in symbols):
+            return token
+        return token.translate(_CHEMICAL_SUBSCRIPTS)
+
+    return re.sub(
+        r"(?<![A-Za-z0-9])(?:[A-Z][a-z]?\d*)+(?:\((?:aq|s|l|g)\))?"
+        r"(?![A-Za-z0-9])",
+        convert,
+        value,
+    )
 
 
 def _plain_math(value: str) -> str:
@@ -1217,17 +1252,53 @@ def _plain_math(value: str) -> str:
     # these wrappers from matching (for example L\,mol^{-1}).
     text = re.sub(r"\\(?:text|mathrm|mathbf)\{([^{}]*)\}", r"\1", text)
     text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
+    # At this point every supported TeX command has already been converted.
+    # Any remaining slash is a malformed delimiter emitted by the provider
+    # (for example ``\H2O2(aq)\``) and must never reach a printable booklet.
+    text = text.replace("\\", "")
     text = re.sub(r"\b(L|mol)\s*[−-]1\b", r"\1⁻¹", text)
     text = re.sub(r"\b(cm|dm|m)\s*[−-]3\b", r"\1⁻³", text)
     text = re.sub(r"\b(cm|dm|m)3\b", r"\1³", text)
+    text = _plain_chemical_formulae(text)
     text = re.sub(
-        r"(?<=\d)(?=(?:cm³|dm³|m³|cm⁻³|dm⁻³|m⁻³|mol|g|L)\b)",
+        r"(?<=\d)(?=(?:cm³|dm³|m³|cm⁻³|dm⁻³|m⁻³|mol|min|ms|kg|mg|µg|μg|"
+        r"mL|kJ|kPa|Pa|Hz|g|L|J|K|V|A|W|N|h|s)(?![A-Za-z0-9]))",
         " ",
+        text,
+    )
+    unit_pattern = (
+        r"cm³|dm³|m³|cm⁻³|dm⁻³|m⁻³|mol|min|ms|kg|mg|µg|μg|mL|kJ|kPa|"
+        r"Pa|Hz|g|L|J|K|V|A|W|N|h|s"
+    )
+    text = re.sub(
+        rf"\b({unit_pattern})(?=[\u3400-\u9fff])",
+        r"\1 ",
+        text,
+    )
+    text = re.sub(
+        r"((?:[A-Z][a-z]?[₀-₉]*)+(?:\((?:aq|s|l|g)\))?)"
+        r"(?=[\u3400-\u9fff])",
+        r"\1 ",
         text,
     )
     text = re.sub(r"°\s*C\b", "°C", text)
     text = text.replace("{", "").replace("}", "")
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def _clean_generated_practice_body(value: str) -> str:
+    """Remove model boilerplate that should not appear in student booklets."""
+    text = str(value or "")
+    boilerplate = (
+        r"请?只(?:使用|根据)题目所给(?:的)?(?:信息|内容)(?:作答|回答)[。.!！]?",
+        r"(?:Use|Answer using) only the (?:information|content) "
+        r"(?:given|provided) in (?:the|this) question[.!]?",
+        r"AI\s*生成练习\s*[·•-]?\s*已独立解答并校验",
+        r"AI-generated practice\s*[·•-]?\s*independently solved and validated",
+    )
+    for pattern in boilerplate:
+        text = re.sub(rf"(?im)^\s*(?:{pattern})\s*$", "", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _readable_markdown_tables(value: str, lang: str) -> str:
@@ -1467,20 +1538,21 @@ class _PdfFlow:
                     fontsize=10.2,
                     color=(0.10, 0.12, 0.20),
                 )
-                source_width = self._text_width(source_label, 7.5)
-                self.page.insert_text(
-                    (
-                        max(
-                            self.margin_x + 120,
-                            self.page.rect.width - self.margin_x - source_width,
+                if source_label:
+                    source_width = self._text_width(source_label, 7.5)
+                    self.page.insert_text(
+                        (
+                            max(
+                                self.margin_x + 120,
+                                self.page.rect.width - self.margin_x - source_width,
+                            ),
+                            self.y + 10,
                         ),
-                        self.y + 10,
-                    ),
-                    source_label,
-                    fontname=self.font,
-                    fontsize=7.5,
-                    color=(0.46, 0.49, 0.56),
-                )
+                        source_label,
+                        fontname=self.font,
+                        fontsize=7.5,
+                        color=(0.46, 0.49, 0.56),
+                    )
                 top = self.y + header_height
                 target = fitz.Rect(
                     self.margin_x,
@@ -1547,7 +1619,7 @@ class _PdfFlow:
                 color=(0.15, 0.17, 0.23),
             )
             self.y += 29 + len(chunk) * 14
-            if not wrapped:
+            if not wrapped and source_label:
                 self.page.insert_text(
                     (self.margin_x, self.y),
                     source_label,
@@ -1687,16 +1759,19 @@ class _PdfFlow:
                 if segment_index < len(segments) - 1:
                     flush_line(paragraph_gap=not segment.strip())
         flush_line()
-        if self.y + 18 > self.bottom:
-            new_continuation_page()
-        self.page.insert_text(
-            (self.margin_x, self.y + 8),
-            source_label,
-            fontname=self.font,
-            fontsize=7.5,
-            color=(0.46, 0.49, 0.56),
-        )
-        self.y += 26
+        if source_label:
+            if self.y + 18 > self.bottom:
+                new_continuation_page()
+            self.page.insert_text(
+                (self.margin_x, self.y + 8),
+                source_label,
+                fontname=self.font,
+                fontsize=7.5,
+                color=(0.46, 0.49, 0.56),
+            )
+            self.y += 26
+        else:
+            self.y += 12
 
     def finish(self) -> bytes:
         for page_number, page in enumerate(self.document, start=1):
@@ -1754,11 +1829,9 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
                 if lang == "zh"
                 else f"Question {item['order_index']}  ·  {topic_label(lang, item['topic'])}"
             )
-            source = (
-                "AI-generated practice · independently solved and validated"
-                if lang == "en"
-                else "AI 生成练习 · 已独立解答并校验"
-            )
+            # Generated worksheet and answer-booklet entries do not need a
+            # repeated provenance footnote beneath every question.
+            source = ""
             if kind == "questions":
                 body = item["prompt_zh"] if lang == "zh" else item["prompt_en"]
             else:
@@ -1772,6 +1845,7 @@ def practice_pdf(student_id: int, set_id: int, kind: str, lang: str) -> bytes | 
                 )
                 final_label = "最终答案" if lang == "zh" else "Final answer"
                 body = f"{solution}\n\n{final_label}: {final_answer}"
+            body = _clean_generated_practice_body(body)
             flow.add_rich_text(label=label, body=body, source_label=source)
             continue
         source = (

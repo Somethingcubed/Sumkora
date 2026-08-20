@@ -12,6 +12,7 @@ from curricula import curriculum_profile, topics_for_curriculum
 from db import execute, hash_password, query_one
 from document_assessment import _prompt
 from learning import (
+    _clean_generated_practice_body,
     _plain_math,
     _readable_markdown_tables,
     create_generated_practice_set,
@@ -33,6 +34,20 @@ def test_pdf_math_fallback_keeps_chemistry_quantities_readable():
     assert _plain_math("0.0200 mol L−1; 25.0 cm3") == "0.0200 mol L⁻¹; 25.0 cm³"
     assert _plain_math(r"$25.0\,cm^3$; $15\,^\circ C$") == "25.0 cm³; 15 °C"
     assert _plain_math("0.40mol dm−3") == "0.40 mol dm⁻³"
+    assert _plain_math(r"\H2O2(aq)\; \MnO2(s)\; CO2") == "H₂O₂(aq) MnO₂(s) CO₂"
+    assert _plain_math("1.0min; 1.4g; 25mL") == "1.0 min; 1.4 g; 25 mL"
+    assert _plain_math("研究H2O2(aq)在1.0min内生成1.4g的CO2。") == (
+        "研究H₂O₂(aq) 在1.0 min 内生成1.4 g 的CO₂。"
+    )
+
+
+def test_generated_pdf_boilerplate_is_removed():
+    source = """写出反应方程式。
+
+只使用题目所给的信息作答。
+AI 生成练习 · 已独立解答并校验
+"""
+    assert _clean_generated_practice_body(source) == "写出反应方程式。"
 
 
 def test_markdown_tables_become_readable_rows_without_pipe_syntax():
@@ -280,7 +295,7 @@ def test_generated_practice_is_saved_only_after_validation(monkeypatch):
 
     with fitz.open(stream=practice_pdf(student_id, set_id, "questions", "en"), filetype="pdf") as document:
         text = "".join(page.get_text() for page in document)
-        assert "AI-generated practice" in text
+        assert "AI-generated practice" not in text
         assert "Evaluate" in text
         assert sum(len(page.get_images(full=True)) for page in document) >= 10
     with fitz.open(stream=practice_pdf(student_id, set_id, "answers", "en"), filetype="pdf") as document:
