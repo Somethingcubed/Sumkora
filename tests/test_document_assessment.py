@@ -44,9 +44,10 @@ def valid_assessment(mode="detailed"):
     }
 
 
-def make_pdf(path, text):
+def make_pdf(path, text, pages=1):
     document = fitz.open()
-    document.new_page().insert_text((72, 72), text)
+    for index in range(pages):
+        document.new_page().insert_text((72, 72), f"{text} page {index + 1}")
     document.save(path)
     document.close()
 
@@ -342,12 +343,12 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     )
     assert metadata["transport_attempts"] == 2
     assert len(metadata["transport_timeouts"]) == 2
-    assert metadata["transport_timeouts"] == [120, 75]
+    assert metadata["transport_timeouts"] == [105, 45]
     assert metadata["transport_reasoning_efforts"] == ["medium", "low"]
     assert calls[0][0]["reasoning"]["effort"] == "medium"
     assert calls[1][0]["reasoning"]["effort"] == "low"
     assert metadata["provider"] == "cxsee_responses_images"
-    assert metadata["render_dpi"] == 160
+    assert metadata["render_dpi"] == 110
     assert any(stage == "provider_retry" for stage, _detail in progress)
     assert result["estimated_score"] == 2
 
@@ -441,9 +442,51 @@ def test_compact_paper_uses_low_reasoning_fast_path(tmp_path, monkeypatch):
 
     assert calls[0]["reasoning"]["effort"] == "low"
     assert metadata["compact_fast_path"] is True
-    assert metadata["target_seconds"] == 225
-    assert metadata["primary_timeout_seconds"] == 120
+    assert metadata["target_seconds"] == 180
+    assert metadata["primary_timeout_seconds"] == 105
     assert metadata["reasoning_effort"] == "low"
+    assert result["estimated_score"] == 2
+
+
+def test_seven_page_estimate_uses_fast_nonblocking_path(tmp_path, monkeypatch):
+    answer = tmp_path / "seven-page-answer.pdf"
+    make_pdf(answer, "Q answer", pages=7)
+    calls = []
+
+    def fake_post(_url, payload, **kwargs):
+        calls.append((payload, kwargs))
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "seven-page-fast-response",
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_CONTEXT_ENABLED", True)
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+
+    result, metadata = document_assessment.assess_documents(
+        str(answer),
+        model="gpt-5.5",
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0]["reasoning"]["effort"] == "low"
+    assert calls[0][1]["timeout"] == 105
+    assert metadata["fast_estimate_path"] is True
+    assert metadata["render_dpi"] == 110
+    assert metadata["target_seconds"] == 180
+    assert metadata["document_context"]["status"] == "skipped_fast_estimate"
     assert result["estimated_score"] == 2
 
 

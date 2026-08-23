@@ -611,6 +611,7 @@ def _call_structured_document_model(
     timeout_seconds: int | None = None,
     retries: int | None = None,
     render_documents_as_images: bool = False,
+    render_dpi_override: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     request_timeout = timeout_seconds or config.WHOLE_DOCUMENT_TIMEOUT_SECONDS
     request_retries = (
@@ -634,7 +635,7 @@ def _call_structured_document_model(
         + json.dumps(schema, ensure_ascii=False)
     )
     if model.startswith("qwen"):
-        dpi = _document_render_dpi(document_paths)
+        dpi = render_dpi_override or _document_render_dpi(document_paths)
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt + schema_instruction},
         ]
@@ -749,7 +750,7 @@ def _call_structured_document_model(
         render_dpi = None
     elif render_documents_as_images:
         content = [{"type": "input_text", "text": prompt}]
-        render_dpi = _document_render_dpi(document_paths)
+        render_dpi = render_dpi_override or _document_render_dpi(document_paths)
         for index, path in enumerate(document_paths):
             label = (
                 "Completed student work"
@@ -1586,8 +1587,12 @@ def assess_documents(
             )
 
     selected_model = model or config.WHOLE_DOCUMENT_MODEL
-    compact_assessment = pages <= 5 and (
-        not mark_scheme_path or scheme_pages <= 5
+    fast_estimate = mode == "estimate" and pages <= max(
+        1,
+        int(getattr(config, "WHOLE_DOCUMENT_FAST_ESTIMATE_MAX_PAGES", 10)),
+    )
+    compact_assessment = fast_estimate or (
+        pages <= 5 and mark_scheme_path and scheme_pages <= 5
     )
     effort = (
         reasoning_effort
@@ -1612,7 +1617,7 @@ def assess_documents(
                     getattr(
                         config,
                         "WHOLE_DOCUMENT_COMPACT_TARGET_SECONDS",
-                        225,
+                        180,
                     )
                 ),
             ),
@@ -1670,7 +1675,7 @@ def assess_documents(
                             if transport_attempt == 0
                             else "WHOLE_DOCUMENT_COMPACT_RETRY_TIMEOUT_SECONDS"
                         ),
-                        120 if transport_attempt == 0 else 75,
+                        105 if transport_attempt == 0 else 45,
                     )
                 )
                 primary_timeout = max(
@@ -1715,6 +1720,20 @@ def assess_documents(
                         retries=0,
                         render_documents_as_images=(
                             transport_attempt > 0 and not document_texts
+                        ),
+                        render_dpi_override=(
+                            max(
+                                90,
+                                int(
+                                    getattr(
+                                        config,
+                                        "WHOLE_DOCUMENT_FAST_ESTIMATE_RENDER_DPI",
+                                        110,
+                                    )
+                                ),
+                            )
+                            if fast_estimate and not document_texts
+                            else None
                         ),
                     )
                 )
@@ -1770,6 +1789,7 @@ def assess_documents(
                 "transport_reasoning_efforts": transport_reasoning_efforts,
                 "curriculum_id": (curriculum or {}).get("id"),
                 "compact_fast_path": compact_assessment,
+                "fast_estimate_path": fast_estimate,
             }
             if (
                 mode == "detailed"
@@ -1793,7 +1813,16 @@ def assess_documents(
                     (time.monotonic() - started) * 1000
                 )
             validated = _ensure_question_display_fields(validated)
-            if config.WHOLE_DOCUMENT_CONTEXT_ENABLED:
+            if config.WHOLE_DOCUMENT_CONTEXT_ENABLED and fast_estimate:
+                # The primary whole-paper result already contains the marks,
+                # topics and rationales needed for the report.  A second vision
+                # pass exists only to transcribe missed questions for the
+                # mistake book; it must not hold up a quick estimate.
+                provider_metadata["document_context"] = {
+                    "status": "skipped_fast_estimate",
+                    "duration_ms": 0,
+                }
+            elif config.WHOLE_DOCUMENT_CONTEXT_ENABLED:
                 context_remaining = remaining_seconds()
                 if context_remaining < 35:
                     provider_metadata["document_context"] = {
@@ -1870,16 +1899,31 @@ def assess_documents(
                             "feedback",
                             "Writing concise English and Chinese learning feedback",
                         )
+                        feedback_timeout_cap = int(
+                            getattr(
+                                config,
+                                "WHOLE_DOCUMENT_OPTIONAL_TIMEOUT_SECONDS",
+                                120,
+                            )
+                        )
+                        if fast_estimate:
+                            feedback_timeout_cap = min(
+                                feedback_timeout_cap,
+                                max(
+                                    20,
+                                    int(
+                                        getattr(
+                                            config,
+                                            "WHOLE_DOCUMENT_FAST_FEEDBACK_TIMEOUT_SECONDS",
+                                            35,
+                                        )
+                                    ),
+                                ),
+                            )
                         feedback_timeout = max(
                             20,
                             min(
-                                int(
-                                    getattr(
-                                        config,
-                                        "WHOLE_DOCUMENT_OPTIONAL_TIMEOUT_SECONDS",
-                                        120,
-                                    )
-                                ),
+                                feedback_timeout_cap,
                                 int(feedback_remaining - 10),
                             ),
                         )
