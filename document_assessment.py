@@ -1600,6 +1600,23 @@ def assess_documents(
         60,
         int(getattr(config, "WHOLE_DOCUMENT_TARGET_SECONDS", 480)),
     )
+    if compact_assessment:
+        # Compact papers normally finish quickly (the production one-page
+        # baseline is about 90 seconds).  Do not let an interrupted provider
+        # request consume the long-document budget before recovery begins.
+        target_seconds = min(
+            target_seconds,
+            max(
+                120,
+                int(
+                    getattr(
+                        config,
+                        "WHOLE_DOCUMENT_COMPACT_TARGET_SECONDS",
+                        225,
+                    )
+                ),
+            ),
+        )
 
     def remaining_seconds() -> float:
         return max(0.0, target_seconds - (time.monotonic() - started))
@@ -1644,16 +1661,37 @@ def assess_documents(
                 raise TimeoutError(
                     "The assessment exceeded its processing time budget."
                 )
-            recovery_reserve = (
-                135 if transport_attempt == 0 and remaining >= 240 else 0
-            )
-            primary_timeout = max(
-                45,
-                min(
-                    config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
-                    int(remaining - 15 - recovery_reserve),
-                ),
-            )
+            if compact_assessment:
+                compact_timeout = int(
+                    getattr(
+                        config,
+                        (
+                            "WHOLE_DOCUMENT_COMPACT_INITIAL_TIMEOUT_SECONDS"
+                            if transport_attempt == 0
+                            else "WHOLE_DOCUMENT_COMPACT_RETRY_TIMEOUT_SECONDS"
+                        ),
+                        120 if transport_attempt == 0 else 75,
+                    )
+                )
+                primary_timeout = max(
+                    45,
+                    min(
+                        config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+                        compact_timeout,
+                        int(remaining - 15),
+                    ),
+                )
+            else:
+                recovery_reserve = (
+                    135 if transport_attempt == 0 and remaining >= 240 else 0
+                )
+                primary_timeout = max(
+                    45,
+                    min(
+                        config.WHOLE_DOCUMENT_TIMEOUT_SECONDS,
+                        int(remaining - 15 - recovery_reserve),
+                    ),
+                )
             transport_timeouts.append(primary_timeout)
             request_reasoning_effort = (
                 "low" if transport_attempt > 0 and effort != "low" else effort

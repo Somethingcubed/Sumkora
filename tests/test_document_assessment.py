@@ -342,6 +342,7 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     )
     assert metadata["transport_attempts"] == 2
     assert len(metadata["transport_timeouts"]) == 2
+    assert metadata["transport_timeouts"] == [120, 75]
     assert metadata["transport_reasoning_efforts"] == ["medium", "low"]
     assert calls[0][0]["reasoning"]["effort"] == "medium"
     assert calls[1][0]["reasoning"]["effort"] == "low"
@@ -440,6 +441,8 @@ def test_compact_paper_uses_low_reasoning_fast_path(tmp_path, monkeypatch):
 
     assert calls[0]["reasoning"]["effort"] == "low"
     assert metadata["compact_fast_path"] is True
+    assert metadata["target_seconds"] == 225
+    assert metadata["primary_timeout_seconds"] == 120
     assert metadata["reasoning_effort"] == "low"
     assert result["estimated_score"] == 2
 
