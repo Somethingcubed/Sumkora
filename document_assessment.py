@@ -24,7 +24,7 @@ from curricula import curriculum_prompt_context
 from ocr import api_post_json, cxsee_api_base
 
 
-ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v3-gpt55-direct"
+ASSESSMENT_PROMPT_VERSION = "whole-document-assessment-v4-fast-vision"
 VALID_STATUSES = {"graded", "estimated", "uncertain", "ungraded"}
 CONTRADICTION_PHRASES = (
     "blank",
@@ -324,8 +324,15 @@ evidence is genuinely insufficient.
         else """
 This is the ESTIMATE mode. You receive only the student's complete worked
 paper. Infer the printed questions, available marks, and demonstrated methods
-from that document. Produce a conservative estimated score range, not a claim
-of official marking. Identify useful strengths, weaknesses, and next steps.
+from that document. Produce the best-supported estimated score and a cautious
+score range, not a claim of official marking. Approximate Cambridge-style
+method, accuracy, and follow-through marks from the visible work: award credit
+for each valid method step even when the final answer is wrong or unfinished.
+For a "show that" question, credit a visible transformation that is already
+algebraically equivalent to the target even if the student does not rewrite
+the final target expression. Put genuine marking uncertainty into the score
+range; do not automatically deduct a mark merely because no official mark
+scheme was supplied. Identify useful strengths, weaknesses, and next steps.
 Use `estimated` or `uncertain`, and use `ungraded` with null awarded_mark when
 the evidence is genuinely insufficient.
 """
@@ -1030,6 +1037,24 @@ def validate_assessment(
             if str(value).strip()
         ]
     if mode == "estimate":
+        # Providers sometimes narrate their pre-validation total in a warning.
+        # The authoritative score is recomputed from the validated question
+        # marks above, so do not show students a contradictory second total.
+        result["warnings"] = [
+            warning
+            for warning in result["warnings"]
+            if not (
+                any(
+                    phrase in warning.lower()
+                    for phrase in (
+                        "estimated total awarded mark",
+                        "estimated score is",
+                        "estimated score:",
+                    )
+                )
+                and any(character.isdigit() for character in warning)
+            )
+        ]
         result["warnings"].append(
             "The score range includes a calibration margin because no official "
             "mark scheme was supplied."
@@ -1754,6 +1779,19 @@ def assess_documents(
                     else fast_fallback_model
                 )
             transport_models.append(request_model)
+            fast_image_transport = (
+                fast_estimate
+                and not document_texts
+                and request_model
+                == (
+                    getattr(
+                        config,
+                        "WHOLE_DOCUMENT_FAST_PRIMARY_MODEL",
+                        "gpt-5.4-mini",
+                    )
+                    or "gpt-5.4-mini"
+                )
+            )
             try:
                 response_text, response_metadata = (
                     _call_structured_document_model(
@@ -1771,9 +1809,12 @@ def assess_documents(
                         timeout_seconds=primary_timeout,
                         retries=0,
                         render_documents_as_images=(
-                            transport_attempt > 0
-                            and request_model == selected_model
-                            and not document_texts
+                            fast_image_transport
+                            or (
+                                transport_attempt > 0
+                                and request_model == selected_model
+                                and not document_texts
+                            )
                         ),
                         render_dpi_override=(
                             max(
@@ -1787,7 +1828,10 @@ def assess_documents(
                                 ),
                             )
                             if compact_assessment
-                            and request_model == selected_model
+                            and (
+                                request_model == selected_model
+                                or fast_image_transport
+                            )
                             and not document_texts
                             else None
                         ),
@@ -1852,6 +1896,7 @@ def assess_documents(
                 "compact_fast_path": compact_assessment,
                 "fast_estimate_path": fast_estimate,
                 "fast_detailed_path": fast_detailed,
+                "fast_image_transport": fast_image_transport,
             }
             if (
                 mode == "detailed"

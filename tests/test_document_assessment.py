@@ -332,7 +332,8 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     assert len(calls) == 2
     assert all(call[1]["retries"] == 0 for call in calls)
     first_content = calls[0][0]["input"][0]["content"]
-    assert first_content[1]["type"] == "input_file"
+    assert first_content[1]["type"] == "input_text"
+    assert first_content[2]["type"] == "input_image"
     retry_content = calls[1][0]["input"][0]["content"]
     assert retry_content[1]["type"] == "input_text"
     assert retry_content[2]["type"] == "input_image"
@@ -340,7 +341,7 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     assert len(metadata["transport_timeouts"]) == 2
     assert metadata["transport_timeouts"] == [70, 45]
     assert metadata["transport_reasoning_efforts"] == ["medium", "low"]
-    assert metadata["transport_models"] == ["gpt-5.4-mini", "gpt-5.5"]
+    assert metadata["transport_models"] == ["gpt-5.4-mini", "gpt-5.4-mini"]
     assert metadata["fallback_used"] is True
     assert calls[0][0]["reasoning"]["effort"] == "medium"
     assert calls[1][0]["reasoning"]["effort"] == "low"
@@ -350,7 +351,7 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     assert result["estimated_score"] == 2
 
 
-def test_pdf_attachment_rejection_retries_as_complete_page_images(
+def test_fast_image_transport_retries_without_falling_back_to_native_pdf(
     tmp_path, monkeypatch
 ):
     answer = tmp_path / "scanned-answer.pdf"
@@ -362,14 +363,10 @@ def test_pdf_attachment_rejection_retries_as_complete_page_images(
         if len(calls) == 1:
             raise urllib.error.HTTPError(
                 "https://provider.invalid/v1/responses",
-                400,
-                "Bad Request",
+                500,
+                "Internal Server Error",
                 {},
-                io.BytesIO(
-                    b'{"error":{"message":"Invalid value: '
-                    b"'input_file'. Supported values are: 'input_text'."
-                    b'}}'
-                ),
+                None,
             )
         body = valid_assessment("estimate")
         body["questions"][0]["evidence_pages"] = [1]
@@ -396,7 +393,8 @@ def test_pdf_attachment_rejection_retries_as_complete_page_images(
     )
 
     assert len(calls) == 2
-    assert calls[0][0]["input"][0]["content"][1]["type"] == "input_file"
+    assert calls[0][0]["input"][0]["content"][1]["type"] == "input_text"
+    assert calls[0][0]["input"][0]["content"][2]["type"] == "input_image"
     retry_content = calls[1][0]["input"][0]["content"]
     assert retry_content[1]["type"] == "input_text"
     assert retry_content[2]["type"] == "input_image"
@@ -451,7 +449,7 @@ def test_fast_timeout_switches_models_within_two_minute_budget(
 
     assert [call[0]["model"] for call in calls] == [
         "gpt-5.4-mini",
-        "gpt-5.5",
+        "gpt-5.4-mini",
     ]
     assert metadata["transport_timeouts"] == [70, 45]
     assert metadata["fallback_used"] is True
@@ -578,13 +576,13 @@ def test_seven_page_estimate_uses_fast_nonblocking_path(tmp_path, monkeypatch):
     assert calls[0][0]["model"] == "gpt-5.4-mini"
     assert calls[0][1]["timeout"] == 70
     assert metadata["fast_estimate_path"] is True
-    assert metadata["render_dpi"] is None
+    assert metadata["render_dpi"] == 110
     assert metadata["target_seconds"] == 120
     assert metadata["document_context"]["status"] == "skipped_fast_assessment"
     assert result["estimated_score"] == 2
 
 
-def test_fifteen_page_estimate_keeps_native_pdf_fast_path(
+def test_fifteen_page_estimate_uses_stable_ordered_image_fast_path(
     tmp_path, monkeypatch
 ):
     answer = tmp_path / "fifteen-page-answer.pdf"
@@ -618,10 +616,34 @@ def test_fifteen_page_estimate_keeps_native_pdf_fast_path(
     content = calls[0][0]["input"][0]["content"]
     assert calls[0][0]["model"] == "gpt-5.4-mini"
     assert calls[0][1]["timeout"] in {104, 105}
-    assert content[1]["type"] == "input_file"
+    assert content[1]["type"] == "input_text"
+    assert content[2]["type"] == "input_image"
+    assert len(content) == 31
+    assert "page 1 of 15" in content[1]["text"]
+    assert "page 15 of 15" in content[-2]["text"]
     assert metadata["fast_estimate_path"] is True
+    assert metadata["fast_image_transport"] is True
+    assert metadata["render_dpi"] == 110
     assert metadata["target_seconds"] == 120
     assert result["estimated_score"] == 2
+
+
+def test_validator_removes_provider_warning_with_contradictory_estimate_total():
+    body = valid_assessment("estimate")
+    body["warnings"] = [
+        "Estimated total awarded mark is 1 out of 3.",
+        "One handwritten symbol is faint.",
+    ]
+
+    result = validate_assessment(
+        body,
+        mode="estimate",
+        completed_work_pages=2,
+    )
+
+    assert result["estimated_score"] == 2
+    assert "Estimated total awarded mark is 1 out of 3." not in result["warnings"]
+    assert "One handwritten symbol is faint." in result["warnings"]
 
 
 def test_unrelated_bad_request_does_not_retry_document_transport():
