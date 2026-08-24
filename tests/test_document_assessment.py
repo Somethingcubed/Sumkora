@@ -325,7 +325,6 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
 
     result, metadata = document_assessment.assess_documents(
         str(answer),
-        model="gpt-5.5",
         reasoning_effort="medium",
         progress_callback=lambda stage, detail: progress.append((stage, detail)),
     )
@@ -333,23 +332,20 @@ def test_retryable_provider_failure_reconnects_complete_pdf_once(
     assert len(calls) == 2
     assert all(call[1]["retries"] == 0 for call in calls)
     first_content = calls[0][0]["input"][0]["content"]
-    assert first_content[1]["type"] == "input_text"
-    assert first_content[2]["type"] == "input_image"
+    assert first_content[1]["type"] == "input_file"
     retry_content = calls[1][0]["input"][0]["content"]
-    assert retry_content[1]["type"] == "input_file"
-    assert retry_content[1]["file_data"].startswith(
-        "data:application/pdf;base64,"
-    )
+    assert retry_content[1]["type"] == "input_text"
+    assert retry_content[2]["type"] == "input_image"
     assert metadata["transport_attempts"] == 2
     assert len(metadata["transport_timeouts"]) == 2
-    assert metadata["transport_timeouts"] == [55, 50]
+    assert metadata["transport_timeouts"] == [70, 45]
     assert metadata["transport_reasoning_efforts"] == ["medium", "low"]
-    assert metadata["transport_models"] == ["gpt-5.5", "gpt-5.4-mini"]
+    assert metadata["transport_models"] == ["gpt-5.4-mini", "gpt-5.5"]
     assert metadata["fallback_used"] is True
     assert calls[0][0]["reasoning"]["effort"] == "medium"
     assert calls[1][0]["reasoning"]["effort"] == "low"
-    assert metadata["provider"] == "cxsee_responses"
-    assert metadata["render_dpi"] is None
+    assert metadata["provider"] == "cxsee_responses_images"
+    assert metadata["render_dpi"] == 110
     assert any(stage == "provider_retry" for stage, _detail in progress)
     assert result["estimated_score"] == 2
 
@@ -420,7 +416,7 @@ def test_fast_timeout_switches_models_within_two_minute_budget(
     def fake_post(_url, payload, **kwargs):
         calls.append((payload, kwargs))
         if len(calls) == 1:
-            clock[0] += 56
+            clock[0] += 71
             raise TimeoutError("The read operation timed out")
         clock[0] += 40
         body = valid_assessment("estimate")
@@ -451,16 +447,15 @@ def test_fast_timeout_switches_models_within_two_minute_budget(
 
     result, metadata = document_assessment.assess_documents(
         str(answer),
-        model="gpt-5.5",
     )
 
     assert [call[0]["model"] for call in calls] == [
-        "gpt-5.5",
         "gpt-5.4-mini",
+        "gpt-5.5",
     ]
-    assert metadata["transport_timeouts"] == [55, 48]
+    assert metadata["transport_timeouts"] == [70, 45]
     assert metadata["fallback_used"] is True
-    assert metadata["duration_ms"] == 97000
+    assert metadata["duration_ms"] == 112000
     assert result["estimated_score"] == 2
 
 
@@ -496,12 +491,12 @@ def test_short_detailed_paper_uses_fast_path(tmp_path, monkeypatch):
     result, metadata = document_assessment.assess_documents(
         str(answer),
         str(scheme),
-        model="gpt-5.5",
     )
 
     assert len(calls) == 1
     assert calls[0][0]["reasoning"]["effort"] == "low"
-    assert calls[0][1]["timeout"] == 55
+    assert calls[0][0]["model"] == "gpt-5.5"
+    assert calls[0][1]["timeout"] == 70
     assert metadata["fast_detailed_path"] is True
     assert metadata["render_dpi"] == 110
     assert metadata["target_seconds"] == 120
@@ -537,13 +532,12 @@ def test_compact_paper_uses_low_reasoning_fast_path(tmp_path, monkeypatch):
 
     result, metadata = document_assessment.assess_documents(
         str(answer),
-        model="gpt-5.5",
     )
 
     assert calls[0]["reasoning"]["effort"] == "low"
     assert metadata["compact_fast_path"] is True
     assert metadata["target_seconds"] == 120
-    assert metadata["primary_timeout_seconds"] == 55
+    assert metadata["primary_timeout_seconds"] == 70
     assert metadata["reasoning_effort"] == "low"
     assert result["estimated_score"] == 2
 
@@ -577,16 +571,56 @@ def test_seven_page_estimate_uses_fast_nonblocking_path(tmp_path, monkeypatch):
 
     result, metadata = document_assessment.assess_documents(
         str(answer),
-        model="gpt-5.5",
     )
 
     assert len(calls) == 1
     assert calls[0][0]["reasoning"]["effort"] == "low"
-    assert calls[0][1]["timeout"] == 55
+    assert calls[0][0]["model"] == "gpt-5.4-mini"
+    assert calls[0][1]["timeout"] == 70
     assert metadata["fast_estimate_path"] is True
-    assert metadata["render_dpi"] == 110
+    assert metadata["render_dpi"] is None
     assert metadata["target_seconds"] == 120
     assert metadata["document_context"]["status"] == "skipped_fast_assessment"
+    assert result["estimated_score"] == 2
+
+
+def test_fifteen_page_estimate_keeps_native_pdf_fast_path(
+    tmp_path, monkeypatch
+):
+    answer = tmp_path / "fifteen-page-answer.pdf"
+    make_pdf(answer, "Q answer", pages=15)
+    calls = []
+
+    def fake_post(_url, payload, **kwargs):
+        calls.append((payload, kwargs))
+        body = valid_assessment("estimate")
+        body["questions"][0]["evidence_pages"] = [1]
+        return {
+            "id": "full-paper-fast-response",
+            "model": payload["model"],
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(body)}
+                    ]
+                }
+            ],
+            "usage": {"total_tokens": 10},
+        }
+
+    monkeypatch.setattr(document_assessment.config, "CXSEE_API_KEY", "test-key")
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_CONTEXT_ENABLED", False)
+    monkeypatch.setattr(document_assessment.config, "WHOLE_DOCUMENT_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(document_assessment, "api_post_json", fake_post)
+
+    result, metadata = document_assessment.assess_documents(str(answer))
+
+    content = calls[0][0]["input"][0]["content"]
+    assert calls[0][0]["model"] == "gpt-5.4-mini"
+    assert calls[0][1]["timeout"] in {104, 105}
+    assert content[1]["type"] == "input_file"
+    assert metadata["fast_estimate_path"] is True
+    assert metadata["target_seconds"] == 120
     assert result["estimated_score"] == 2
 
 

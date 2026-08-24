@@ -1579,6 +1579,7 @@ def assess_documents(
         raise ValueError(
             f"Completed work must contain 1 to {config.WHOLE_DOCUMENT_MAX_PAGES} pages."
         )
+    scheme_pages = 0
     if mark_scheme_path:
         scheme_pages = _page_count(mark_scheme_path)
         if not 1 <= scheme_pages <= config.WHOLE_DOCUMENT_MAX_PAGES:
@@ -1587,14 +1588,15 @@ def assess_documents(
             )
 
     selected_model = model or config.WHOLE_DOCUMENT_MODEL
-    fast_page_limit = max(
+    fast_estimate_page_limit = max(
         1,
-        int(getattr(config, "WHOLE_DOCUMENT_FAST_ESTIMATE_MAX_PAGES", 10)),
+        int(getattr(config, "WHOLE_DOCUMENT_FAST_ESTIMATE_MAX_PAGES", 20)),
     )
-    fast_estimate = mode == "estimate" and pages <= fast_page_limit
+    fast_detailed_page_limit = min(10, fast_estimate_page_limit)
+    fast_estimate = mode == "estimate" and pages <= fast_estimate_page_limit
     fast_detailed = (
         mode == "detailed"
-        and pages <= fast_page_limit
+        and pages <= fast_detailed_page_limit
         and scheme_pages
         <= max(
             1,
@@ -1620,9 +1622,9 @@ def assess_documents(
         int(getattr(config, "WHOLE_DOCUMENT_TARGET_SECONDS", 480)),
     )
     if compact_assessment:
-        # Compact papers normally finish quickly (the production one-page
-        # baseline is about 90 seconds).  Do not let an interrupted provider
-        # request consume the long-document budget before recovery begins.
+        # Native-PDF estimates normally finish within the short product
+        # target. Do not let an interrupted provider request consume the
+        # long-document budget before recovery begins.
         target_seconds = min(
             target_seconds,
             max(
@@ -1682,17 +1684,28 @@ def assess_documents(
                     "The assessment exceeded its processing time budget."
                 )
             if compact_assessment:
-                compact_timeout = int(
-                    getattr(
-                        config,
-                        (
-                            "WHOLE_DOCUMENT_COMPACT_INITIAL_TIMEOUT_SECONDS"
-                            if transport_attempt == 0
-                            else "WHOLE_DOCUMENT_COMPACT_RETRY_TIMEOUT_SECONDS"
-                        ),
-                        55 if transport_attempt == 0 else 50,
+                if transport_attempt == 0 and (
+                    pages > 10 or scheme_pages > 10
+                ):
+                    compact_timeout = int(
+                        getattr(
+                            config,
+                            "WHOLE_DOCUMENT_FAST_LONG_TIMEOUT_SECONDS",
+                            110,
+                        )
                     )
-                )
+                else:
+                    compact_timeout = int(
+                        getattr(
+                            config,
+                            (
+                                "WHOLE_DOCUMENT_COMPACT_INITIAL_TIMEOUT_SECONDS"
+                                if transport_attempt == 0
+                                else "WHOLE_DOCUMENT_COMPACT_RETRY_TIMEOUT_SECONDS"
+                            ),
+                            70 if transport_attempt == 0 else 45,
+                        )
+                    )
                 primary_timeout = max(
                     45,
                     min(
@@ -1718,14 +1731,27 @@ def assess_documents(
             )
             transport_reasoning_efforts.append(request_reasoning_effort)
             request_model = selected_model
-            if compact_assessment and transport_attempt > 0:
-                request_model = (
+            if fast_estimate and model is None:
+                fast_primary_model = (
                     getattr(
                         config,
-                        "WHOLE_DOCUMENT_FAST_FALLBACK_MODEL",
+                        "WHOLE_DOCUMENT_FAST_PRIMARY_MODEL",
                         "gpt-5.4-mini",
                     )
                     or selected_model
+                )
+                fast_fallback_model = (
+                    getattr(
+                        config,
+                        "WHOLE_DOCUMENT_FAST_FALLBACK_MODEL",
+                        selected_model,
+                    )
+                    or selected_model
+                )
+                request_model = (
+                    fast_primary_model
+                    if transport_attempt == 0
+                    else fast_fallback_model
                 )
             transport_models.append(request_model)
             try:
@@ -1820,7 +1846,8 @@ def assess_documents(
                 "transport_timeouts": transport_timeouts,
                 "transport_reasoning_efforts": transport_reasoning_efforts,
                 "transport_models": transport_models,
-                "fallback_used": transport_models[-1] != selected_model,
+                "fallback_used": transport_attempt > 0,
+                "model_substituted": transport_models[-1] != selected_model,
                 "curriculum_id": (curriculum or {}).get("id"),
                 "compact_fast_path": compact_assessment,
                 "fast_estimate_path": fast_estimate,
