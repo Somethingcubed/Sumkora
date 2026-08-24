@@ -1587,13 +1587,27 @@ def assess_documents(
             )
 
     selected_model = model or config.WHOLE_DOCUMENT_MODEL
-    fast_estimate = mode == "estimate" and pages <= max(
+    fast_page_limit = max(
         1,
         int(getattr(config, "WHOLE_DOCUMENT_FAST_ESTIMATE_MAX_PAGES", 10)),
     )
-    compact_assessment = fast_estimate or (
-        pages <= 5 and mark_scheme_path and scheme_pages <= 5
+    fast_estimate = mode == "estimate" and pages <= fast_page_limit
+    fast_detailed = (
+        mode == "detailed"
+        and pages <= fast_page_limit
+        and scheme_pages
+        <= max(
+            1,
+            int(
+                getattr(
+                    config,
+                    "WHOLE_DOCUMENT_FAST_DETAILED_MAX_SCHEME_PAGES",
+                    20,
+                )
+            ),
+        )
     )
+    compact_assessment = fast_estimate or fast_detailed
     effort = (
         reasoning_effort
         or ("low" if compact_assessment else config.WHOLE_DOCUMENT_REASONING_EFFORT)
@@ -1617,7 +1631,7 @@ def assess_documents(
                     getattr(
                         config,
                         "WHOLE_DOCUMENT_COMPACT_TARGET_SECONDS",
-                        180,
+                        120,
                     )
                 ),
             ),
@@ -1660,6 +1674,7 @@ def assess_documents(
         transport_attempt = 0
         transport_timeouts: list[int] = []
         transport_reasoning_efforts: list[str] = []
+        transport_models: list[str] = []
         while True:
             remaining = remaining_seconds()
             if remaining < 45:
@@ -1675,7 +1690,7 @@ def assess_documents(
                             if transport_attempt == 0
                             else "WHOLE_DOCUMENT_COMPACT_RETRY_TIMEOUT_SECONDS"
                         ),
-                        105 if transport_attempt == 0 else 45,
+                        55 if transport_attempt == 0 else 50,
                     )
                 )
                 primary_timeout = max(
@@ -1702,10 +1717,21 @@ def assess_documents(
                 "low" if transport_attempt > 0 and effort != "low" else effort
             )
             transport_reasoning_efforts.append(request_reasoning_effort)
+            request_model = selected_model
+            if compact_assessment and transport_attempt > 0:
+                request_model = (
+                    getattr(
+                        config,
+                        "WHOLE_DOCUMENT_FAST_FALLBACK_MODEL",
+                        "gpt-5.4-mini",
+                    )
+                    or selected_model
+                )
+            transport_models.append(request_model)
             try:
                 response_text, response_metadata = (
                     _call_structured_document_model(
-                        model=selected_model,
+                        model=request_model,
                         prompt=_prompt(
                             mode,
                             repair_errors,
@@ -1719,7 +1745,9 @@ def assess_documents(
                         timeout_seconds=primary_timeout,
                         retries=0,
                         render_documents_as_images=(
-                            transport_attempt > 0 and not document_texts
+                            transport_attempt > 0
+                            and request_model == selected_model
+                            and not document_texts
                         ),
                         render_dpi_override=(
                             max(
@@ -1732,7 +1760,9 @@ def assess_documents(
                                     )
                                 ),
                             )
-                            if fast_estimate and not document_texts
+                            if compact_assessment
+                            and request_model == selected_model
+                            and not document_texts
                             else None
                         ),
                     )
@@ -1742,7 +1772,8 @@ def assess_documents(
                 can_recover = (
                     transport_attempt == 0
                     and _retryable_provider_error(exc)
-                    and remaining_seconds() >= 60
+                    and remaining_seconds()
+                    >= (45 if compact_assessment else 60)
                 )
                 if not can_recover:
                     raise
@@ -1752,10 +1783,10 @@ def assess_documents(
                     "provider_retry",
                     (
                         "The document provider interrupted the first request; "
-                        "the same complete paper is being reconnected"
+                        "a separate backup assessor is reading the same complete paper"
                     ),
                 )
-                time.sleep(4)
+                time.sleep(1 if compact_assessment else 4)
         _notify_progress(
             progress_callback,
             "primary_response",
@@ -1771,7 +1802,8 @@ def assess_documents(
             )
             provider_metadata = {
                 "provider": response_metadata["provider"],
-                "model": selected_model,
+                "model": transport_models[-1],
+                "requested_model": selected_model,
                 "prompt_version": ASSESSMENT_PROMPT_VERSION,
                 "reasoning_effort": transport_reasoning_efforts[-1],
                 "requested_reasoning_effort": effort,
@@ -1787,9 +1819,12 @@ def assess_documents(
                 "transport_attempts": transport_attempt + 1,
                 "transport_timeouts": transport_timeouts,
                 "transport_reasoning_efforts": transport_reasoning_efforts,
+                "transport_models": transport_models,
+                "fallback_used": transport_models[-1] != selected_model,
                 "curriculum_id": (curriculum or {}).get("id"),
                 "compact_fast_path": compact_assessment,
                 "fast_estimate_path": fast_estimate,
+                "fast_detailed_path": fast_detailed,
             }
             if (
                 mode == "detailed"
@@ -1813,13 +1848,14 @@ def assess_documents(
                     (time.monotonic() - started) * 1000
                 )
             validated = _ensure_question_display_fields(validated)
-            if config.WHOLE_DOCUMENT_CONTEXT_ENABLED and fast_estimate:
+            assessment_model = transport_models[-1]
+            if config.WHOLE_DOCUMENT_CONTEXT_ENABLED and compact_assessment:
                 # The primary whole-paper result already contains the marks,
                 # topics and rationales needed for the report.  A second vision
                 # pass exists only to transcribe missed questions for the
                 # mistake book; it must not hold up a quick estimate.
                 provider_metadata["document_context"] = {
-                    "status": "skipped_fast_estimate",
+                    "status": "skipped_fast_assessment",
                     "duration_ms": 0,
                 }
             elif config.WHOLE_DOCUMENT_CONTEXT_ENABLED:
@@ -1861,7 +1897,7 @@ def assess_documents(
                         )
                         validated, context_metadata = _enrich_document_context(
                             validated,
-                            model=selected_model,
+                            model=assessment_model,
                             document_paths=[completed_work_path],
                             timeout_seconds=context_timeout,
                             curriculum=curriculum,
@@ -1906,7 +1942,7 @@ def assess_documents(
                                 120,
                             )
                         )
-                        if fast_estimate:
+                        if compact_assessment:
                             feedback_timeout_cap = min(
                                 feedback_timeout_cap,
                                 max(
@@ -1929,7 +1965,7 @@ def assess_documents(
                         )
                         validated, feedback_metadata = _enrich_feedback(
                             validated,
-                            model=selected_model,
+                            model=assessment_model,
                             timeout_seconds=feedback_timeout,
                             curriculum=curriculum,
                         )
