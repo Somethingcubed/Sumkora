@@ -256,15 +256,65 @@ def _render_responses_document_image_parts(
     label: str,
     dpi: int,
 ) -> list[dict[str, Any]]:
+    """Return one ordered vision input per PDF page.
+
+    Gallery uploads are stored as image-only PDF pages. Reuse a sufficiently
+    large embedded image byte-for-byte. Upscale smaller chat-app exports once
+    with bounded JPEG quality so tiny printed marks remain readable without
+    doubling the request body. Genuine vector/text PDFs use the same bounded
+    rendering fallback.
+    """
     parts: list[dict[str, Any]] = []
     with fitz.open(path) as document:
         total = len(document)
         matrix = fitz.Matrix(dpi / 72, dpi / 72)
         for index, page in enumerate(document):
-            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-            encoded = base64.b64encode(
-                pixmap.tobytes("jpeg", jpg_quality=88)
-            ).decode("ascii")
+            direct_image: tuple[str, bytes] | None = None
+            page_area = max(1.0, float(page.rect.width * page.rect.height))
+            for image in page.get_images(full=True):
+                xref = int(image[0])
+                rectangles = page.get_image_rects(xref)
+                coverage = max(
+                    (
+                        float(rect.width * rect.height) / page_area
+                        for rect in rectangles
+                    ),
+                    default=0.0,
+                )
+                if coverage < 0.85:
+                    continue
+                extracted = document.extract_image(xref)
+                payload = extracted.get("image")
+                extension = str(extracted.get("ext") or "").lower()
+                mime = {
+                    "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg",
+                    "png": "image/png",
+                    "webp": "image/webp",
+                }.get(extension)
+                # Small chat-app exports often arrive around 1280 px wide.
+                # Upscale those pages once so tiny printed mark allocations
+                # remain readable, but keep sufficiently large camera images
+                # byte-for-byte.
+                short_edge = min(
+                    int(extracted.get("width") or 0),
+                    int(extracted.get("height") or 0),
+                )
+                if (
+                    mime
+                    and isinstance(payload, bytes)
+                    and payload
+                    and short_edge >= 1400
+                ):
+                    direct_image = (mime, payload)
+                    break
+            if direct_image is None:
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                mime = "image/jpeg"
+                image_payload = pixmap.tobytes("jpeg", jpg_quality=72)
+            else:
+                mime, image_payload = direct_image
+            encoded = base64.b64encode(image_payload).decode("ascii")
             parts.extend(
                 [
                     {
@@ -273,7 +323,7 @@ def _render_responses_document_image_parts(
                     },
                     {
                         "type": "input_image",
-                        "image_url": f"data:image/jpeg;base64,{encoded}",
+                        "image_url": f"data:{mime};base64,{encoded}",
                         "detail": "high",
                     },
                 ]
@@ -1640,6 +1690,7 @@ def assess_documents(
         or ("low" if compact_assessment else config.WHOLE_DOCUMENT_REASONING_EFFORT)
     )
     repair_errors: list[str] | None = None
+    previous_response_text: str | None = None
     last_validation_error: AssessmentValidationError | None = None
     started = time.monotonic()
     target_seconds = max(
@@ -1681,6 +1732,17 @@ def assess_documents(
                 document_texts.append(
                     ("OFFICIAL MARK SCHEME — OCR TRANSCRIPT", mark_scheme_text)
                 )
+        elif previous_response_text:
+            # The model has already read every image. Structural or arithmetic
+            # validation errors can be repaired from its own JSON in a small
+            # text-only request; resending every image doubles latency and was
+            # the remaining cause of otherwise successful gallery runs failing.
+            document_texts = [
+                (
+                    "PREVIOUS WHOLE-PAPER ASSESSMENT JSON TO CORRECT",
+                    previous_response_text,
+                )
+            ]
         _notify_progress(
             progress_callback,
             "primary_request",
@@ -2072,6 +2134,7 @@ def assess_documents(
                 repair_errors = ["response was not valid JSON"]
                 last_validation_error = AssessmentValidationError(repair_errors)
             if attempt + 1 < attempts:
+                previous_response_text = response_text
                 _notify_progress(
                     progress_callback,
                     "validation_repair",

@@ -1,6 +1,7 @@
 import io
 import json
 import urllib.error
+import base64
 
 import fitz
 import pytest
@@ -50,6 +51,22 @@ def make_pdf(path, text, pages=1):
         document.new_page().insert_text((72, 72), f"{text} page {index + 1}")
     document.save(path)
     document.close()
+
+
+def make_image_only_pdf(path, pages=2):
+    image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 1280, 1707), False)
+    image.clear_with(245)
+    jpeg = image.tobytes("jpeg", jpg_quality=82)
+    document = fitz.open()
+    for _index in range(pages):
+        image_document = fitz.open(stream=jpeg, filetype="jpeg")
+        page_pdf = fitz.open("pdf", image_document.convert_to_pdf())
+        document.insert_pdf(page_pdf)
+        page_pdf.close()
+        image_document.close()
+    document.save(path)
+    document.close()
+    return jpeg
 
 
 def test_validator_rejects_wrong_page_and_positive_mark_for_blank_evidence():
@@ -232,9 +249,11 @@ def test_provider_repairs_invalid_structured_result_once(tmp_path, monkeypatch):
     assert metadata["response_id"] == "response-2"
     repair_text = calls[1]["input"][0]["content"][0]["text"]
     assert "invalid completed-work page" in repair_text
-    file_part = calls[1]["input"][0]["content"][1]
-    assert file_part["type"] == "input_file"
-    assert file_part["file_data"].startswith("data:application/pdf;base64,")
+    repair_content = calls[1]["input"][0]["content"]
+    assert len(repair_content) == 1
+    assert repair_content[0]["type"] == "input_text"
+    assert "PREVIOUS WHOLE-PAPER ASSESSMENT JSON" in repair_content[0]["text"]
+    assert "invalid completed-work page" in repair_content[0]["text"]
     assert calls[1]["max_output_tokens"] == 16384
 
 
@@ -626,6 +645,30 @@ def test_fifteen_page_estimate_uses_stable_ordered_image_fast_path(
     assert metadata["render_dpi"] == 110
     assert metadata["target_seconds"] == 120
     assert result["estimated_score"] == 2
+
+
+def test_small_gallery_images_are_sent_as_clear_bounded_page_images(tmp_path):
+    answer = tmp_path / "completed-work-pages.pdf"
+    original_jpeg = make_image_only_pdf(answer)
+
+    parts = document_assessment._render_responses_document_image_parts(
+        str(answer),
+        label="Completed student work",
+        dpi=110,
+    )
+
+    assert len(parts) == 4
+    assert parts[0]["text"].endswith("page 1 of 2:")
+    assert parts[2]["text"].endswith("page 2 of 2:")
+    for image_part in (parts[1], parts[3]):
+        assert image_part["type"] == "input_image"
+        assert image_part["image_url"].startswith("data:image/jpeg;base64,")
+        encoded = image_part["image_url"].split("base64,", 1)[1]
+        prepared = base64.b64decode(encoded)
+        assert prepared != original_jpeg
+        assert len(prepared) < 300_000
+        prepared_pixmap = fitz.Pixmap(prepared)
+        assert prepared_pixmap.width >= 1400
 
 
 def test_validator_removes_provider_warning_with_contradictory_estimate_total():
