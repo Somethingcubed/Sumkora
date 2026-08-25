@@ -1,4 +1,12 @@
 (() => {
+  let recoveryQueue = Promise.resolve();
+
+  const enqueueRecovery = (task) => {
+    const pending = recoveryQueue.then(task, task);
+    recoveryQueue = pending.catch(() => {});
+    return pending;
+  };
+
   const typeset = (element) => {
     if (window.MathJax?.typesetPromise) {
       window.MathJax.typesetPromise([element]).catch(() => {});
@@ -13,7 +21,7 @@
       if (details.dataset.loaded === "true") return;
       if (contentPromise) return contentPromise;
       details.dataset.loaded = "loading";
-      contentPromise = (async () => {
+      contentPromise = enqueueRecovery(async () => {
         try {
           const response = await fetch(details.dataset.solutionUrl, {
             method: "POST",
@@ -54,7 +62,7 @@
           details.dataset.loaded = "false";
           contentPromise = null;
         }
-      })();
+      });
       return contentPromise;
     };
 
@@ -74,7 +82,7 @@
           observer.disconnect();
           loadContent();
         }
-      }, { rootMargin: "240px 0px" });
+      }, { rootMargin: "0px" });
       observer.observe(details.closest("section") || details);
     }
   });

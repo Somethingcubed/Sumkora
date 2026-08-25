@@ -200,6 +200,9 @@ def _solve_question_image_url(
     curriculum: dict | None = None,
     *,
     target_label: str = "",
+    model: str = "",
+    timeout_seconds: int | None = None,
+    retries: int = 0,
 ) -> dict:
     curriculum_instruction = (
         curriculum_prompt_context(curriculum)
@@ -238,10 +241,11 @@ part of the printed question.
         f"{PROMPT}\n\n{curriculum_instruction}\n{subject_instruction}"
         f"\n{target_instruction}"
     )
+    selected_model = model or config.QUESTION_SOLVER_MODEL
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
-            "model": config.QUESTION_SOLVER_MODEL,
+            "model": selected_model,
             "input": [
                 {
                     "role": "user",
@@ -264,8 +268,8 @@ part of the printed question.
             "store": False,
         },
         headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
-        timeout=config.QUESTION_SOLVER_TIMEOUT_SECONDS,
-        retries=0,
+        timeout=timeout_seconds or config.QUESTION_SOLVER_TIMEOUT_SECONDS,
+        retries=retries,
     )
     parsed = _parse_provider_json(
         _strip_json_fence(_extract_response_text(result))
@@ -289,7 +293,7 @@ part of the printed question.
     parsed["classification_confidence"] = max(
         0.0, min(1.0, float(parsed.get("classification_confidence") or 0.5))
     )
-    parsed["model"] = result.get("model") or config.QUESTION_SOLVER_MODEL
+    parsed["model"] = result.get("model") or selected_model
     parsed["usage"] = result.get("usage") or {}
     return parsed
 
@@ -299,11 +303,17 @@ def solve_question_image(
     curriculum: dict | None = None,
     *,
     target_label: str = "",
+    model: str = "",
+    timeout_seconds: int | None = None,
+    retries: int = 0,
 ) -> dict:
     return _solve_question_image_url(
         _image_data_url(path),
         curriculum,
         target_label=target_label,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
     )
 
 
@@ -313,12 +323,18 @@ def solve_question_image_bytes(
     *,
     mime_type: str = "image/png",
     target_label: str = "",
+    model: str = "",
+    timeout_seconds: int | None = None,
+    retries: int = 0,
 ) -> dict:
     """Solve one labelled question from an in-memory source-page image."""
     return _solve_question_image_url(
         _bytes_data_url(payload, mime_type),
         curriculum,
         target_label=target_label,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
     )
 
 

@@ -8,6 +8,7 @@ import os
 import random
 import re
 import textwrap
+from threading import BoundedSemaphore
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,13 @@ from curricula import profile_from_user
 from i18n import topic_label
 from practice_generator import generate_validated_practice_questions
 from taxonomy import canonical_topic
+
+import config
+
+
+_MISTAKE_RECOVERY_SEMAPHORE = BoundedSemaphore(
+    config.MISTAKE_RECOVERY_CONCURRENCY
+)
 
 
 def _now() -> str:
@@ -2089,12 +2097,26 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
 
         from question_solver import solve_question_image_bytes
 
-        result = solve_question_image_bytes(
-            image_bytes,
-            curriculum,
-            target_label=str(item.get("question_label") or ""),
+        # Recovery is intentionally separate from marking. A small, fast
+        # vision model reads one cited page; serialising these calls prevents
+        # a Mistake Book with several visible cards from overwhelming the
+        # upstream provider.
+        with _MISTAKE_RECOVERY_SEMAPHORE:
+            result = solve_question_image_bytes(
+                image_bytes,
+                curriculum,
+                target_label=str(item.get("question_label") or ""),
+                model=config.MISTAKE_RECOVERY_MODEL,
+                timeout_seconds=config.MISTAKE_RECOVERY_TIMEOUT_SECONDS,
+                retries=1,
+            )
+    except Exception as exc:
+        print(
+            "Mistake question recovery failed "
+            f"for entry {item.get('id')}: {type(exc).__name__}: "
+            f"{str(exc)[:180]}",
+            flush=True,
         )
-    except Exception:
         return False
 
     question_text = str(result.get("transcription") or "").strip()

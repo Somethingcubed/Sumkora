@@ -435,7 +435,14 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
 
     seen = {}
 
-    def fake_source_solver(payload, curriculum, *, mime_type="image/png", target_label=""):
+    def fake_source_solver(
+        payload,
+        curriculum,
+        *,
+        mime_type="image/png",
+        target_label="",
+        **_kwargs,
+    ):
         seen["payload"] = payload
         seen["target_label"] = target_label
         return {
