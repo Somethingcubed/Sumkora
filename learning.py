@@ -8,7 +8,7 @@ import os
 import random
 import re
 import textwrap
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock, Thread
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +30,7 @@ import config
 _MISTAKE_RECOVERY_SEMAPHORE = BoundedSemaphore(
     config.MISTAKE_RECOVERY_CONCURRENCY
 )
+_MISTAKE_PDF_LOCK = Lock()
 
 
 def _now() -> str:
@@ -398,6 +399,8 @@ def mistake_book(
     topic: str = "",
     status: str = "",
 ) -> dict:
+    from question_solver import normalize_mathjax_text
+
     sync_mistake_book(student_id)
     curriculum = _student_curriculum(student_id)
     rows = query_all(
@@ -528,6 +531,41 @@ def mistake_book(
                 or item.get("question_text")
                 or bank_question
             )
+        normalized_question = normalize_mathjax_text(
+            str(item.get("complete_question_text") or "")
+        )
+        item["complete_question_text"] = normalized_question
+        own_latex = str(item.get("question_latex") or "")
+        normalized_own_latex = normalize_mathjax_text(own_latex)
+        if own_latex and normalized_own_latex != own_latex:
+            execute(
+                "UPDATE analysis_question_results SET question_latex = ? WHERE id = ?",
+                (normalized_own_latex, item["question_result_id"]),
+            )
+            item["question_latex"] = normalized_own_latex
+        solution_en = str(item.get("worked_solution_en") or "")
+        solution_zh = str(item.get("worked_solution_zh") or "")
+        normalized_solution_en = normalize_mathjax_text(solution_en)
+        normalized_solution_zh = normalize_mathjax_text(solution_zh)
+        if (
+            normalized_solution_en != solution_en
+            or normalized_solution_zh != solution_zh
+        ):
+            execute(
+                """
+                UPDATE mistake_book_entries
+                SET worked_solution_en = ?, worked_solution_zh = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    normalized_solution_en,
+                    normalized_solution_zh,
+                    _now(),
+                    item["id"],
+                ),
+            )
+            item["worked_solution_en"] = normalized_solution_en
+            item["worked_solution_zh"] = normalized_solution_zh
         item["needs_question_recovery"] = not _is_substantive_question_text(
             str(item.get("question_label") or ""),
             str(item.get("complete_question_text") or ""),
@@ -2241,22 +2279,39 @@ def prepare_mistake_recovery_batch(
 
 
 def warm_analysis_mistakes(student_id: int, analysis_version_id: int) -> None:
-    """Best-effort cache warming for mistakes created by one new analysis."""
-    data = mistake_book(student_id)
-    pending_ids = [
-        int(item["id"])
-        for item in data["items"]
-        if int(item.get("id") or 0) > 0
-        and item.get("needs_question_recovery")
-        and int(item.get("analysis_version_id") or 0) == analysis_version_id
+    """Prepare every new mistake and atomically refresh all PDF booklets."""
+    # One retry pass handles a transient provider failure without making any
+    # individual call exceed its 28-second hard ceiling.
+    for _attempt in range(2):
+        data = mistake_book(student_id)
+        pending_ids = [
+            int(item["id"])
+            for item in data["items"]
+            if int(item.get("id") or 0) > 0
+            and item.get("needs_question_recovery")
+            and int(item.get("analysis_version_id") or 0) == analysis_version_id
+        ]
+        if not pending_ids:
+            break
+        for index in range(0, len(pending_ids), 3):
+            prepare_mistake_recovery_batch(
+                student_id,
+                entry_ids=pending_ids[index:index + 3],
+                analysis_version_id=analysis_version_id,
+                limit=3,
+            )
+
+    refreshed = mistake_book(student_id)
+    new_items = [
+        item
+        for item in refreshed["items"]
+        if int(item.get("analysis_version_id") or 0) == analysis_version_id
+        and not item.get("needs_question_recovery")
     ]
-    for index in range(0, len(pending_ids), 3):
-        prepare_mistake_recovery_batch(
-            student_id,
-            entry_ids=pending_ids[index:index + 3],
-            analysis_version_id=analysis_version_id,
-            limit=3,
-        )
+    prepare_mistake_worked_solutions(
+        new_items, curriculum=_student_curriculum(student_id)
+    )
+    refresh_mistake_book_pdf_cache(student_id)
 
 
 def mistake_worked_solution(
@@ -2272,6 +2327,11 @@ def mistake_worked_solution(
     )
     if not item:
         return None
+    cache_changed = bool(
+        item.get("needs_question_recovery")
+        or not item.get("worked_solution_en")
+        or not item.get("worked_solution_zh")
+    )
     if item.get("needs_question_recovery"):
         recovered = _recover_mistake_from_source(
             item, _student_curriculum(student_id)
@@ -2286,6 +2346,8 @@ def mistake_worked_solution(
         if lang == "zh"
         else item.get("worked_solution_en")
     ) or _fallback_worked_solution(item, lang)
+    if cache_changed:
+        refresh_mistake_book_pdfs_in_background(student_id)
     return {
         "question": str(item.get("complete_question_text") or "").strip(),
         "solution": str(solution).strip(),
@@ -2293,14 +2355,21 @@ def mistake_worked_solution(
     }
 
 
-def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
+def mistake_book_pdf(
+    student_id: int,
+    kind: str,
+    lang: str,
+    *,
+    allow_ai: bool = True,
+) -> bytes:
     data = mistake_book(student_id)
     curriculum = _student_curriculum(student_id)
-    for item in data["items"]:
-        if item.get("needs_question_recovery"):
-            _recover_mistake_from_source(item, curriculum)
+    if allow_ai:
+        for item in data["items"]:
+            if item.get("needs_question_recovery"):
+                _recover_mistake_from_source(item, curriculum)
     is_questions = kind == "questions"
-    if not is_questions:
+    if not is_questions and allow_ai:
         prepare_mistake_worked_solutions(data["items"], curriculum=curriculum)
     if lang == "zh":
         title = "Sumkora 错题本" if is_questions else "Sumkora 错题答案"
@@ -2354,3 +2423,53 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
                 source_label="",
             )
     return flow.finish()
+
+
+def _mistake_pdf_cache_path(student_id: int, kind: str, lang: str) -> Path:
+    root = Path(config.DB_PATH).resolve().parent / "generated" / "mistake-books"
+    return root / str(student_id) / f"{kind}-{lang}.pdf"
+
+
+def refresh_mistake_book_pdf_cache(
+    student_id: int,
+    *,
+    languages: tuple[str, ...] = ("en", "zh"),
+) -> None:
+    """Atomically replace cached question and answer booklets."""
+    with _MISTAKE_PDF_LOCK:
+        for lang in languages:
+            for kind in ("questions", "answers"):
+                content = mistake_book_pdf(
+                    student_id, kind, lang, allow_ai=False
+                )
+                path = _mistake_pdf_cache_path(student_id, kind, lang)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".pdf.tmp")
+                temporary.write_bytes(content)
+                temporary.replace(path)
+
+
+def cached_mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
+    """Return an instant cached booklet, creating a non-AI snapshot if absent."""
+    path = _mistake_pdf_cache_path(student_id, kind, lang)
+    if path.is_file():
+        return path.read_bytes()
+    with _MISTAKE_PDF_LOCK:
+        if path.is_file():
+            return path.read_bytes()
+        content = mistake_book_pdf(student_id, kind, lang, allow_ai=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".pdf.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(path)
+        return content
+
+
+def refresh_mistake_book_pdfs_in_background(student_id: int) -> None:
+    """Refresh download caches after a manual legacy-item recovery."""
+    Thread(
+        target=refresh_mistake_book_pdf_cache,
+        args=(student_id,),
+        name=f"mistake-pdf-refresh-{student_id}",
+        daemon=True,
+    ).start()

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import fitz
 from fastapi.testclient import TestClient
+import learning
 import question_solver
 
 from assessment import rebuild_student_profile, student_skill_profile
@@ -14,12 +15,14 @@ from auth import create_session_token
 from db import execute, hash_password, query_one
 from learning import (
     _PdfFlow,
+    cached_mistake_book_pdf,
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
     prepare_mistake_recovery_batch,
     practice_pdf,
     practice_set_detail,
+    refresh_mistake_book_pdf_cache,
     skill_detail,
 )
 from main import app
@@ -245,6 +248,68 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert client.post(
         f"/student/practice/{set_id}/submit", cookies=cookies
     ).status_code == 404
+
+
+def test_mistake_book_pdf_download_uses_prebuilt_cache(monkeypatch):
+    student_id = create_student("mistake-pdf-cache@student.local")
+    seed_direct_observation(student_id)
+    refresh_mistake_book_pdf_cache(student_id, languages=("en",))
+    expected = cached_mistake_book_pdf(student_id, "questions", "en")
+    assert expected.startswith(b"%PDF")
+
+    def must_not_render(*_args, **_kwargs):
+        raise AssertionError("a cached download must not regenerate the PDF")
+
+    monkeypatch.setattr(learning, "mistake_book_pdf", must_not_render)
+    assert cached_mistake_book_pdf(student_id, "questions", "en") == expected
+
+
+def test_completed_analysis_warms_solutions_and_every_booklet(monkeypatch):
+    student_id = create_student("mistake-background-warm@student.local")
+    seed_direct_observation(student_id)
+    book = mistake_book(student_id)
+    version_id = int(book["items"][0]["analysis_version_id"])
+
+    def generate_without_provider(items, curriculum=None):
+        assert curriculum
+        for item in items:
+            execute(
+                """
+                UPDATE mistake_book_entries
+                SET worked_solution_en = ?, worked_solution_zh = ?,
+                    worked_solution_model = 'test-fast', updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "Use the graph period, then correct the amplitude.",
+                    "先确定图像周期，再修正振幅。",
+                    now(),
+                    item["id"],
+                ),
+            )
+            item["worked_solution_en"] = (
+                "Use the graph period, then correct the amplitude."
+            )
+            item["worked_solution_zh"] = "先确定图像周期，再修正振幅。"
+
+    monkeypatch.setattr(
+        learning, "prepare_mistake_worked_solutions", generate_without_provider
+    )
+    learning.warm_analysis_mistakes(student_id, version_id)
+
+    for language in ("en", "zh"):
+        for kind in ("questions", "answers"):
+            content = cached_mistake_book_pdf(student_id, kind, language)
+            assert content.startswith(b"%PDF")
+            assert len(content) > 1_000
+    answer_text = "".join(
+        page.get_text()
+        for page in fitz.open(
+            stream=cached_mistake_book_pdf(student_id, "answers", "en"),
+            filetype="pdf",
+        )
+    )
+    assert "correct the amplitude" in answer_text
 
 
 def test_progress_report_uses_current_paper_analysis_data():

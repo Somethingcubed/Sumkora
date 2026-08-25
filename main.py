@@ -96,8 +96,8 @@ from reports import (
 from learning import (
     create_generated_practice_set,
     create_practice_set,
+    cached_mistake_book_pdf,
     mistake_book,
-    mistake_book_pdf,
     prepare_mistake_recovery_batch,
     mistake_worked_solution,
     practice_pdf,
@@ -3263,7 +3263,7 @@ def student_mistake_book_pdf(request: Request, kind: str):
         return redirect_login()
     if kind not in {"questions", "answers"}:
         return JSONResponse({"detail": "Not found."}, status_code=404)
-    content = mistake_book_pdf(user["id"], kind, get_lang(request))
+    content = cached_mistake_book_pdf(user["id"], kind, get_lang(request))
     suffix = "questions" if kind == "questions" else "worked-solutions"
     record_student_activity(
         user["id"],

@@ -225,6 +225,54 @@ def _restore_tex_control_escapes(value: str) -> str:
     return text
 
 
+_MATHJAX_DELIMITED_RE = re.compile(
+    r"(\\\((?:.|\n)*?\\\)|\\\[(?:.|\n)*?\\\])"
+)
+_BARE_TEX_TEXT_RE = re.compile(
+    r"\\text(?:bf|it|rm|sf)?\{([^{}]*)\}"
+)
+_BARE_MATH_RE = re.compile(
+    r"("
+    r"\\(?:dfrac|tfrac|frac)\{[^{}\n]*\}\{[^{}\n]*\}"
+    r"|\\sqrt(?:\[[^\]\n]*\])?\{[^{}\n]*\}"
+    r"|\\(?:mathrm|mathbf|mathit|overline|vec)\{[^{}\n]*\}"
+    r"|\\(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|rho|"
+    r"sigma|tau|phi|omega|sin|cos|tan|sec|cosec|cot|log|ln|exp)\b"
+    r"|(?:[A-Za-z0-9]+(?:\^\{[^{}\n]+\}|_\{[^{}\n]+\}|\^[A-Za-z0-9]+|_[A-Za-z0-9]+)+)"
+    r"|(?:[A-Za-z](?:_\{?\w+\}?)?|[-+]?\d+(?:\.\d+)?)"
+    r"\s*(?:=|≤|≥|<|>)\s*"
+    r"(?:[A-Za-z](?:_\{?\w+\}?)?|[-+]?\d+(?:\.\d+)?)"
+    r")"
+)
+
+
+def normalize_mathjax_text(value: str) -> str:
+    """Make model-authored mathematics deterministic and MathJax-safe.
+
+    Existing ``\\(...\\)`` and ``\\[...\\]`` blocks are preserved.  Outside
+    them, prose-only ``\\text{...}`` wrappers are removed and common bare TeX
+    expressions are wrapped with inline delimiters.  This is deliberately a
+    fast string transform; it never makes another model call.
+    """
+    text = _restore_tex_control_escapes(value)
+    if not text:
+        return ""
+    parts = _MATHJAX_DELIMITED_RE.split(text)
+    normalized: list[str] = []
+    for index, part in enumerate(parts):
+        if not part:
+            continue
+        if index % 2:
+            normalized.append(part)
+            continue
+        outside = _BARE_TEX_TEXT_RE.sub(r"\1", part)
+        outside = outside.replace(r"\ ", " ")
+        outside = outside.replace(r"\quad", " ").replace(r"\qquad", " ")
+        outside = _BARE_MATH_RE.sub(lambda match: rf"\({match.group(0)}\)", outside)
+        normalized.append(outside)
+    return "".join(normalized)
+
+
 def _clean_solution_fields(parsed: dict) -> None:
     for key in (
         "transcription",
@@ -234,7 +282,7 @@ def _clean_solution_fields(parsed: dict) -> None:
         "final_answer",
         "final_answer_zh",
     ):
-        parsed[key] = _restore_tex_control_escapes(parsed.get(key, ""))
+        parsed[key] = normalize_mathjax_text(parsed.get(key, ""))
 
 
 def _solve_question_image_url(

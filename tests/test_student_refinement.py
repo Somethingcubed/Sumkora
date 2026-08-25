@@ -7,6 +7,7 @@ from question_solver import (
     _enforce_solution_consistency,
     _restore_tex_control_escapes,
     _equation_rhs_signature,
+    normalize_mathjax_text,
     solve_question_texts,
 )
 from question_solver import PROMPT
@@ -17,6 +18,18 @@ def test_question_solver_restores_json_damaged_tex_controls():
     damaged = "\textbf{Q2}: \frac{1}{2} \right) \neq \x01"
     repaired = _restore_tex_control_escapes(damaged)
     assert repaired == r"\textbf{Q2}: \frac{1}{2} \right) \neq "
+
+
+def test_question_solver_wraps_bare_model_tex_deterministically():
+    damaged = (
+        r"Q2 \text{2 Differentiate } x^2 e^{3x}"
+        r"\text{ with respect to } x. \ [3]"
+    )
+    normalized = normalize_mathjax_text(damaged)
+    assert r"\text{" not in normalized
+    assert r"\(x^2\)" in normalized
+    assert r"\(e^{3x}\)" in normalized
+    assert "Differentiate" in normalized
 
 
 class FixedRandom:
