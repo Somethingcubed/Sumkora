@@ -3197,7 +3197,10 @@ def student_mistake_solution(request: Request, entry_id: int):
         return JSONResponse({"detail": "Authentication required."}, status_code=401)
     result = mistake_worked_solution(user["id"], entry_id, get_lang(request))
     if not result:
-        return JSONResponse({"detail": "Not found."}, status_code=404)
+        return JSONResponse(
+            {"detail": "The complete question could not be restored yet."},
+            status_code=503,
+        )
     return JSONResponse(result)
 
 

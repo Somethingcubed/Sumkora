@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import fitz
 from fastapi.testclient import TestClient
+import question_solver
 
 from assessment import rebuild_student_profile, student_skill_profile
 from auth import create_session_token
@@ -229,7 +230,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert "Picture of the original question and your work" not in mistake_page.text
     assert "Have you tried this question again?" in mistake_page.text
     assert "Show the fully worked solution" in mistake_page.text
-    assert "/static/mistakes.js?v=20260825-2" in mistake_page.text
+    assert "/static/mistakes.js?v=20260825-3" in mistake_page.text
     solution = client.post(
         f"/student/mistakes/{book['items'][0]['id']}/solution",
         cookies=cookies,
@@ -376,6 +377,110 @@ def test_mistake_book_reconnects_fast_results_to_original_page(tmp_path):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG")
+
+
+def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
+    tmp_path, monkeypatch
+):
+    student_id = create_student("mistake-recovery@student.local")
+    paper_id, result_id = seed_direct_observation(student_id)
+    source_path = tmp_path / "completed-work-recovery.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 90), "2 Differentiate x^2 e^(3x) with respect to x. [3]")
+    document.save(source_path)
+    document.close()
+    version = query_one(
+        "SELECT id FROM paper_analysis_versions WHERE paper_id = ?",
+        (paper_id,),
+    )
+    execute(
+        """
+        UPDATE student_papers
+        SET title = 'Uncatalogued photographed paper', paper_number = ''
+        WHERE id = ?
+        """,
+        (paper_id,),
+    )
+    execute(
+        """
+        UPDATE paper_analysis_versions
+        SET answer_script_path = ?, assessment_summary = '{}'
+        WHERE id = ?
+        """,
+        (str(source_path), version["id"]),
+    )
+    execute(
+        """
+        UPDATE analysis_question_results
+        SET question_label = 'Q2', question_text = 'Q2 — Calculus',
+            question_latex = 'Q2 — Calculus', evidence_pages = '[1]'
+        WHERE id = ?
+        """,
+        (result_id,),
+    )
+    book = mistake_book(student_id)
+    entry = book["items"][0]
+    execute(
+        """
+        UPDATE mistake_book_entries
+        SET worked_solution_en = 'Insufficient information.',
+            worked_solution_zh = '信息不足。'
+        WHERE id = ?
+        """,
+        (entry["id"],),
+    )
+    assert entry["needs_question_recovery"] is True
+    assert entry["complete_question_text"] == ""
+
+    seen = {}
+
+    def fake_source_solver(payload, curriculum, *, mime_type="image/png", target_label=""):
+        seen["payload"] = payload
+        seen["target_label"] = target_label
+        return {
+            "transcription": "Differentiate x^2 e^(3x) with respect to x.",
+            "question_latex": (
+                r"Differentiate \(x^2e^{3x}\) with respect to \(x\)."
+            ),
+            "solution_en": (
+                r"Using the product rule, \(\frac{d}{dx}(x^2e^{3x})"
+                r"=2xe^{3x}+3x^2e^{3x}\)."
+            ),
+            "solution_zh": (
+                r"使用乘积法则，\(\frac{d}{dx}(x^2e^{3x})"
+                r"=2xe^{3x}+3x^2e^{3x}\)。"
+            ),
+            "model": "test-vision-model",
+        }
+
+    monkeypatch.setattr(
+        question_solver, "solve_question_image_bytes", fake_source_solver
+    )
+    with TestClient(app) as isolated_client:
+        isolated_client.cookies.set("session", create_session_token(student_id))
+        response = isolated_client.post(
+            f"/student/mistakes/{entry['id']}/solution"
+        )
+    assert response.status_code == 200
+    assert seen["payload"].startswith(b"\x89PNG")
+    assert seen["target_label"] == "Q2"
+    assert r"Differentiate \(x^2e^{3x}\)" in response.json()["question"]
+    assert "product rule" in response.json()["solution"]
+    repaired = query_one(
+        "SELECT question_latex FROM analysis_question_results WHERE id = ?",
+        (result_id,),
+    )
+    cached = query_one(
+        """
+        SELECT worked_solution_en FROM mistake_book_entries
+        WHERE id = ?
+        """,
+        (entry["id"],),
+    )
+    assert r"Differentiate \(x^2e^{3x}\)" in repaired["question_latex"]
+    assert "Insufficient information" not in cached["worked_solution_en"]
+    assert mistake_book(student_id)["items"][0]["needs_question_recovery"] is False
 
 
 def test_unclassified_is_not_exposed_as_student_mastery():

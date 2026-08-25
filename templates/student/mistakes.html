@@ -37,9 +37,9 @@
       <img src="/student/mistakes/{{ item.id }}/source-image" loading="lazy" alt="{{ tr('Original page containing', '包含原题的页面') }} {{ item.question_label }}">
     </details>
     {% endif %}
-    <div class="mistake-question-copy mt-4">
+    <div class="mistake-question-copy mt-4" data-mistake-question>
       <p class="mistake-section-label">{{ tr('Question', '题目') }}</p>
-      <div class="math-copy whitespace-pre-line">{{ item.complete_question_text or tr('Question text will be linked when the source paper is added to the question bank.', '原试卷加入题库后将显示完整题目。') }}</div>
+      <div class="math-copy whitespace-pre-line" data-question-body>{% if item.needs_question_recovery %}{{ tr('Restoring the complete question from the original page…', '正在从原始页面恢复完整题目…') }}{% else %}{{ item.complete_question_text or tr('Complete question text is unavailable.', '暂时无法显示完整题目。') }}{% endif %}</div>
       {% if item.has_parent_context %}<p class="context-note">{{ tr('The complete parent question is included so this part can be understood independently.', '已包含完整的母题内容，确保此小题可以独立理解。') }}</p>{% endif %}
     </div>
     <form method="post" action="/student/mistakes/{{ item.id }}/status" class="flex flex-wrap gap-2 items-end mt-4">
@@ -47,10 +47,10 @@
       <button class="button button-secondary">{{ tr('Save status', '保存状态') }}</button>
     </form>
     {% set cached_solution = item.worked_solution_zh if lang == 'zh' else item.worked_solution_en %}
-    <details class="mistake-solution mistake-disclosure mt-4" data-mistake-solution data-solution-url="/student/mistakes/{{ item.id }}/solution" data-loaded="{{ 'true' if cached_solution else 'false' }}">
+    <details class="mistake-solution mistake-disclosure mt-4" data-mistake-solution data-solution-url="/student/mistakes/{{ item.id }}/solution" data-needs-question-recovery="{{ 'true' if item.needs_question_recovery else 'false' }}" data-loaded="{{ 'true' if cached_solution and not item.needs_question_recovery else 'false' }}">
       <summary><span>{{ tr('Show the fully worked solution', '查看完整解答') }}</span><span class="disclosure-state" data-open-label="{{ tr('Hide solution', '收起解答') }}" data-closed-label="{{ tr('Show solution', '展开解答') }}">{{ tr('Show solution', '展开解答') }}</span></summary>
       <div class="mistake-solution-body" data-solution-body>
-        {% if cached_solution %}<div class="math-copy whitespace-pre-line">{{ cached_solution }}</div>{% else %}<p class="mistake-solution-loading">{{ tr('Preparing the worked solution…', '正在准备完整解答…') }}</p>{% endif %}
+        {% if cached_solution and not item.needs_question_recovery %}<div class="math-copy whitespace-pre-line">{{ cached_solution }}</div>{% else %}<p class="mistake-solution-loading">{{ tr('Preparing the complete question and worked solution…', '正在准备完整题目与解答…') }}</p>{% endif %}
         <div class="mistake-improvement"><p class="font-medium">{{ tr('What to improve', '需要改进') }}</p><p>{{ item.error_mechanism_zh if lang == 'zh' and item.error_mechanism_zh else (item.error_mechanism or item.ai_rationale_zh if lang == 'zh' and item.ai_rationale_zh else item.ai_rationale) }}</p></div>
       </div>
     </details>
@@ -60,5 +60,5 @@
 {% else %}
 <section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('No mistakes match these filters', '没有符合筛选条件的错题') }}</h2><p class="text-slate-500 mt-2">{{ tr('Mistakes appear automatically after a paper analysis.', '试卷分析完成后，错题会自动出现在这里。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse a paper', '分析试卷') }}</a></section>
 {% endif %}
-<script defer src="/static/mistakes.js?v=20260825-2"></script>
+<script defer src="/static/mistakes.js?v=20260825-3"></script>
 {% endblock %}

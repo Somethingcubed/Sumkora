@@ -520,6 +520,15 @@ def mistake_book(
                 or item.get("question_text")
                 or bank_question
             )
+        item["needs_question_recovery"] = not _is_substantive_question_text(
+            str(item.get("question_label") or ""),
+            str(item.get("complete_question_text") or ""),
+        )
+        if item["needs_question_recovery"]:
+            # A label/topic fallback such as "Q2 — Calculus" is navigation
+            # metadata, not a usable question.  Keep it out of the rendered
+            # question and recover the printed source page on demand below.
+            item["complete_question_text"] = ""
         item["has_parent_context"] = use_bank_parent or len(complete_parts) > 1
         evidence_pages = _json(item.get("evidence_pages"), [])
         source_page = next(
@@ -588,6 +597,7 @@ def mistake_book(
                 "complete_question_text": (
                     help_item["question_latex"] or help_item["transcription"]
                 ),
+                "needs_question_recovery": False,
                 "has_parent_context": False,
                 "source_page": 1,
                 "has_source_image": bool(
@@ -2059,6 +2069,78 @@ def prepare_mistake_worked_solutions(
             by_id[entry_id]["worked_solution_model"] = model_by_id.get(entry_id, "")
 
 
+def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
+    """Recover one full printed question and solution from its cited page."""
+    path = str(item.get("answer_script_path") or "")
+    if not path or not os.path.isfile(path):
+        return False
+
+    try:
+        with fitz.open(path) as document:
+            if not document.page_count:
+                return False
+            page_number = max(1, int(item.get("source_page") or 1))
+            page = document.load_page(min(page_number - 1, document.page_count - 1))
+            scale = 160 / 72
+            image_bytes = page.get_pixmap(
+                matrix=fitz.Matrix(scale, scale),
+                alpha=False,
+            ).tobytes("png")
+
+        from question_solver import solve_question_image_bytes
+
+        result = solve_question_image_bytes(
+            image_bytes,
+            curriculum,
+            target_label=str(item.get("question_label") or ""),
+        )
+    except Exception:
+        return False
+
+    question_text = str(result.get("transcription") or "").strip()
+    question_latex = str(
+        result.get("question_latex") or question_text
+    ).strip()
+    substantive = question_latex or question_text
+    if not _is_substantive_question_text(
+        str(item.get("question_label") or ""), substantive
+    ):
+        return False
+
+    solution_en = str(result.get("solution_en") or "").strip()
+    solution_zh = str(result.get("solution_zh") or "").strip()
+    model = str(result.get("model") or "")
+    execute(
+        """
+        UPDATE analysis_question_results
+        SET question_text = ?, question_latex = ?
+        WHERE id = ?
+        """,
+        (question_text, question_latex, item["question_result_id"]),
+    )
+    execute(
+        """
+        UPDATE mistake_book_entries
+        SET worked_solution_en = ?, worked_solution_zh = ?,
+            worked_solution_model = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (solution_en, solution_zh, model, _now(), item["id"]),
+    )
+    item.update(
+        {
+            "question_text": question_text,
+            "question_latex": question_latex,
+            "complete_question_text": question_latex or question_text,
+            "needs_question_recovery": False,
+            "worked_solution_en": solution_en,
+            "worked_solution_zh": solution_zh,
+            "worked_solution_model": model,
+        }
+    )
+    return True
+
+
 def mistake_worked_solution(
     student_id: int,
     entry_id: int,
@@ -2072,6 +2154,12 @@ def mistake_worked_solution(
     )
     if not item:
         return None
+    if item.get("needs_question_recovery"):
+        recovered = _recover_mistake_from_source(
+            item, _student_curriculum(student_id)
+        )
+        if not recovered:
+            return None
     prepare_mistake_worked_solutions(
         [item], curriculum=_student_curriculum(student_id)
     )
@@ -2081,6 +2169,7 @@ def mistake_worked_solution(
         else item.get("worked_solution_en")
     ) or _fallback_worked_solution(item, lang)
     return {
+        "question": str(item.get("complete_question_text") or "").strip(),
         "solution": str(solution).strip(),
         "model": item.get("worked_solution_model") or "",
     }
@@ -2088,11 +2177,13 @@ def mistake_worked_solution(
 
 def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
     data = mistake_book(student_id)
+    curriculum = _student_curriculum(student_id)
+    for item in data["items"]:
+        if item.get("needs_question_recovery"):
+            _recover_mistake_from_source(item, curriculum)
     is_questions = kind == "questions"
     if not is_questions:
-        prepare_mistake_worked_solutions(
-            data["items"], curriculum=_student_curriculum(student_id)
-        )
+        prepare_mistake_worked_solutions(data["items"], curriculum=curriculum)
     if lang == "zh":
         title = "Sumkora 错题本" if is_questions else "Sumkora 错题答案"
         subtitle = (

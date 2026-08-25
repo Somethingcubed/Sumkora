@@ -121,6 +121,11 @@ def _image_data_url(path: str) -> str:
     return f"data:{mime};base64,{payload}"
 
 
+def _bytes_data_url(payload: bytes, mime_type: str) -> str:
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 def _conclusion(solution: str, *, chinese: bool = False) -> str:
     lines = [
         line.strip()
@@ -190,7 +195,12 @@ def _enforce_solution_consistency(parsed: dict) -> None:
             parsed[final_key] = conclusion
 
 
-def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
+def _solve_question_image_url(
+    image_url: str,
+    curriculum: dict | None = None,
+    *,
+    target_label: str = "",
+) -> dict:
     curriculum_instruction = (
         curriculum_prompt_context(curriculum)
         if curriculum
@@ -214,7 +224,20 @@ def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
             "formulae with standard LaTeX subscripts and superscripts (for example "
             "\\(\\mathrm{CO_2}\\)) rather than plain-text approximations."
         )
-    prompt = f"{PROMPT}\n\n{curriculum_instruction}\n{subject_instruction}"
+    target_instruction = ""
+    if target_label:
+        target_instruction = f"""
+The image may contain more than one printed question. Work ONLY on the question
+labelled {target_label}. Transcribe that target's complete printed wording and
+mathematics, not merely its label or topic. Include any visible parent stem,
+diagram, table, definitions, or earlier-part context needed to solve it. Do not
+solve a neighbouring question and do not treat the student's handwriting as
+part of the printed question.
+"""
+    prompt = (
+        f"{PROMPT}\n\n{curriculum_instruction}\n{subject_instruction}"
+        f"\n{target_instruction}"
+    )
     result = api_post_json(
         f"{cxsee_api_base()}/responses",
         {
@@ -224,7 +247,7 @@ def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
                     "role": "user",
                     "content": [
                         {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": _image_data_url(path)},
+                        {"type": "input_image", "image_url": image_url},
                     ],
                 }
             ],
@@ -269,6 +292,34 @@ def solve_question_image(path: str, curriculum: dict | None = None) -> dict:
     parsed["model"] = result.get("model") or config.QUESTION_SOLVER_MODEL
     parsed["usage"] = result.get("usage") or {}
     return parsed
+
+
+def solve_question_image(
+    path: str,
+    curriculum: dict | None = None,
+    *,
+    target_label: str = "",
+) -> dict:
+    return _solve_question_image_url(
+        _image_data_url(path),
+        curriculum,
+        target_label=target_label,
+    )
+
+
+def solve_question_image_bytes(
+    payload: bytes,
+    curriculum: dict | None = None,
+    *,
+    mime_type: str = "image/png",
+    target_label: str = "",
+) -> dict:
+    """Solve one labelled question from an in-memory source-page image."""
+    return _solve_question_image_url(
+        _bytes_data_url(payload, mime_type),
+        curriculum,
+        target_label=target_label,
+    )
 
 
 def solve_question_texts(
