@@ -234,7 +234,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert "Picture of the original question and your work" not in mistake_page.text
     assert "Have you tried this question again?" in mistake_page.text
     assert "Show the fully worked solution" in mistake_page.text
-    assert "/static/mistakes.js?v=20260825-5" in mistake_page.text
+    assert "/static/mistakes.js?v=20260825-6" in mistake_page.text
     solution = client.post(
         f"/student/mistakes/{book['items'][0]['id']}/solution",
         cookies=cookies,
@@ -406,7 +406,7 @@ def test_mistake_book_recombines_sibling_subquestions_for_context():
     assert book["counts"]["total"] == 1
     question = book["items"][0]["complete_question_text"]
     assert "Q12(a)" in question
-    assert r"\((2+x)^{59}\)" in question
+    assert r"$(2+x)^{59}$" in question
     assert "Q12(b)" in question
 
 
@@ -513,7 +513,7 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
         return {
             "transcription": "Differentiate x^2 e^(3x) with respect to x.",
             "question_latex": (
-                r"Differentiate \(x^2e^{3x}\) with respect to \(x\)."
+                r"Differentiate $x^2e^{3x}$ with respect to $x$."
             ),
             "solution_en": (
                 r"Using the product rule, \(\frac{d}{dx}(x^2e^{3x})"
@@ -564,7 +564,7 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
     assert seen["payload"].startswith(b"\xff\xd8\xff")
     assert response.elapsed.total_seconds() < 30
     assert seen["target_label"] == "Q2"
-    assert r"Differentiate \(x^2e^{3x}\)" in response.json()["question"]
+    assert r"Differentiate $x^2e^{3x}$" in response.json()["question"]
     assert "product rule" in response.json()["solution"]
     repaired = query_one(
         "SELECT question_latex FROM analysis_question_results WHERE id = ?",
@@ -577,7 +577,7 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
         """,
         (entry["id"],),
     )
-    assert r"Differentiate \(x^2e^{3x}\)" in repaired["question_latex"]
+    assert r"Differentiate $x^2e^{3x}$" in repaired["question_latex"]
     assert "Insufficient information" not in cached["worked_solution_en"]
     assert mistake_book(student_id)["items"][0]["needs_question_recovery"] is False
 
@@ -630,7 +630,7 @@ def test_mistake_book_prefetch_recovers_only_first_three_and_caches(
         seen.append(label)
         return {
             "transcription": f"{label} Differentiate x^2 e^(3x) with respect to x.",
-            "question_latex": rf"{label} Differentiate \(x^2e^{{3x}}\) with respect to \(x\).",
+            "question_latex": rf"{label} Differentiate $x^2e^{{3x}}$ with respect to $x$.",
             "solution_en": r"The derivative is \(2xe^{3x}+3x^2e^{3x}\).",
             "solution_zh": r"导数为 \(2xe^{3x}+3x^2e^{3x}\)。",
             "model": "test-fast-vision",

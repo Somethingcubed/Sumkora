@@ -5,6 +5,8 @@ import re
 
 from learning import _choose_weak_topic
 from question_solver import (
+    TEXT_SOLUTIONS_PROMPT,
+    TRANSCRIPTION_PROMPT,
     _enforce_solution_consistency,
     _restore_tex_control_escapes,
     _equation_rhs_signature,
@@ -28,24 +30,34 @@ def test_question_solver_wraps_bare_model_tex_deterministically():
     )
     normalized = normalize_mathjax_text(damaged)
     assert r"\text{" not in normalized
-    assert r"\(x^2\)" in normalized
-    assert r"\(e^{3x}\)" in normalized
+    assert "$x^2$" in normalized
+    assert "$e^{3x}$" in normalized
     assert "Differentiate" in normalized
 
 
-def test_question_solver_never_exposes_dollar_or_bare_tex_delimiters():
+def test_question_solver_preserves_dollar_math_without_bare_tex():
     damaged = (
         r"Find $x^2$ when \text{given } \left\frac{1}{2}\right. "
         r"and \ [3]."
     )
     normalized = normalize_mathjax_text(damaged)
     outside_math = re.sub(
-        r"\\\((?:.|\n)*?\\\)|\\\[(?:.|\n)*?\\\]", "", normalized
+        r"\$\$(?:.|\n)*?\$\$|(?<![\\$])\$(?!\$)[^$\n]*?(?<![\\$])\$(?!\$)",
+        "",
+        normalized,
     )
-    assert "$" not in normalized
     assert "\\" not in outside_math
-    assert r"\(x^2\)" in normalized
-    assert r"\(\frac{1}{2}\)" in normalized
+    assert "$x^2$" in normalized
+    assert r"$\frac{1}{2}$" in normalized
+    assert r"\(" not in normalized
+    assert r"\[" not in normalized
+
+
+def test_new_mistake_prompts_require_literal_dollar_math():
+    assert "Use `$...$` for every inline mathematical expression" in TRANSCRIPTION_PROMPT
+    assert "Do NOT use `\\(...\\)` or `\\[...\\]`" in TRANSCRIPTION_PROMPT
+    assert "Use `$...$` for every inline mathematical expression" in TEXT_SOLUTIONS_PROMPT
+    assert "no `\\(...\\)` or `\\[...\\]` delimiters appear" in TEXT_SOLUTIONS_PROMPT
 
 
 class FixedRandom:
@@ -186,5 +198,6 @@ def test_text_solver_returns_worked_solutions_without_exposing_mark_schemes(
     assert result["solutions"][0]["id"] == 7
     assert "x <= -2 or x >= 3" in result["solutions"][0]["solution_en"]
     prompt = captured["payload"]["input"][0]["content"][0]["text"]
-    assert "Do not mention a mark scheme" in prompt
+    assert "Never mention or reveal" in prompt
+    assert "a mark scheme" in prompt
     assert captured["payload"]["reasoning"]["effort"] == "low"

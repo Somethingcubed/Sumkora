@@ -96,23 +96,176 @@ returning. The final_answer fields MUST exactly agree with the final line of
 the corresponding worked solution; copy the same result rather than
 recalculating or simplifying it differently. Return only the required JSON object."""
 
-TEXT_SOLUTIONS_PROMPT = """You are Sumkora's subject tutor. Produce a concise,
-complete worked solution for every question in the JSON input. Each solution
-must show the reasoning or calculation process step by step and end with the
-final answer. Preserve exact values, formulae, equations, units, domains,
-inequalities, experimental observations, and all question parts. Check all
-calculations, symbols, scientific claims, and signs.
+TRANSCRIPTION_PROMPT = r"""Read the photographed exam page and transcribe ONLY the complete printed question labelled {label}. Include its printed parent stem, every subpart belonging to it, instructions, definitions, given values, domains, units, table entries, and diagram labels needed to answer it.
 
-In solution_en and solution_zh, enclose every inline mathematical expression
-in \\( ... \\) and every display equation in \\[ ... \\]. Never leave LaTeX
-commands such as \\frac, \\sqrt, \\theta, subscripts, or superscripts outside
-MathJax delimiters. Keep ordinary sentences outside the delimiters.
+Ignore handwriting, annotations, crossed-out student work, page headers and footers, page numbers, barcodes, examiner markings, and neighbouring questions.
 
-Some questions include a private reference answer. Use it only to verify
-accuracy. Do not mention a mark scheme, marking instructions, marks, examiner
-codes, or the reference answer in the output. Write a natural worked solution,
-not a marking guide. Return both English and Simplified Chinese. Return only
-the required JSON object, with one result for every supplied id."""
+Transcribe the printed question faithfully. Do not solve, simplify, paraphrase, interpret, correct, reorder, or add content. Preserve the original wording, numerical values, symbols, labels, and mathematical structure as closely as possible.
+
+Return transcription only. Do not include a solution, explanation, commentary, topic label, Markdown heading, introduction, conclusion, or code fence.
+
+FORMAT ALL MATHEMATICS FOR DIRECT WEBSITE RENDERING:
+
+- Use `$...$` for every inline mathematical expression.
+- Use `$$...$$` only for mathematical expressions that should appear as separate displayed lines.
+- Output the dollar-sign delimiters literally. Do NOT escape them as `\$`.
+- Do NOT use `\(...\)` or `\[...\]`.
+- Do NOT place mathematical expressions inside backticks or code fences.
+- Every LaTeX command must be completely inside `$...$` or `$$...$$`.
+- Never output raw LaTeX commands outside math delimiters.
+- Never nest math delimiters.
+- Never open a math delimiter without closing it.
+
+For example, output:
+
+The function $f(x)=\frac{x^2+1}{\sqrt{x-3}}$ is defined for $x>3$.
+
+and NOT:
+
+The function f(x)=\frac{x^2+1}{\sqrt{x-3}} is defined for x>3.
+
+and NOT:
+
+The function (f(x)=\frac{x^2+1}{\sqrt{x-3}}) is defined for (x>3).
+
+Use valid LaTeX syntax inside the math delimiters. Fractions must use `\frac{...}{...}`, square roots must use `\sqrt{...}`, and superscripts and subscripts must use properly grouped LaTeX when necessary. Keep all braces balanced.
+
+Preserve mathematical notation accurately, including fractions, radicals, exponents, subscripts, superscripts, coordinates, intervals, sets, functions, equations, inequalities, vectors, matrices, Greek letters, degree symbols, multiplication signs, and grouping symbols.
+
+Do not unnecessarily place ordinary prose inside math mode. For example, write:
+
+Find the value of $x$ when $x^2-5x+6=0$.
+
+Do not write:
+
+$Find\ the\ value\ of\ x\ when\ x^2-5x+6=0.$
+
+If a printed mathematical expression contains ordinary words that genuinely belong inside the expression, use appropriate LaTeX such as `\text{...}` where necessary.
+
+For tables, reproduce every relevant printed heading, row, column, value, symbol, and unit without changing any entry. Keep mathematical entries inside `$...$`.
+
+For diagrams, transcribe only the printed labels, values, symbols, and textual or mathematical information needed to answer the question. Do not invent a verbal description of the diagram.
+
+If any part of the requested printed question cannot be read reliably, do not guess or fabricate it.
+
+Before returning the transcription, silently verify that:
+
+1. every `$` or `$$` delimiter is correctly paired;
+2. every LaTeX command occurs inside math delimiters;
+3. all braces are balanced;
+4. there are no escaped math delimiters such as `\$`;
+5. there are no `\(...\)` or `\[...\]` delimiters;
+6. the output contains only the requested question.
+
+The final response must contain only the transcription of question {label}."""
+
+
+TEXT_SOLUTIONS_PROMPT = r"""You are Sumkora's subject tutor. Produce a concise but complete worked solution for every question in the JSON input.
+
+For every supplied `id`, provide a solution that:
+
+- answers every part of the question;
+- shows the reasoning, derivation, or calculation process step by step;
+- preserves exact values whenever appropriate;
+- preserves all relevant formulae, equations, units, domains, inequalities, conditions, and experimental observations;
+- checks calculations, algebraic signs, notation, symbols, scientific claims, and final conclusions for correctness;
+- ends with a clear final answer.
+
+Return both:
+
+- `solution_en`: English solution
+- `solution_zh`: Simplified Chinese solution
+
+The English and Chinese versions must express the same mathematical or scientific reasoning and reach the same final answer.
+
+FORMAT ALL MATHEMATICS FOR DIRECT WEBSITE RENDERING:
+
+In both `solution_en` and `solution_zh`:
+
+- Use `$...$` for every inline mathematical expression.
+- Use `$$...$$` only for equations or mathematical expressions that should appear on separate displayed lines.
+- Output the dollar-sign delimiters literally. Do NOT escape them as `\$`.
+- Do NOT use `\(...\)` or `\[...\]`.
+- Do NOT place mathematics inside backticks or Markdown code fences.
+- Every LaTeX command must occur entirely inside `$...$` or `$$...$$`.
+- Never leave commands such as `\frac`, `\sqrt`, `\theta`, `\times`, `\le`, `\ge`, subscripts, superscripts, or other LaTeX syntax outside math delimiters.
+- Never nest math delimiters.
+- Never open a math delimiter without closing it.
+- Keep ordinary prose outside math mode unless text genuinely belongs inside a mathematical expression.
+
+For example, write:
+
+`The acceleration is $a=\frac{v-u}{t}=3.0\,\mathrm{m\,s^{-2}}$.`
+
+not:
+
+`The acceleration is a=\frac{v-u}{t}=3.0 m/s^2.`
+
+and not:
+
+`The acceleration is \(a=\frac{v-u}{t}\).`
+
+Use valid LaTeX inside every math delimiter. Ensure:
+
+- all braces, parentheses, brackets, absolute-value signs, and delimiters are balanced;
+- fractions use valid forms such as `\frac{a}{b}`;
+- radicals use valid forms such as `\sqrt{x}`;
+- exponents and subscripts are correctly grouped when needed;
+- Greek letters and mathematical operators use valid LaTeX;
+- units inside math mode use suitable formatting such as `\mathrm{m}`, `\mathrm{s}`, `^\circ`, or equivalent valid LaTeX;
+- vectors, matrices, sets, intervals, functions, inequalities, coordinates, scientific notation, and other mathematical structures are represented faithfully.
+
+Do not replace exact values with decimal approximations unless the question requires or benefits from an approximation. If both are useful, give the exact value first and then the approximation.
+
+For multi-part questions, preserve the original part structure clearly inside each solution so that every subpart is answered.
+
+For numerical work, show enough intermediate steps to make the reasoning verifiable, but remain concise. Do not omit a non-obvious step that is necessary to justify the answer.
+
+For proof, explanation, or theory questions, give the necessary logical steps rather than only stating the conclusion.
+
+For experimental or scientific questions, preserve relevant observations, units, physical quantities, chemical species, conditions, directions, signs, and cause-and-effect relationships accurately.
+
+Some questions include a private reference answer. Use it only as an internal accuracy check. Never mention or reveal:
+
+- the reference answer;
+- a mark scheme;
+- marking instructions;
+- marks or point allocations;
+- examiner comments;
+- examiner codes;
+- grading criteria.
+
+Write each response as a natural worked solution, not as a marking guide.
+
+OUTPUT FORMAT:
+
+Return only one valid JSON object containing exactly one result for every supplied `id`.
+
+Do not include:
+
+- Markdown code fences;
+- commentary before or after the JSON;
+- headings outside the JSON;
+- explanations of the output format;
+- any additional ids that were not supplied.
+
+The output must be syntactically valid JSON. Escape quotation marks, backslashes, and control characters correctly wherever required by JSON.
+
+Within JSON string values, preserve the literal `$...$` and `$$...$$` math delimiters exactly as required by the website renderer.
+
+Before returning the result, silently verify that:
+
+1. every supplied `id` appears exactly once;
+2. every question and subpart has been answered;
+3. every solution contains a clear reasoning process and final answer;
+4. `solution_en` and `solution_zh` are consistent;
+5. every mathematical expression is inside `$...$` or `$$...$$`;
+6. no LaTeX command appears outside math delimiters;
+7. no `\(...\)` or `\[...\]` delimiters appear;
+8. every math delimiter is correctly paired;
+9. all LaTeX braces and grouping symbols are balanced;
+10. calculations, signs, units, domains, inequalities, and scientific claims have been checked;
+11. the final output is valid JSON and contains nothing outside the required JSON object."""
 
 
 def _image_data_url(path: str) -> str:
@@ -154,15 +307,14 @@ def _numeric_values(value: str) -> set[str]:
 def _equation_rhs_signature(value: str) -> str:
     """Return a stable signature for the last explicit equation's right side."""
     text = str(value or "")
-    math_blocks = [
-        inline or display
-        for inline, display in re.findall(
-            r"\\\((.*?)\\\)|\\\[(.*?)\\\]",
-            text,
-            flags=re.DOTALL,
-        )
-        if inline or display
-    ]
+    math_blocks = []
+    for match in re.finditer(
+        r"\\\((.*?)\\\)|\\\[(.*?)\\\]|"
+        r"\$\$(.*?)\$\$|(?<![\\$])\$(?!\$)([^$\n]*?)(?<![\\$])\$(?!\$)",
+        text,
+        flags=re.DOTALL,
+    ):
+        math_blocks.append(next(group for group in match.groups() if group is not None))
     candidates = list(reversed(math_blocks)) + [text]
     for candidate in candidates:
         parts = re.split(r"(?<![<>!])=(?!=)", candidate)
@@ -226,7 +378,7 @@ def _restore_tex_control_escapes(value: str) -> str:
 
 
 _MATHJAX_DELIMITED_RE = re.compile(
-    r"(\\\((?:.|\n)*?\\\)|\\\[(?:.|\n)*?\\\])"
+    r"(\$\$(?:.|\n)*?\$\$|(?<![\\$])\$(?!\$)[^$\n]*?(?<![\\$])\$(?!\$))"
 )
 _BARE_TEX_TEXT_RE = re.compile(
     r"\\text(?:bf|it|rm|sf)?\{([^{}]*)\}"
@@ -249,19 +401,24 @@ _BARE_MATH_RE = re.compile(
 def normalize_mathjax_text(value: str) -> str:
     """Make model-authored mathematics deterministic and MathJax-safe.
 
-    Existing ``\\(...\\)`` and ``\\[...\\]`` blocks are preserved.  Outside
-    them, prose-only ``\\text{...}`` wrappers are removed and common bare TeX
-    expressions are wrapped with inline delimiters.  This is deliberately a
-    fast string transform; it never makes another model call.
+    Website output is standardized to literal dollar delimiters.  Legacy
+    ``\\(...\\)`` and ``\\[...\\]`` blocks are converted for compatibility;
+    malformed bare TeX is repaired without making another model call.
     """
     text = _restore_tex_control_escapes(value)
     if not text:
         return ""
-    # The site intentionally supports only explicit MathJax delimiters.  Model
-    # output occasionally uses dollar delimiters instead, which would remain
-    # visible as literal dollar signs without this deterministic conversion.
-    text = re.sub(r"\$\$((?:.|\n)*?)\$\$", r"\\[\1\\]", text)
-    text = re.sub(r"(?<!\\)\$([^$\n]+)\$", r"\\(\1\\)", text)
+    text = text.replace(r"\$", "$")
+    text = re.sub(
+        r"\\\[((?:.|\n)*?)\\\]",
+        lambda match: f"$${match.group(1)}$$",
+        text,
+    )
+    text = re.sub(
+        r"\\\(((?:.|\n)*?)\\\)",
+        lambda match: f"${match.group(1)}$",
+        text,
+    )
     parts = _MATHJAX_DELIMITED_RE.split(text)
     normalized: list[str] = []
     for index, part in enumerate(parts):
@@ -277,7 +434,7 @@ def normalize_mathjax_text(value: str) -> str:
         protected_math: list[str] = []
 
         def protect_math(match: re.Match[str]) -> str:
-            protected_math.append(rf"\({match.group(0)}\)")
+            protected_math.append(f"${match.group(0)}$")
             return f"\x00MATH{len(protected_math) - 1}\x00"
 
         outside = _BARE_MATH_RE.sub(protect_math, outside)
@@ -285,6 +442,7 @@ def normalize_mathjax_text(value: str) -> str:
         # Preserve its readable name but never expose a raw backslash in the UI.
         outside = re.sub(r"\\([A-Za-z]+)", r"\1", outside)
         outside = outside.replace("\\", "")
+        outside = outside.replace("$", "")
         for math_index, math_value in enumerate(protected_math):
             outside = outside.replace(f"\x00MATH{math_index}\x00", math_value)
         normalized.append(outside)
@@ -307,17 +465,7 @@ def transcribe_question_image_bytes(
     fast vision model; worked solutions are generated separately from text.
     """
     label = str(target_label or "the target question").strip()
-    prompt = f"""Read the photographed exam page and transcribe ONLY the complete
-printed question labelled {label}. Include its printed parent stem, every
-subpart belonging to it, instructions, definitions, values, domains, units,
-table entries, and diagram labels needed to answer it. Ignore handwriting,
-crossed-out student work, page headers, barcodes, and neighbouring questions.
-
-Return transcription only: no solution, explanation, topic label, Markdown
-heading, or code fence. Use ordinary prose, and enclose every mathematical
-expression in \\( ... \\) or \\[ ... \\] so it renders with MathJax. Never
-leave commands such as \\frac, \\sqrt, superscripts, or subscripts outside
-those delimiters."""
+    prompt = TRANSCRIPTION_PROMPT.replace("{label}", label)
     candidates = list(dict.fromkeys([
         config.MISTAKE_RECOVERY_MODEL,
         config.WHOLE_DOCUMENT_FAST_FALLBACK_MODEL,
