@@ -1,6 +1,7 @@
 """Focused checks for the student refinement session."""
 
 import json
+import re
 
 from learning import _choose_weak_topic
 from question_solver import (
@@ -30,6 +31,21 @@ def test_question_solver_wraps_bare_model_tex_deterministically():
     assert r"\(x^2\)" in normalized
     assert r"\(e^{3x}\)" in normalized
     assert "Differentiate" in normalized
+
+
+def test_question_solver_never_exposes_dollar_or_bare_tex_delimiters():
+    damaged = (
+        r"Find $x^2$ when \text{given } \left\frac{1}{2}\right. "
+        r"and \ [3]."
+    )
+    normalized = normalize_mathjax_text(damaged)
+    outside_math = re.sub(
+        r"\\\((?:.|\n)*?\\\)|\\\[(?:.|\n)*?\\\]", "", normalized
+    )
+    assert "$" not in normalized
+    assert "\\" not in outside_math
+    assert r"\(x^2\)" in normalized
+    assert r"\(\frac{1}{2}\)" in normalized
 
 
 class FixedRandom:

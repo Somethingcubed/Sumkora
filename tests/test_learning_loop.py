@@ -234,7 +234,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert "Picture of the original question and your work" not in mistake_page.text
     assert "Have you tried this question again?" in mistake_page.text
     assert "Show the fully worked solution" in mistake_page.text
-    assert "/static/mistakes.js?v=20260825-4" in mistake_page.text
+    assert "/static/mistakes.js?v=20260825-5" in mistake_page.text
     solution = client.post(
         f"/student/mistakes/{book['items'][0]['id']}/solution",
         cookies=cookies,
@@ -503,7 +503,6 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
 
     def fake_source_solver(
         payload,
-        curriculum,
         *,
         mime_type="image/png",
         target_label="",
@@ -528,7 +527,33 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
         }
 
     monkeypatch.setattr(
-        question_solver, "solve_question_image_bytes", fake_source_solver
+        question_solver, "transcribe_question_image_bytes", fake_source_solver
+    )
+
+    def fake_text_solution(items, curriculum=None):
+        for item in items:
+            solution_en = (
+                r"Using the product rule, \(\frac{d}{dx}(x^2e^{3x})"
+                r"=2xe^{3x}+3x^2e^{3x}\)."
+            )
+            solution_zh = (
+                r"使用乘积法则，\(\frac{d}{dx}(x^2e^{3x})"
+                r"=2xe^{3x}+3x^2e^{3x}\)。"
+            )
+            execute(
+                """
+                UPDATE mistake_book_entries
+                SET worked_solution_en = ?, worked_solution_zh = ?,
+                    worked_solution_model = 'test-text-model'
+                WHERE id = ?
+                """,
+                (solution_en, solution_zh, item["id"]),
+            )
+            item["worked_solution_en"] = solution_en
+            item["worked_solution_zh"] = solution_zh
+
+    monkeypatch.setattr(
+        learning, "prepare_mistake_worked_solutions", fake_text_solution
     )
     with TestClient(app) as isolated_client:
         isolated_client.cookies.set("session", create_session_token(student_id))
@@ -598,7 +623,7 @@ def test_mistake_book_prefetch_recovers_only_first_three_and_caches(
 
     seen = []
 
-    def fake_source_solver(payload, _curriculum, **kwargs):
+    def fake_source_solver(payload, **kwargs):
         assert kwargs["mime_type"] == "image/jpeg"
         assert payload.startswith(b"\xff\xd8\xff")
         label = kwargs["target_label"]
@@ -612,7 +637,7 @@ def test_mistake_book_prefetch_recovers_only_first_three_and_caches(
         }
 
     monkeypatch.setattr(
-        question_solver, "solve_question_image_bytes", fake_source_solver
+        question_solver, "transcribe_question_image_bytes", fake_source_solver
     )
     results = prepare_mistake_recovery_batch(student_id, limit=3)
     assert len(results) == 3

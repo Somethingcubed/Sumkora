@@ -257,6 +257,11 @@ def normalize_mathjax_text(value: str) -> str:
     text = _restore_tex_control_escapes(value)
     if not text:
         return ""
+    # The site intentionally supports only explicit MathJax delimiters.  Model
+    # output occasionally uses dollar delimiters instead, which would remain
+    # visible as literal dollar signs without this deterministic conversion.
+    text = re.sub(r"\$\$((?:.|\n)*?)\$\$", r"\\[\1\\]", text)
+    text = re.sub(r"(?<!\\)\$([^$\n]+)\$", r"\\(\1\\)", text)
     parts = _MATHJAX_DELIMITED_RE.split(text)
     normalized: list[str] = []
     for index, part in enumerate(parts):
@@ -268,9 +273,120 @@ def normalize_mathjax_text(value: str) -> str:
         outside = _BARE_TEX_TEXT_RE.sub(r"\1", part)
         outside = outside.replace(r"\ ", " ")
         outside = outside.replace(r"\quad", " ").replace(r"\qquad", " ")
-        outside = _BARE_MATH_RE.sub(lambda match: rf"\({match.group(0)}\)", outside)
+        outside = outside.replace(r"\left", "").replace(r"\right", "")
+        protected_math: list[str] = []
+
+        def protect_math(match: re.Match[str]) -> str:
+            protected_math.append(rf"\({match.group(0)}\)")
+            return f"\x00MATH{len(protected_math) - 1}\x00"
+
+        outside = _BARE_MATH_RE.sub(protect_math, outside)
+        # Any command still outside a math block is malformed provider output.
+        # Preserve its readable name but never expose a raw backslash in the UI.
+        outside = re.sub(r"\\([A-Za-z]+)", r"\1", outside)
+        outside = outside.replace("\\", "")
+        for math_index, math_value in enumerate(protected_math):
+            outside = outside.replace(f"\x00MATH{math_index}\x00", math_value)
         normalized.append(outside)
     return "".join(normalized)
+
+
+def transcribe_question_image_bytes(
+    payload: bytes,
+    *,
+    mime_type: str = "image/jpeg",
+    target_label: str = "",
+    timeout_seconds: int = 18,
+) -> dict:
+    """Quickly recover one printed question without solving the page.
+
+    Mistake Book recovery used to ask a reasoning model for transcription,
+    classification, two solutions, and final answers in one large request.
+    Production traces showed that request timing out before returning any
+    question.  This smaller transcription-only request uses the authorized
+    fast vision model; worked solutions are generated separately from text.
+    """
+    label = str(target_label or "the target question").strip()
+    prompt = f"""Read the photographed exam page and transcribe ONLY the complete
+printed question labelled {label}. Include its printed parent stem, every
+subpart belonging to it, instructions, definitions, values, domains, units,
+table entries, and diagram labels needed to answer it. Ignore handwriting,
+crossed-out student work, page headers, barcodes, and neighbouring questions.
+
+Return transcription only: no solution, explanation, topic label, Markdown
+heading, or code fence. Use ordinary prose, and enclose every mathematical
+expression in \\( ... \\) or \\[ ... \\] so it renders with MathJax. Never
+leave commands such as \\frac, \\sqrt, superscripts, or subscripts outside
+those delimiters."""
+    candidates = list(dict.fromkeys([
+        config.MISTAKE_RECOVERY_MODEL,
+        config.WHOLE_DOCUMENT_FAST_FALLBACK_MODEL,
+    ]))
+    last_error: Exception | None = None
+    for model in candidates:
+        try:
+            result = api_post_json(
+                f"{cxsee_api_base()}/responses",
+                {
+                    "model": model,
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prompt},
+                                {
+                                    "type": "input_image",
+                                    "image_url": _bytes_data_url(
+                                        payload, mime_type
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                    "reasoning": {"effort": "low"},
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": "sumkora_question_transcription",
+                            "strict": True,
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["question"],
+                                "properties": {
+                                    "question": {"type": "string"}
+                                },
+                            },
+                        }
+                    },
+                    "max_output_tokens": 1400,
+                    "store": False,
+                },
+                headers={"Authorization": f"Bearer {config.CXSEE_API_KEY}"},
+                # Two short attempts are materially more reliable than the
+                # previous single 26-second request and still keep the whole
+                # interaction below the browser's 29-second ceiling.
+                timeout=max(8, min(12, int(timeout_seconds))),
+                retries=1,
+            )
+            parsed = _parse_provider_json(
+                _strip_json_fence(_extract_response_text(result))
+            )
+            question = normalize_mathjax_text(
+                str(parsed.get("question") or "").strip()
+            )
+            if question:
+                return {
+                    "transcription": question,
+                    "question_latex": question,
+                    "model": result.get("model") or model,
+                    "usage": result.get("usage") or {},
+                }
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("The question transcription provider returned no text.")
 
 
 def _clean_solution_fields(parsed: dict) -> None:

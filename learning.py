@@ -2139,23 +2139,22 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
                 alpha=False,
             ).tobytes("jpeg", jpg_quality=82)
 
-        from question_solver import solve_question_image_bytes
+        from question_solver import transcribe_question_image_bytes
 
-        # Never let one student's page wait behind a long queue.  The first
-        # three cards are recovered in parallel; excess work fails quickly
-        # and can be retried when the student opens that card.
-        acquired = _MISTAKE_RECOVERY_SEMAPHORE.acquire(timeout=1.0)
+        # A foreground card may arrive while the post-analysis warmer occupies
+        # all three slots.  Wait briefly for the fast OCR call instead of
+        # incorrectly declaring the question unavailable after one second.
+        acquired = _MISTAKE_RECOVERY_SEMAPHORE.acquire(timeout=8.0)
         if not acquired:
             return False
         try:
-            result = solve_question_image_bytes(
+            result = transcribe_question_image_bytes(
                 image_bytes,
-                curriculum,
                 mime_type="image/jpeg",
                 target_label=str(item.get("question_label") or ""),
-                model=config.MISTAKE_RECOVERY_MODEL,
-                timeout_seconds=config.MISTAKE_RECOVERY_TIMEOUT_SECONDS,
-                retries=0,
+                timeout_seconds=min(
+                    18, config.MISTAKE_RECOVERY_TIMEOUT_SECONDS
+                ),
             )
         finally:
             _MISTAKE_RECOVERY_SEMAPHORE.release()
@@ -2178,9 +2177,6 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
     ):
         return False
 
-    solution_en = str(result.get("solution_en") or "").strip()
-    solution_zh = str(result.get("solution_zh") or "").strip()
-    model = str(result.get("model") or "")
     execute(
         """
         UPDATE analysis_question_results
@@ -2192,11 +2188,11 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
     execute(
         """
         UPDATE mistake_book_entries
-        SET worked_solution_en = ?, worked_solution_zh = ?,
-            worked_solution_model = ?, updated_at = ?
+        SET worked_solution_en = '', worked_solution_zh = '',
+            worked_solution_model = '', updated_at = ?
         WHERE id = ?
         """,
-        (solution_en, solution_zh, model, _now(), item["id"]),
+        (_now(), item["id"]),
     )
     item.update(
         {
@@ -2204,9 +2200,9 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
             "question_latex": question_latex,
             "complete_question_text": question_latex or question_text,
             "needs_question_recovery": False,
-            "worked_solution_en": solution_en,
-            "worked_solution_zh": solution_zh,
-            "worked_solution_model": model,
+            "worked_solution_en": "",
+            "worked_solution_zh": "",
+            "worked_solution_model": "",
         }
     )
     return True
