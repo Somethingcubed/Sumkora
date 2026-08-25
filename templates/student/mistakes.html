@@ -8,15 +8,15 @@
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
   <div class="surface"><p class="text-xs text-slate-500">{{ tr('All mistakes', '全部错题') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.total }}</p></div>
-  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Not retried', '未重练') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.not_retried }}</p></div>
-  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Improving', '正在进步') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.improving }}</p></div>
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Not tried again', '尚未重做') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.not_retried }}</p></div>
+  <div class="surface"><p class="text-xs text-slate-500">{{ tr('Tried again', '已经重做') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.improving }}</p></div>
   <div class="surface"><p class="text-xs text-slate-500">{{ tr('Mastered', '已掌握') }}</p><p class="text-2xl font-bold mt-1">{{ book.counts.mastered }}</p></div>
 </div>
 
 <form method="get" class="surface mb-5">
   <div class="grid md:grid-cols-3 gap-3 items-end">
     <label><span class="form-label">{{ tr('Topic', '知识点') }}</span><select name="topic"><option value="">{{ tr('All topics', '全部知识点') }}</option>{% for topic in book.topics %}<option value="{{ topic }}" {% if topic == book.selected_topic %}selected{% endif %}>{{ topic_label(topic) }}</option>{% endfor %}</select></label>
-    <label><span class="form-label">{{ tr('Progress status', '掌握状态') }}</span><select name="status"><option value="">{{ tr('All statuses', '全部状态') }}</option><option value="not_retried" {% if book.selected_status == 'not_retried' %}selected{% endif %}>{{ tr('Not retried', '未重练') }}</option><option value="improving" {% if book.selected_status == 'improving' %}selected{% endif %}>{{ tr('Improving', '正在进步') }}</option><option value="mastered" {% if book.selected_status == 'mastered' %}selected{% endif %}>{{ tr('Mastered', '已掌握') }}</option></select></label>
+    <label><span class="form-label">{{ tr('Progress status', '掌握状态') }}</span><select name="status"><option value="">{{ tr('All statuses', '全部状态') }}</option><option value="not_retried" {% if book.selected_status == 'not_retried' %}selected{% endif %}>{{ tr('Not tried again', '尚未重做') }}</option><option value="improving" {% if book.selected_status == 'improving' %}selected{% endif %}>{{ tr('Tried again', '已经重做') }}</option><option value="mastered" {% if book.selected_status == 'mastered' %}selected{% endif %}>{{ tr('Mastered', '已掌握') }}</option></select></label>
     <button class="button button-secondary">{{ tr('Apply filters', '应用筛选') }}</button>
   </div>
 </form>
@@ -32,22 +32,33 @@
       <div class="text-right"><p class="text-2xl font-bold {{ 'text-red-700' if item.outcome == 'incorrect' else 'text-amber-700' }}">{{ item.mark }}/{{ item.maximum_marks }}</p><p class="text-xs text-slate-500">{{ tr('marks', '分') }}</p></div>
     </div>
     {% if item.has_source_image %}
-    <figure class="mistake-source mt-4">
-      <figcaption>{{ tr('Original question and your work', '原题与作答') }}</figcaption>
+    <details class="mistake-source mistake-disclosure mt-4" open>
+      <summary>{{ tr('Picture of the original question and your work', '原题与作答图片') }}</summary>
       <img src="/student/mistakes/{{ item.id }}/source-image" loading="lazy" alt="{{ tr('Original page containing', '包含原题的页面') }} {{ item.question_label }}">
-    </figure>
+    </details>
     {% endif %}
-    <div class="math-copy text-sm mt-4 whitespace-pre-line">{{ item.complete_question_text or tr('Question text will be linked when the source paper is added to the question bank.', '原试卷加入题库后将显示完整题目。') }}</div>
-    {% if item.has_parent_context %}<p class="context-note">{{ tr('The complete parent question is included so this part can be understood independently.', '已包含完整的母题内容，确保此小题可以独立理解。') }}</p>{% endif %}
-    <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm mt-3"><p class="font-medium">{{ tr('What to improve', '需要改进') }}</p><p class="text-slate-600 mt-1">{{ item.error_mechanism_zh if lang == 'zh' and item.error_mechanism_zh else (item.error_mechanism or item.ai_rationale_zh if lang == 'zh' and item.ai_rationale_zh else item.ai_rationale) }}</p></div>
+    <div class="mistake-question-copy mt-4">
+      <p class="mistake-section-label">{{ tr('Question', '题目') }}</p>
+      <div class="math-copy whitespace-pre-line">{{ item.complete_question_text or tr('Question text will be linked when the source paper is added to the question bank.', '原试卷加入题库后将显示完整题目。') }}</div>
+      {% if item.has_parent_context %}<p class="context-note">{{ tr('The complete parent question is included so this part can be understood independently.', '已包含完整的母题内容，确保此小题可以独立理解。') }}</p>{% endif %}
+    </div>
     <form method="post" action="/student/mistakes/{{ item.id }}/status" class="flex flex-wrap gap-2 items-end mt-4">
-      <label class="flex-1 min-w-[200px]"><span class="form-label">{{ tr('My progress', '我的掌握情况') }}</span><select name="status"><option value="not_retried" {% if item.status == 'not_retried' %}selected{% endif %}>{{ tr('Not retried', '未重练') }}</option><option value="improving" {% if item.status == 'improving' %}selected{% endif %}>{{ tr('Improving', '正在进步') }}</option><option value="mastered" {% if item.status == 'mastered' %}selected{% endif %}>{{ tr('Mastered', '已掌握') }}</option></select></label>
+      <label class="flex-1 min-w-[200px]"><span class="form-label">{{ tr('Have you tried this question again?', '是否已经重新做过这道题？') }}</span><select name="status"><option value="not_retried" {% if item.status == 'not_retried' %}selected{% endif %}>{{ tr('Not tried again', '尚未重做') }}</option><option value="improving" {% if item.status == 'improving' %}selected{% endif %}>{{ tr('Tried again', '已经重做') }}</option><option value="mastered" {% if item.status == 'mastered' %}selected{% endif %}>{{ tr('Tried again and mastered', '已经重做并掌握') }}</option></select></label>
       <button class="button button-secondary">{{ tr('Save status', '保存状态') }}</button>
     </form>
+    {% set cached_solution = item.worked_solution_zh if lang == 'zh' else item.worked_solution_en %}
+    <details class="mistake-solution mistake-disclosure mt-4" data-mistake-solution data-solution-url="/student/mistakes/{{ item.id }}/solution" data-loaded="{{ 'true' if cached_solution else 'false' }}">
+      <summary><span>{{ tr('Show the fully worked solution', '查看完整解答') }}</span><span class="disclosure-state" data-open-label="{{ tr('Hide solution', '收起解答') }}" data-closed-label="{{ tr('Show solution', '展开解答') }}">{{ tr('Show solution', '展开解答') }}</span></summary>
+      <div class="mistake-solution-body" data-solution-body>
+        {% if cached_solution %}<div class="math-copy whitespace-pre-line">{{ cached_solution }}</div>{% else %}<p class="mistake-solution-loading">{{ tr('Preparing the worked solution…', '正在准备完整解答…') }}</p>{% endif %}
+        <div class="mistake-improvement"><p class="font-medium">{{ tr('What to improve', '需要改进') }}</p><p>{{ item.error_mechanism_zh if lang == 'zh' and item.error_mechanism_zh else (item.error_mechanism or item.ai_rationale_zh if lang == 'zh' and item.ai_rationale_zh else item.ai_rationale) }}</p></div>
+      </div>
+    </details>
   </section>
   {% endfor %}
 </div>
 {% else %}
 <section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('No mistakes match these filters', '没有符合筛选条件的错题') }}</h2><p class="text-slate-500 mt-2">{{ tr('Mistakes appear automatically after a paper analysis.', '试卷分析完成后，错题会自动出现在这里。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse a paper', '分析试卷') }}</a></section>
 {% endif %}
+<script defer src="/static/mistakes.js?v=20260825-2"></script>
 {% endblock %}

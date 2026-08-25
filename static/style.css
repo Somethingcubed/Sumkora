@@ -2964,12 +2964,43 @@ details[open] > summary {
   background: #f8f9fc;
 }
 
-.mistake-source figcaption {
+.mistake-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.9rem;
   padding: 0.7rem 0.9rem;
   color: #4c5268;
-  border-bottom: 1px solid #e2e4ed;
+  cursor: pointer;
+  list-style: none;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.mistake-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mistake-disclosure > summary::after {
+  content: "+";
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  color: #4f46d8;
+  border-radius: 999px;
+  background: #eeedff;
+  font-size: 1rem;
+}
+
+.mistake-disclosure[open] > summary {
+  border-bottom: 1px solid #e2e4ed;
+}
+
+.mistake-disclosure[open] > summary::after {
+  content: "−";
 }
 
 .mistake-source img {
@@ -2978,6 +3009,63 @@ details[open] > summary {
   max-height: 42rem;
   object-fit: contain;
   background: white;
+}
+
+.mistake-question-copy {
+  padding: 1rem 1.1rem;
+  border: 1px solid #e2e4ed;
+  border-radius: 0.9rem;
+  background: white;
+}
+
+.mistake-section-label {
+  margin-bottom: 0.65rem;
+  color: #6862d9;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mistake-solution {
+  overflow: hidden;
+  border: 1px solid #d9d7ff;
+  border-radius: 0.9rem;
+  background: #fbfaff;
+}
+
+.mistake-solution > summary {
+  color: #302d70;
+  font-size: 0.9rem;
+}
+
+.disclosure-state {
+  margin-left: auto;
+  color: #6862d9;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.mistake-solution-body {
+  padding: 1.1rem;
+  background: white;
+}
+
+.mistake-solution-loading {
+  color: #6b7280;
+}
+
+.mistake-improvement {
+  margin-top: 1rem;
+  padding: 0.85rem 0.95rem;
+  color: #555d72;
+  border-radius: 0.75rem;
+  background: #f6f7fb;
+  font-size: 0.82rem;
+}
+
+.mistake-improvement p + p {
+  margin-top: 0.3rem;
 }
 
 @media (max-width: 1020px) {

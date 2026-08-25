@@ -176,12 +176,17 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert book["items"][0]["outcome"] == "partial"
     chinese_book = mistake_book_pdf(student_id, "questions", "zh")
     with fitz.open(stream=chinese_book, filetype="pdf") as document:
-        assert "错题本" in document[0].get_text()
-        assert "共 1 道题" in document[0].get_text()
+        question_text = "\n".join(page.get_text() for page in document)
+    assert "错题本" in question_text
+    assert "共 1 道题" in question_text
+    assert "Sketch the trigonometric graph" in question_text
     answer_book = mistake_book_pdf(student_id, "answers", "en")
     with fitz.open(stream=answer_book, filetype="pdf") as document:
         answer_text = "\n".join(page.get_text() for page in document)
     assert "Sumkora Worked Solutions" in answer_text
+    assert answer_text.index("Sketch the trigonometric graph") < answer_text.index(
+        "Worked solution"
+    )
     assert "Worked process" in answer_text
     assert "Incorrect amplitude" in answer_text
     assert "mark scheme" not in answer_text.lower()
@@ -208,7 +213,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
 
     cookies = login(email)
     dashboard = client.get("/student", cookies=cookies)
-    assert "/static/style.css?v=20260825-1" in dashboard.text
+    assert "/static/style.css?v=20260825-2" in dashboard.text
     assert 'width="24" height="24" fill="none"' in dashboard.text
     assert client.get(
         "/student/skills/detail?skill=trigonometric%20graphs", cookies=cookies
@@ -221,6 +226,17 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     mistake_page = client.get("/student/mistakes", cookies=cookies)
     assert 'download="sumkora-mistake-book-questions.pdf"' in mistake_page.text
     assert "Download worked solutions" in mistake_page.text
+    assert "Picture of the original question and your work" not in mistake_page.text
+    assert "Have you tried this question again?" in mistake_page.text
+    assert "Show the fully worked solution" in mistake_page.text
+    assert "/static/mistakes.js?v=20260825-2" in mistake_page.text
+    solution = client.post(
+        f"/student/mistakes/{book['items'][0]['id']}/solution",
+        cookies=cookies,
+    )
+    assert solution.status_code == 200
+    assert "Worked process" in solution.json()["solution"]
+    assert "mark scheme" not in solution.json()["solution"].lower()
     practice_page = client.get(f"/student/practice/{set_id}", cookies=cookies)
     assert f"/student/practice/{set_id}/submit" not in practice_page.text
     assert "Analyse completed worksheet" not in practice_page.text

@@ -98,6 +98,7 @@ from learning import (
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
+    mistake_worked_solution,
     practice_pdf,
     practice_set_detail,
     practice_sets,
@@ -3187,6 +3188,17 @@ def student_mistake_status(
         return redirect_login()
     update_mistake_status(user["id"], entry_id, status)
     return RedirectResponse("/student/mistakes", status_code=303)
+
+
+@app.post("/student/mistakes/{entry_id}/solution")
+def student_mistake_solution(request: Request, entry_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    result = mistake_worked_solution(user["id"], entry_id, get_lang(request))
+    if not result:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return JSONResponse(result)
 
 
 @app.get("/student/mistakes/{entry_id}/source-image")

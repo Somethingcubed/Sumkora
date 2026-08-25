@@ -103,6 +103,11 @@ final answer. Preserve exact values, formulae, equations, units, domains,
 inequalities, experimental observations, and all question parts. Check all
 calculations, symbols, scientific claims, and signs.
 
+In solution_en and solution_zh, enclose every inline mathematical expression
+in \\( ... \\) and every display equation in \\[ ... \\]. Never leave LaTeX
+commands such as \\frac, \\sqrt, \\theta, subscripts, or superscripts outside
+MathJax delimiters. Keep ordinary sentences outside the delimiters.
+
 Some questions include a private reference answer. Use it only to verify
 accuracy. Do not mention a mark scheme, marking instructions, marks, examiner
 codes, or the reference answer in the output. Write a natural worked solution,

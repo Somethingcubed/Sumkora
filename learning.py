@@ -1718,7 +1718,9 @@ class _PdfFlow:
             x = self.margin_x
             baseline = self.y + max(10.8, (line_height + 9.3) / 2)
             for kind, value, width, height in line:
-                if kind == "math":
+                if kind == "spacer":
+                    pass
+                elif kind == "math":
                     top = self.y + max(0.0, (line_height - height) / 2)
                     self.page.insert_image(
                         fitz.Rect(x, top, x + width, top + height),
@@ -1751,18 +1753,44 @@ class _PdfFlow:
             line_width += width
             line_height = max(line_height, height)
 
+        def append_spacer(width: float = 4.5) -> None:
+            append_atom("spacer", "", width, 15.0)
+
         prepared_body = _readable_markdown_tables(str(body or ""), self.lang)
         chunks = _MATH_CHUNK_RE.split(prepared_body)
-        for chunk in chunks:
+        for chunk_index, chunk in enumerate(chunks):
             if not chunk:
                 continue
             if _MATH_CHUNK_RE.fullmatch(chunk):
                 rendered = _math_image(chunk)
+                if line:
+                    append_spacer()
                 if rendered:
                     payload, width, height = rendered
-                    append_atom("math", payload, width + 2, height)
+                    append_atom("math", payload, width, height)
+                    following = chunks[chunk_index + 1] if chunk_index + 1 < len(chunks) else ""
+                    if following and not re.match(r"^\s*[,.;:!?)}\]]", following):
+                        append_spacer()
                     continue
-                chunk = _plain_math(chunk)
+                math_text = _plain_math(chunk).strip()
+                math_is_latin = bool(
+                    re.fullmatch(
+                        r"[\x20-\x7e⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎"
+                        r"≤≥≠×÷±∞θπ√Σ∴∈·→≈]+",
+                        math_text,
+                    )
+                )
+                math_kind = "latin" if math_is_latin else "text"
+                math_width = (
+                    self._latin_width(math_text, 10.35)
+                    if math_is_latin
+                    else self._text_width(math_text, 10.35)
+                )
+                append_atom(math_kind, math_text, math_width, 15.0)
+                following = chunks[chunk_index + 1] if chunk_index + 1 < len(chunks) else ""
+                if following and not re.match(r"^\s*[,.;:!?)}\]]", following):
+                    append_spacer()
+                continue
             plain = _plain_math(chunk)
             segments = plain.split("\n")
             for segment_index, segment in enumerate(segments):
@@ -1788,6 +1816,12 @@ class _PdfFlow:
                         if latin_token
                         else self._text_width(token, 10.35)
                     )
+                    if token == " ":
+                        # Some embedded font metric providers report a zero
+                        # advance for a standalone space. Preserve a normal
+                        # word gap explicitly so prose never collides with
+                        # adjacent formulae in Safari or printed output.
+                        width = max(width, 3.1)
                     append_atom(kind, token, width, 15.0)
                 if segment_index < len(segments) - 1:
                     flush_line(paragraph_gap=not segment.strip())
@@ -2025,6 +2059,33 @@ def prepare_mistake_worked_solutions(
             by_id[entry_id]["worked_solution_model"] = model_by_id.get(entry_id, "")
 
 
+def mistake_worked_solution(
+    student_id: int,
+    entry_id: int,
+    lang: str,
+) -> dict | None:
+    """Return one owned mistake's cached or freshly generated worked solution."""
+    data = mistake_book(student_id)
+    item = next(
+        (row for row in data["items"] if int(row.get("id") or 0) == entry_id),
+        None,
+    )
+    if not item:
+        return None
+    prepare_mistake_worked_solutions(
+        [item], curriculum=_student_curriculum(student_id)
+    )
+    solution = (
+        item.get("worked_solution_zh")
+        if lang == "zh"
+        else item.get("worked_solution_en")
+    ) or _fallback_worked_solution(item, lang)
+    return {
+        "solution": str(solution).strip(),
+        "model": item.get("worked_solution_model") or "",
+    }
+
+
 def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
     data = mistake_book(student_id)
     is_questions = kind == "questions"
@@ -2046,29 +2107,41 @@ def mistake_book_pdf(student_id: int, kind: str, lang: str) -> bytes:
             if is_questions
             else "A step-by-step worked solution and final answer for every question."
         )
+    item_count = len(data["items"])
     count_text = (
-        f"共 {len(data['items'])} 道题"
+        f"共 {item_count} 道题"
         if lang == "zh"
-        else f"{len(data['items'])} questions"
+        else f"{item_count} {'question' if item_count == 1 else 'questions'}"
     )
     flow = _PdfFlow(title=title, subtitle=f"{count_text}  ·  {subtitle}", lang=lang)
     for index, item in enumerate(data["items"], start=1):
         heading = f"{index}. {item['paper_title']} - {item['question_label']}"
-        source = f"{item['paper_title']}  ·  {item['paper_date'][:10]}"
-        if is_questions and flow.add_asset(
-            item["question_asset_path"],
-            label=heading,
-            source_label=source,
-        ):
-            continue
-        if is_questions:
-            unavailable = "暂无题目文本。" if lang == "zh" else "Question text unavailable."
-            body = item["complete_question_text"] or unavailable
-        else:
-            body = (
+        unavailable = "暂无题目文本。" if lang == "zh" else "Question text unavailable."
+        question = item["complete_question_text"] or unavailable
+        question_label = str(item.get("question_label") or "").strip()
+        if question_label:
+            question = re.sub(
+                rf"^\s*{re.escape(question_label)}\s*(?:[-:—]\s*)?",
+                "",
+                str(question),
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip() or question
+        # Both booklets are deliberately text-first. Source-page screenshots
+        # remain available in the interactive Mistake Book, while printable
+        # pages use the reconstructed question so mathematics can be rendered
+        # cleanly and spacing remains consistent.
+        flow.add_rich_text(label=heading, body=question, source_label="")
+        if not is_questions:
+            solution = (
                 item.get("worked_solution_zh")
                 if lang == "zh"
                 else item.get("worked_solution_en")
             ) or _fallback_worked_solution(item, lang)
-        flow.add_text(label=heading, body=body, source_label=source)
+            solution_heading = "完整解答" if lang == "zh" else "Worked solution"
+            flow.add_rich_text(
+                label=solution_heading,
+                body=solution,
+                source_label="",
+            )
     return flow.finish()
