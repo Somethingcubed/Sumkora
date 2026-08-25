@@ -98,6 +98,7 @@ from learning import (
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
+    prepare_mistake_recovery_batch,
     mistake_worked_solution,
     practice_pdf,
     practice_set_detail,
@@ -3202,6 +3203,18 @@ def student_mistake_solution(request: Request, entry_id: int):
             status_code=503,
         )
     return JSONResponse(result)
+
+
+@app.post("/student/mistakes/prefetch")
+def student_mistake_prefetch(request: Request):
+    """Prepare only the first three missing Mistake Book cards."""
+    user = require_role(request, "student")
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    items = prepare_mistake_recovery_batch(
+        user["id"], lang=get_lang(request), limit=3
+    )
+    return JSONResponse({"items": items})
 
 
 @app.get("/student/mistakes/{entry_id}/source-image")

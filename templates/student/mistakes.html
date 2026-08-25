@@ -24,7 +24,7 @@
 {% if book['items'] %}
 <div class="space-y-4">
   {% for item in book['items'] %}
-  <section class="surface">
+  <section class="surface" data-mistake-entry-id="{{ item.id }}">
     <div class="flex flex-wrap justify-between gap-3">
       {% set topic_name = topic_label(item.topic)|trim %}
       {% set skill_name = skill_label(item.skill)|trim %}
@@ -47,7 +47,7 @@
       <button class="button button-secondary">{{ tr('Save status', '保存状态') }}</button>
     </form>
     {% set cached_solution = item.worked_solution_zh if lang == 'zh' else item.worked_solution_en %}
-    <details class="mistake-solution mistake-disclosure mt-4" data-mistake-solution data-solution-url="/student/mistakes/{{ item.id }}/solution" data-needs-question-recovery="{{ 'true' if item.needs_question_recovery else 'false' }}" data-loaded="{{ 'true' if cached_solution and not item.needs_question_recovery else 'false' }}">
+    <details class="mistake-solution mistake-disclosure mt-4" data-mistake-solution data-entry-id="{{ item.id }}" data-solution-url="/student/mistakes/{{ item.id }}/solution" data-needs-question-recovery="{{ 'true' if item.needs_question_recovery else 'false' }}" data-loaded="{{ 'true' if cached_solution and not item.needs_question_recovery else 'false' }}">
       <summary><span>{{ tr('Show the fully worked solution', '查看完整解答') }}</span><span class="disclosure-state" data-open-label="{{ tr('Hide solution', '收起解答') }}" data-closed-label="{{ tr('Show solution', '展开解答') }}">{{ tr('Show solution', '展开解答') }}</span></summary>
       <div class="mistake-solution-body" data-solution-body>
         {% if cached_solution and not item.needs_question_recovery %}<div class="math-copy whitespace-pre-line">{{ cached_solution }}</div>{% else %}<p class="mistake-solution-loading">{{ tr('Preparing the complete question and worked solution…', '正在准备完整题目与解答…') }}</p>{% endif %}
@@ -60,5 +60,5 @@
 {% else %}
 <section class="surface text-center py-12"><h2 class="text-xl font-semibold">{{ tr('No mistakes match these filters', '没有符合筛选条件的错题') }}</h2><p class="text-slate-500 mt-2">{{ tr('Mistakes appear automatically after a paper analysis.', '试卷分析完成后，错题会自动出现在这里。') }}</p><a href="/student/analyse" class="button button-primary mt-5">{{ tr('Analyse a paper', '分析试卷') }}</a></section>
 {% endif %}
-<script defer src="/static/mistakes.js?v=20260825-3"></script>
+<script defer src="/static/mistakes.js?v=20260825-4"></script>
 {% endblock %}

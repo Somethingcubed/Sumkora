@@ -1853,6 +1853,24 @@ def run_self_service_analysis(version_id: int) -> dict:
             """,
             (version["version_number"], now_iso(), version["student_paper_id"]),
         )
+        # Marking is complete before this starts.  Warm only the newly-created
+        # mistake entries in a daemon thread, so the result page remains fast
+        # and later Mistake Book visits can use the permanent DB cache.
+        def warm_mistakes() -> None:
+            try:
+                from learning import warm_analysis_mistakes
+
+                warm_analysis_mistakes(version["student_id"], version_id)
+            except Exception:
+                logger.exception(
+                    "Mistake cache warming failed for analysis %s", version_id
+                )
+
+        threading.Thread(
+            target=warm_mistakes,
+            name=f"mistake-warm-{version_id}",
+            daemon=True,
+        ).start()
         return {"status": "completed", "paper_id": version["student_paper_id"]}
     except Exception as exc:
         logger.exception("Whole-document analysis version %s failed", version_id)

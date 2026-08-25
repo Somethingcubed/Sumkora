@@ -195,6 +195,48 @@ def _enforce_solution_consistency(parsed: dict) -> None:
             parsed[final_key] = conclusion
 
 
+def _restore_tex_control_escapes(value: str) -> str:
+    """Undo JSON control escapes produced by single-backslash model TeX.
+
+    Some OpenAI-compatible gateways return syntactically valid JSON containing
+    ``\text`` or ``\frac`` with only one JSON backslash.  A normal JSON decoder
+    then turns those prefixes into tab/form-feed control characters.  The
+    response is otherwise valid, so the generic invalid-JSON repair never runs.
+    Repair the known TeX prefixes before they reach MathJax or the database.
+    """
+    text = str(value or "").replace("\x01", "")
+    replacements = {
+        "\text": r"\text",
+        "\theta": r"\theta",
+        "\times": r"\times",
+        "\tan": r"\tan",
+        "\tfrac": r"\tfrac",
+        "\frac": r"\frac",
+        "\begin": r"\begin",
+        "\beta": r"\beta",
+        "\right": r"\right",
+        "\rho": r"\rho",
+        "\neq": r"\neq",
+        "\nabla": r"\nabla",
+        "\not": r"\not",
+    }
+    for damaged, repaired in replacements.items():
+        text = text.replace(damaged, repaired)
+    return text
+
+
+def _clean_solution_fields(parsed: dict) -> None:
+    for key in (
+        "transcription",
+        "question_latex",
+        "solution_en",
+        "solution_zh",
+        "final_answer",
+        "final_answer_zh",
+    ):
+        parsed[key] = _restore_tex_control_escapes(parsed.get(key, ""))
+
+
 def _solve_question_image_url(
     image_url: str,
     curriculum: dict | None = None,
@@ -274,6 +316,7 @@ part of the printed question.
     parsed = _parse_provider_json(
         _strip_json_fence(_extract_response_text(result))
     )
+    _clean_solution_fields(parsed)
     _enforce_solution_consistency(parsed)
     parsed["topic"] = (
         canonical_topic_for_curriculum(

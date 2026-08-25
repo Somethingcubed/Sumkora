@@ -17,6 +17,7 @@ from learning import (
     create_practice_set,
     mistake_book,
     mistake_book_pdf,
+    prepare_mistake_recovery_batch,
     practice_pdf,
     practice_set_detail,
     skill_detail,
@@ -230,7 +231,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
     assert "Picture of the original question and your work" not in mistake_page.text
     assert "Have you tried this question again?" in mistake_page.text
     assert "Show the fully worked solution" in mistake_page.text
-    assert "/static/mistakes.js?v=20260825-3" in mistake_page.text
+    assert "/static/mistakes.js?v=20260825-4" in mistake_page.text
     solution = client.post(
         f"/student/mistakes/{book['items'][0]['id']}/solution",
         cookies=cookies,
@@ -470,7 +471,8 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
             f"/student/mistakes/{entry['id']}/solution"
         )
     assert response.status_code == 200
-    assert seen["payload"].startswith(b"\x89PNG")
+    assert seen["payload"].startswith(b"\xff\xd8\xff")
+    assert response.elapsed.total_seconds() < 30
     assert seen["target_label"] == "Q2"
     assert r"Differentiate \(x^2e^{3x}\)" in response.json()["question"]
     assert "product rule" in response.json()["solution"]
@@ -488,6 +490,71 @@ def test_mistake_book_recovers_full_question_and_replaces_stale_solution(
     assert r"Differentiate \(x^2e^{3x}\)" in repaired["question_latex"]
     assert "Insufficient information" not in cached["worked_solution_en"]
     assert mistake_book(student_id)["items"][0]["needs_question_recovery"] is False
+
+
+def test_mistake_book_prefetch_recovers_only_first_three_and_caches(
+    tmp_path, monkeypatch
+):
+    student_id = create_student("mistake-prefetch@student.local")
+    source_path = tmp_path / "prefetch-source.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 90), "2 Differentiate x^2 e^(3x) with respect to x. [3]")
+    document.save(source_path)
+    document.close()
+
+    for index in range(4):
+        paper_id, result_id = seed_direct_observation(student_id)
+        version = query_one(
+            "SELECT id FROM paper_analysis_versions WHERE paper_id = ?",
+            (paper_id,),
+        )
+        execute(
+            "UPDATE student_papers SET title = ?, paper_number = '' WHERE id = ?",
+            (f"Uncatalogued paper {index}", paper_id),
+        )
+        execute(
+            """
+            UPDATE paper_analysis_versions
+            SET answer_script_path = ?, assessment_summary = '{}'
+            WHERE id = ?
+            """,
+            (str(source_path), version["id"]),
+        )
+        execute(
+            """
+            UPDATE analysis_question_results
+            SET question_label = ?, question_text = ?, question_latex = ?,
+                evidence_pages = '[1]'
+            WHERE id = ?
+            """,
+            (f"Q{index + 1}", f"Q{index + 1} — Calculus", f"Q{index + 1} — Calculus", result_id),
+        )
+
+    seen = []
+
+    def fake_source_solver(payload, _curriculum, **kwargs):
+        assert kwargs["mime_type"] == "image/jpeg"
+        assert payload.startswith(b"\xff\xd8\xff")
+        label = kwargs["target_label"]
+        seen.append(label)
+        return {
+            "transcription": f"{label} Differentiate x^2 e^(3x) with respect to x.",
+            "question_latex": rf"{label} Differentiate \(x^2e^{{3x}}\) with respect to \(x\).",
+            "solution_en": r"The derivative is \(2xe^{3x}+3x^2e^{3x}\).",
+            "solution_zh": r"导数为 \(2xe^{3x}+3x^2e^{3x}\)。",
+            "model": "test-fast-vision",
+        }
+
+    monkeypatch.setattr(
+        question_solver, "solve_question_image_bytes", fake_source_solver
+    )
+    results = prepare_mistake_recovery_batch(student_id, limit=3)
+    assert len(results) == 3
+    assert all(item["ok"] for item in results)
+    assert len(seen) == 3
+    refreshed = mistake_book(student_id)["items"]
+    assert sum(bool(item["needs_question_recovery"]) for item in refreshed) == 1
 
 
 def test_unclassified_is_not_exposed_as_student_mastery():

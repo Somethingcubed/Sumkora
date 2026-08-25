@@ -2089,27 +2089,38 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
                 return False
             page_number = max(1, int(item.get("source_page") or 1))
             page = document.load_page(min(page_number - 1, document.page_count - 1))
-            scale = 160 / 72
+            # The previous 160-DPI lossless PNG regularly exceeded the
+            # provider proxy's upload window in production.  A full A4 page
+            # was several megabytes after base64 encoding, which caused
+            # ``write operation timed out`` before the model even saw it.
+            # A 120-DPI JPEG is still comfortably readable for printed maths
+            # and handwriting, while typically being 8-15x smaller.
+            scale = 120 / 72
             image_bytes = page.get_pixmap(
                 matrix=fitz.Matrix(scale, scale),
                 alpha=False,
-            ).tobytes("png")
+            ).tobytes("jpeg", jpg_quality=82)
 
         from question_solver import solve_question_image_bytes
 
-        # Recovery is intentionally separate from marking. A small, fast
-        # vision model reads one cited page; serialising these calls prevents
-        # a Mistake Book with several visible cards from overwhelming the
-        # upstream provider.
-        with _MISTAKE_RECOVERY_SEMAPHORE:
+        # Never let one student's page wait behind a long queue.  The first
+        # three cards are recovered in parallel; excess work fails quickly
+        # and can be retried when the student opens that card.
+        acquired = _MISTAKE_RECOVERY_SEMAPHORE.acquire(timeout=1.0)
+        if not acquired:
+            return False
+        try:
             result = solve_question_image_bytes(
                 image_bytes,
                 curriculum,
+                mime_type="image/jpeg",
                 target_label=str(item.get("question_label") or ""),
                 model=config.MISTAKE_RECOVERY_MODEL,
                 timeout_seconds=config.MISTAKE_RECOVERY_TIMEOUT_SECONDS,
-                retries=1,
+                retries=0,
             )
+        finally:
+            _MISTAKE_RECOVERY_SEMAPHORE.release()
     except Exception as exc:
         print(
             "Mistake question recovery failed "
@@ -2161,6 +2172,91 @@ def _recover_mistake_from_source(item: dict, curriculum: dict) -> bool:
         }
     )
     return True
+
+
+def _mistake_recovery_payload(item: dict, lang: str) -> dict:
+    solution = (
+        item.get("worked_solution_zh")
+        if lang == "zh"
+        else item.get("worked_solution_en")
+    ) or _fallback_worked_solution(item, lang)
+    return {
+        "id": int(item["id"]),
+        "ok": not item.get("needs_question_recovery"),
+        "question": str(item.get("complete_question_text") or "").strip(),
+        "solution": str(solution or "").strip(),
+        "model": item.get("worked_solution_model") or "",
+    }
+
+
+def prepare_mistake_recovery_batch(
+    student_id: int,
+    *,
+    lang: str = "en",
+    entry_ids: list[int] | None = None,
+    analysis_version_id: int | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    """Recover a small visible batch and permanently cache every success.
+
+    The browser calls this once for the first three incomplete cards instead
+    of starting one request for every item in a large Mistake Book.  Parallel
+    calls use compressed page images and each has a hard provider timeout, so
+    the whole visible batch stays within the interaction budget.
+    """
+    data = mistake_book(student_id)
+    allowed_ids = {int(value) for value in (entry_ids or []) if int(value) > 0}
+    pending = [
+        item
+        for item in data["items"]
+        if int(item.get("id") or 0) > 0
+        and item.get("needs_question_recovery")
+        and (not allowed_ids or int(item["id"]) in allowed_ids)
+        and (
+            analysis_version_id is None
+            or int(item.get("analysis_version_id") or 0) == analysis_version_id
+        )
+    ][: max(0, min(int(limit), 3))]
+    if not pending:
+        return []
+
+    curriculum = _student_curriculum(student_id)
+    workers = min(3, len(pending))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_recover_mistake_from_source, item, curriculum): item
+            for item in pending
+        }
+        for future, item in futures.items():
+            try:
+                future.result()
+            except Exception as exc:
+                print(
+                    "Mistake recovery batch item failed "
+                    f"for entry {item.get('id')}: {type(exc).__name__}: "
+                    f"{str(exc)[:180]}",
+                    flush=True,
+                )
+    return [_mistake_recovery_payload(item, lang) for item in pending]
+
+
+def warm_analysis_mistakes(student_id: int, analysis_version_id: int) -> None:
+    """Best-effort cache warming for mistakes created by one new analysis."""
+    data = mistake_book(student_id)
+    pending_ids = [
+        int(item["id"])
+        for item in data["items"]
+        if int(item.get("id") or 0) > 0
+        and item.get("needs_question_recovery")
+        and int(item.get("analysis_version_id") or 0) == analysis_version_id
+    ]
+    for index in range(0, len(pending_ids), 3):
+        prepare_mistake_recovery_batch(
+            student_id,
+            entry_ids=pending_ids[index:index + 3],
+            analysis_version_id=analysis_version_id,
+            limit=3,
+        )
 
 
 def mistake_worked_solution(

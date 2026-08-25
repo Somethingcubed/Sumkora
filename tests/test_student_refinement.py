@@ -5,11 +5,18 @@ import json
 from learning import _choose_weak_topic
 from question_solver import (
     _enforce_solution_consistency,
+    _restore_tex_control_escapes,
     _equation_rhs_signature,
     solve_question_texts,
 )
 from question_solver import PROMPT
 from taxonomy import canonical_topic
+
+
+def test_question_solver_restores_json_damaged_tex_controls():
+    damaged = "\textbf{Q2}: \frac{1}{2} \right) \neq \x01"
+    repaired = _restore_tex_control_escapes(damaged)
+    assert repaired == r"\textbf{Q2}: \frac{1}{2} \right) \neq "
 
 
 class FixedRandom:
