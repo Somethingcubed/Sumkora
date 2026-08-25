@@ -4,7 +4,7 @@
 {% set ns = namespace(lost=0, strong=none, improve=none) %}
 {% for item in result.questions %}
   {% set awarded = item.human_mark if item.human_mark is not none else item.awarded_mark %}
-  {% if awarded is not none and item.maximum_marks > 0 %}
+  {% if awarded is not none and item.maximum_marks > 0 and not is_unclassified(item.topic) and not is_unclassified(item.skill) %}
     {% set ns.lost = ns.lost + item.maximum_marks - awarded %}
     {% if ns.strong is none and awarded / item.maximum_marks >= 0.8 %}{% set ns.strong = item %}{% endif %}
     {% if ns.improve is none and awarded / item.maximum_marks < 0.6 %}{% set ns.improve = item %}{% endif %}
@@ -63,7 +63,7 @@
       {% set result_state = 'neutral' if awarded is none or item.assessment_status in ['ungraded', 'uncertain'] else ('correct' if awarded >= item.maximum_marks else 'needs-work') %}
       <details class="surface group question-result question-result-{{ result_state }}">
         <summary class="cursor-pointer list-none flex justify-between gap-4">
-          <div><p class="font-semibold">{{ item.question_label }} · {{ item.topic }}</p><p class="text-sm text-slate-500 mt-1">{{ item.skill }}</p></div>
+          <div><p class="font-semibold">{{ item.question_label }}{% if not is_unclassified(item.topic) %} · {{ item.topic }}{% endif %}</p>{% if not is_unclassified(item.skill) %}<p class="text-sm text-slate-500 mt-1">{{ item.skill }}</p>{% endif %}</div>
           <div class="text-right">{% if awarded is none or item.assessment_status == 'ungraded' %}<p class="text-sm font-semibold text-amber-700">{{ tr('Needs review', '需要复核') }}</p>{% else %}<p class="text-xl font-bold result-mark">{{ awarded }} / {{ item.maximum_marks }}</p><p class="result-state-label">{{ '✓ ' if result_state == 'correct' else '• ' }}{{ tr('Correct', '正确') if result_state == 'correct' else tr('Marks lost', '有失分') }}</p>{% endif %}{% if item.human_mark is not none %}<p class="text-xs text-emerald-700">{{ tr('Reviewed mark', '已复核得分') }}</p>{% elif item.assessment_status in ['estimated','uncertain'] %}<p class="text-xs text-amber-700">{{ tr(item.assessment_status|capitalize, '估计' if item.assessment_status == 'estimated' else '不确定') }}</p>{% endif %}</div>
         </summary>
         <div class="mt-5 pt-5 border-t border-slate-100 space-y-4 text-sm">

@@ -206,7 +206,12 @@ def test_chemistry_pathway_is_visible_and_uses_chemistry_specific_checks():
     client.cookies.set("lang", "zh")
     page = client.get("/signup")
     assert page.status_code == 200
-    assert "沪科版（五四制）九年级化学（2026新版）" in page.text
+    assert 'name="curriculum_id"' not in page.text
+    student_id, username = _student()
+    _login(username)
+    client.cookies.set("lang", "zh")
+    settings = client.get("/student/settings")
+    assert "沪科版（五四制）九年级化学（2026新版）" in settings.text
     client.cookies.delete("lang")
 
     chemistry = curriculum_profile(

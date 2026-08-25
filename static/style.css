@@ -2377,6 +2377,10 @@ details[open] > summary {
   width: min(100%, 42rem);
 }
 
+.auth-card:has(.onboarding-tour) {
+  width: min(100%, 44rem);
+}
+
 .public-demo {
   padding: clamp(1.1rem, 3vw, 1.65rem);
   border: 1px solid var(--line);
@@ -2749,6 +2753,233 @@ details[open] > summary {
   text-align: center;
 }
 
+.remember-signin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #e1e4ee;
+  border-radius: 0.9rem;
+  background: white;
+}
+
+.remember-signin label {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+}
+
+.remember-signin span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.remember-signin small,
+.remember-signin > p {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.remember-signin > p {
+  margin: 0 0 0 0.7rem;
+  white-space: nowrap;
+}
+
+.remember-signin input {
+  width: 2.55rem;
+  height: 1.45rem;
+  accent-color: var(--brand);
+}
+
+.onboarding-tour {
+  overflow: hidden;
+  border: 1px solid #dfe2ed;
+  border-radius: 1.15rem;
+  background: white;
+  box-shadow: 0 12px 30px rgba(29, 32, 67, 0.07);
+}
+
+.tour-viewport {
+  display: flex;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+
+.tour-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.tour-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 1rem;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.tour-picture {
+  position: relative;
+  min-height: 15rem;
+  overflow: hidden;
+  border: 1px solid #e4e5f0;
+  border-radius: 0.95rem;
+  background: linear-gradient(145deg, #f9f9ff, #eef0ff);
+}
+
+.tour-copy {
+  padding: 1rem 0.15rem 0.15rem;
+}
+
+.tour-copy > span {
+  color: var(--brand);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.tour-copy h3 {
+  margin: 0.3rem 0 0.35rem;
+  font-size: 1.08rem;
+}
+
+.tour-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.tour-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem 1rem;
+  gap: 1rem;
+}
+
+.tour-arrow {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  place-items: center;
+  color: #3730a3;
+  border: 1px solid #d9dcf0;
+  border-radius: 999px;
+  background: white;
+}
+
+.tour-dots {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.tour-dots button {
+  width: 0.45rem;
+  height: 0.45rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #c8cbda;
+}
+
+.tour-dots button.active {
+  width: 1.4rem;
+  background: var(--brand);
+}
+
+.tour-mini-nav {
+  display: flex;
+  align-items: center;
+  height: 2.35rem;
+  padding: 0 0.85rem;
+  border-bottom: 1px solid #e5e7ef;
+  background: white;
+  gap: 0.6rem;
+}
+
+.tour-mini-nav b {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  color: white;
+  border-radius: 0.35rem;
+  background: var(--brand);
+  font-size: 0.58rem;
+}
+
+.tour-mini-nav span,
+.tour-mini-heading i,
+.tour-upload-card span {
+  display: block;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: #d8dbe7;
+}
+
+.tour-mini-nav span { width: 3.2rem; }
+.tour-mini-heading { display: grid; margin: 1rem; gap: 0.45rem; }
+.tour-mini-heading i:first-child { width: 7rem; height: 0.65rem; background: #24283a; }
+.tour-mini-heading i:last-child { width: 10rem; }
+.tour-mini-score { display: grid; grid-template-columns: 0.42fr 1fr; align-items: center; margin: 0 1rem; padding: 1rem; border: 1px solid #e2e4ef; border-radius: 0.75rem; background: white; }
+.tour-mini-score strong { color: var(--brand); font-size: 1.7rem; }
+.tour-mini-score div { display: flex; align-items: end; height: 3rem; gap: 0.45rem; border-bottom: 1px solid #d9dce9; }
+.tour-mini-score span { flex: 1; border-radius: 0.25rem 0.25rem 0 0; background: #857ff5; }
+.tour-mini-score span:nth-child(1) { height: 35%; }
+.tour-mini-score span:nth-child(2) { height: 62%; }
+.tour-mini-score span:nth-child(3) { height: 84%; }
+.tour-mini-tools { display: grid; grid-template-columns: 1fr 1fr; margin: 0.75rem 1rem; gap: 0.55rem; }
+.tour-mini-tools i { height: 2.7rem; border: 1px solid #e2e4ef; border-radius: 0.7rem; background: white; }
+
+.tour-analyse-picture { display: grid; grid-template-columns: 0.9fr 1.1fr; align-items: center; padding: 1.2rem; gap: 0.8rem; }
+.tour-upload-card, .tour-progress-card { padding: 1rem; border: 1px solid #dedff0; border-radius: 0.8rem; background: white; }
+.tour-upload-card { display: grid; place-items: center; min-height: 9rem; gap: 0.5rem; border-style: dashed; }
+.tour-upload-card b { display: grid; width: 2.5rem; height: 2.5rem; place-items: center; color: var(--brand); border-radius: 999px; background: #eeedff; font-size: 1.35rem; }
+.tour-upload-card span { width: 72%; }
+.tour-upload-card span:last-child { width: 45%; }
+.tour-progress-card { display: grid; gap: 0.7rem; }
+.tour-progress-card::before { content: ""; grid-column: 1; grid-row: 1; height: 0.48rem; border-radius: 999px; background: #ebeaf4; }
+.tour-progress-card > i { grid-column: 1; grid-row: 1; z-index: 1; height: 0.48rem; border-radius: 999px; background: var(--brand); }
+.tour-progress-card small { height: 1.9rem; border-bottom: 1px solid #e5e6ef; }
+
+.tour-progress-picture { display: grid; grid-template-columns: 1.2fr 0.8fr; align-items: center; padding: 1.25rem; gap: 1rem; }
+.tour-bars, .tour-review-cards { display: grid; gap: 0.8rem; }
+.tour-bars span { height: 1.25rem; overflow: hidden; border-radius: 999px; background: #e3e5ef; }
+.tour-bars i { display: block; height: 100%; border-radius: inherit; background: #7169eb; }
+.tour-bars span:first-child i { background: #e2aa45; }
+.tour-review-cards i { display: grid; min-height: 4rem; place-items: center; color: var(--brand); border: 1px solid #e1e3ed; border-radius: 0.75rem; background: white; font-size: 1.3rem; font-style: normal; }
+
+.mistake-source {
+  overflow: hidden;
+  border: 1px solid #e2e4ed;
+  border-radius: 0.9rem;
+  background: #f8f9fc;
+}
+
+.mistake-source figcaption {
+  padding: 0.7rem 0.9rem;
+  color: #4c5268;
+  border-bottom: 1px solid #e2e4ed;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.mistake-source img {
+  display: block;
+  width: 100%;
+  max-height: 42rem;
+  object-fit: contain;
+  background: white;
+}
+
 @media (max-width: 1020px) {
   .desktop-nav {
     display: none;
@@ -3008,6 +3239,19 @@ details[open] > summary {
   .auth-language {
     top: 1.2rem;
     right: 1.25rem;
+  }
+
+  .tour-picture {
+    min-height: 12rem;
+  }
+
+  .tour-analyse-picture,
+  .tour-progress-picture {
+    padding: 0.8rem;
+  }
+
+  .signup-next-actions {
+    grid-template-columns: 1fr;
   }
 
   .upload-tile {

@@ -39,6 +39,16 @@ def _display_skill(value: str) -> str:
     return (value or "Unclassified").replace("_", " ").strip()
 
 
+def _is_unclassified(value: str | None) -> bool:
+    return (value or "").strip().lower().replace("_", " ") in {
+        "",
+        "unclassified",
+        "unknown",
+        "uncategorized",
+        "uncategorised",
+    }
+
+
 def _student_curriculum(student_id: int) -> dict:
     return profile_from_user(
         query_one("SELECT * FROM users WHERE id = ?", (student_id,))
@@ -387,6 +397,7 @@ def mistake_book(
         SELECT mbe.*, aqr.id AS question_result_id,
                aqr.analysis_version_id, aqr.question_label,
                aqr.question_text, aqr.question_latex,
+               aqr.answer_page, aqr.evidence_pages,
                aqr.maximum_marks, aqr.awarded_mark, aqr.ai_mark,
                aqr.ai_rationale, aqr.ai_rationale_zh,
                aqr.mark_scheme_text, aqr.topic, aqr.skill,
@@ -441,9 +452,11 @@ def mistake_book(
         item = dict(raw)
         resolved_question = _resolve_bank_question(item, identity_cache)
         if resolved_question:
-            item["paper_question_id"] = resolved_question["id"]
+            resolved_question = dict(resolved_question)
+            item["paper_question_id"] = resolved_question.pop("id")
             item.update(resolved_question)
-        topics.add(item["topic"] or "Unclassified")
+        if not _is_unclassified(item.get("topic")):
+            topics.add(item["topic"])
         if topic and item["topic"] != topic:
             continue
         if status and item["status"] != status:
@@ -508,6 +521,20 @@ def mistake_book(
                 or bank_question
             )
         item["has_parent_context"] = use_bank_parent or len(complete_parts) > 1
+        evidence_pages = _json(item.get("evidence_pages"), [])
+        source_page = next(
+            (
+                int(page)
+                for page in evidence_pages
+                if str(page).isdigit() and int(page) > 0
+            ),
+            int(item.get("answer_page") or 1),
+        )
+        item["source_page"] = source_page
+        item["has_source_image"] = bool(
+            item.get("answer_script_path")
+            and os.path.isfile(item["answer_script_path"])
+        )
         items.append(item)
     help_rows = query_all(
         """
@@ -520,7 +547,8 @@ def mistake_book(
     for raw in help_rows:
         help_item = dict(raw)
         help_topic = help_item["topic"] or "Unclassified"
-        topics.add(help_topic)
+        if not _is_unclassified(help_topic):
+            topics.add(help_topic)
         if topic and help_topic != topic:
             continue
         if status and help_item["mistake_status"] != status:
@@ -561,6 +589,11 @@ def mistake_book(
                     help_item["question_latex"] or help_item["transcription"]
                 ),
                 "has_parent_context": False,
+                "source_page": 1,
+                "has_source_image": bool(
+                    help_item.get("image_path")
+                    and os.path.isfile(help_item["image_path"])
+                ),
                 "outcome": "incorrect",
                 "status": help_item["mistake_status"],
             }

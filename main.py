@@ -1,4 +1,5 @@
 import os
+import base64
 import json
 import csv
 import hashlib
@@ -23,9 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import config
 from accounts import (
     count_label,
-    generate_recovery_code,
     normalize_username,
-    recovery_code_hash,
     recovery_code_matches,
     student_explanation,
     validate_password,
@@ -285,6 +284,36 @@ def redirect_login():
     return RedirectResponse("/login", status_code=303)
 
 
+def is_unclassified(value: str | None) -> bool:
+    return (value or "").strip().lower().replace("_", " ") in {
+        "",
+        "unclassified",
+        "unknown",
+        "uncategorized",
+        "uncategorised",
+    }
+
+
+def student_facing_assessment_summary(raw: str | None) -> dict:
+    summary = parse_json(raw, {})
+    for key in (
+        "strengths",
+        "weaknesses",
+        "recommendations",
+        "strengths_zh",
+        "weaknesses_zh",
+        "recommendations_zh",
+    ):
+        values = summary.get(key)
+        if isinstance(values, list):
+            summary[key] = [
+                value
+                for value in values
+                if "unclassified" not in str(value).lower()
+            ]
+    return summary
+
+
 def render(request: Request, name: str, context: dict, status_code: int = 200):
     lang = get_lang(request)
     active_curriculum = (
@@ -310,6 +339,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200):
         "default_curriculum_id": DEFAULT_CURRICULUM_ID,
         "active_curriculum": active_curriculum,
         "student_explanation": student_explanation,
+        "is_unclassified": is_unclassified,
         "skill_url": skill_url,
         "current_path": request.url.path,
         "is_researcher": bool(
@@ -450,14 +480,14 @@ def student_activity_ping(
     return {"recorded": seconds}
 
 
-def set_session_cookie(response, user_id: int):
+def set_session_cookie(response, user_id: int, *, persistent: bool = True):
     response.set_cookie(
         "session",
         create_session_token(user_id),
         httponly=True,
         secure=config.COOKIE_SECURE,
         samesite="lax",
-        max_age=config.SESSION_MAX_AGE_SECONDS,
+        max_age=config.SESSION_MAX_AGE_SECONDS if persistent else None,
         path="/",
     )
     return response
@@ -651,7 +681,7 @@ def signup_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    password_confirmation: str = Form(...),
+    password_confirmation: str = Form(""),
     display_name: str = Form(""),
     curriculum_id: str = Form(DEFAULT_CURRICULUM_ID),
     curriculum_level: str = Form(""),
@@ -702,7 +732,7 @@ def signup_submit(
             },
             status_code=400,
         )
-    if password != password_confirmation:
+    if password_confirmation and password != password_confirmation:
         return render(
             request,
             "signup.html",
@@ -727,10 +757,9 @@ def signup_submit(
             },
             status_code=400,
         )
-    recovery_code = generate_recovery_code()
     internal_email = f"student-{uuid.uuid4().hex}@accounts.sumkora.invalid"
     original_username = username.strip()
-    safe_display_name = display_name.strip()[:60] or original_username
+    safe_display_name = original_username
     try:
         user_id = execute(
             """
@@ -746,7 +775,7 @@ def signup_submit(
                 normalized,
                 hash_password(password),
                 safe_display_name,
-                recovery_code_hash(recovery_code),
+                None,
                 selected_curriculum["id"],
                 selected_curriculum["level"],
             ),
@@ -774,10 +803,22 @@ def signup_submit(
         "signup_success.html",
         {
             "user": query_one("SELECT * FROM users WHERE id = ?", (user_id,)),
-            "recovery_code": recovery_code,
         },
     )
     return set_session_cookie(response, user_id)
+
+
+@app.post("/account/session-preference")
+def account_session_preference(
+    request: Request,
+    remember: str = Form(""),
+):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    persistent = remember.lower() in {"1", "true", "yes", "on"}
+    response = JSONResponse({"remembered": persistent})
+    return set_session_cookie(response, user["id"], persistent=persistent)
 
 
 @app.get("/recover", response_class=HTMLResponse)
@@ -1390,9 +1431,8 @@ def student_paper_result(
             "result": result,
             "paper": paper,
             "versions": versions,
-            "assessment_summary": parse_json(
-                result["version"]["assessment_summary"],
-                {},
+            "assessment_summary": student_facing_assessment_summary(
+                result["version"]["assessment_summary"]
             ),
         },
     )
@@ -3147,6 +3187,45 @@ def student_mistake_status(
         return redirect_login()
     update_mistake_status(user["id"], entry_id, status)
     return RedirectResponse("/student/mistakes", status_code=303)
+
+
+@app.get("/student/mistakes/{entry_id}/source-image")
+def student_mistake_source_image(request: Request, entry_id: int):
+    user = require_role(request, "student")
+    if not user:
+        return redirect_login()
+    if entry_id < 0:
+        return RedirectResponse(f"/student/solve/{-entry_id}/image", status_code=307)
+    source = query_one(
+        """
+        SELECT pav.answer_script_path, aqr.answer_page, aqr.evidence_pages
+        FROM mistake_book_entries mbe
+        JOIN analysis_question_results aqr
+          ON aqr.id = mbe.analysis_question_result_id
+        JOIN paper_analysis_versions pav ON pav.id = aqr.analysis_version_id
+        WHERE mbe.id = ? AND mbe.student_id = ?
+        """,
+        (entry_id, user["id"]),
+    )
+    if not source or not os.path.isfile(source["answer_script_path"]):
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    pages = parse_json(source["evidence_pages"], [])
+    page_number = next(
+        (
+            int(page)
+            for page in pages
+            if str(page).isdigit() and int(page) > 0
+        ),
+        int(source["answer_page"] or 1),
+    )
+    image = get_page_image_base64(source["answer_script_path"], page_number, dpi=120)
+    if not image:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
+    return StreamingResponse(
+        io.BytesIO(base64.b64decode(image)),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @app.get("/student/mistakes/{kind}.pdf")

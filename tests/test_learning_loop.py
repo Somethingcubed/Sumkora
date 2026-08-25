@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 import fitz
 from fastapi.testclient import TestClient
 
-from assessment import rebuild_student_profile
+from assessment import rebuild_student_profile, student_skill_profile
+from auth import create_session_token
 from db import execute, hash_password, query_one
 from learning import (
     _PdfFlow,
@@ -57,6 +58,7 @@ def create_researcher(email: str):
 
 
 def login(email: str):
+    client.cookies.clear()
     response = client.post(
         "/login",
         data={"email": email, "password": "pass123"},
@@ -206,7 +208,7 @@ def test_clickable_skill_mistake_book_and_worksheet_pdfs():
 
     cookies = login(email)
     dashboard = client.get("/student", cookies=cookies)
-    assert "/static/style.css?v=20260809-1" in dashboard.text
+    assert "/static/style.css?v=20260825-1" in dashboard.text
     assert 'width="24" height="24" fill="none"' in dashboard.text
     assert client.get(
         "/student/skills/detail?skill=trigonometric%20graphs", cookies=cookies
@@ -252,7 +254,7 @@ def test_progress_report_uses_current_paper_analysis_data():
 
     cookies = login(email)
     response = client.get("/student/report", cookies=cookies)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.headers["content-disposition"].endswith(
         'sumkora-learning-student-progress-report.pdf"'
     )
@@ -323,6 +325,78 @@ def test_mistake_book_recombines_sibling_subquestions_for_context():
     assert "Q12(a)" in question
     assert r"\((2+x)^{59}\)" in question
     assert "Q12(b)" in question
+
+
+def test_mistake_book_reconnects_fast_results_to_original_page(tmp_path):
+    email = "mistake-source@student.local"
+    student_id = create_student(email)
+    paper_id, result_id = seed_direct_observation(student_id)
+    source_path = tmp_path / "completed-work.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 90), "Q1 Sketch the trigonometric graph.")
+    document.save(source_path)
+    document.close()
+    version = query_one(
+        "SELECT id FROM paper_analysis_versions WHERE paper_id = ?",
+        (paper_id,),
+    )
+    execute(
+        "UPDATE paper_analysis_versions SET answer_script_path = ? WHERE id = ?",
+        (str(source_path), version["id"]),
+    )
+    execute(
+        "UPDATE analysis_question_results SET evidence_pages = '[1]' WHERE id = ?",
+        (result_id,),
+    )
+
+    book = mistake_book(student_id)
+    assert book["items"][0]["has_source_image"] is True
+    with TestClient(app) as isolated_client:
+        isolated_client.cookies.set("session", create_session_token(student_id))
+        response = isolated_client.get(
+            f"/student/mistakes/{book['items'][0]['id']}/source-image"
+        )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_unclassified_is_not_exposed_as_student_mastery():
+    student_id = create_student("classified-progress@student.local")
+    values = {
+        "evidence_count": 2,
+        "distinct_papers": 1,
+        "total_marks_earned": 1,
+        "total_marks_available": 2,
+        "all_time_estimate": 0.5,
+        "current_estimate": 0.5,
+        "uncertainty": 0.1,
+        "status": "early signal",
+        "trend": "stable",
+        "first_observed": now(),
+        "last_observed": now(),
+        "calculation_version": "test",
+        "updated_at": now(),
+    }
+    for skill, topic in [
+        ("unclassified", "Unclassified"),
+        ("quadratic equations", "Algebra and graphs"),
+    ]:
+        execute(
+            """
+            INSERT INTO student_skill_states
+            (student_id, skill, topic, evidence_count, distinct_papers,
+             total_marks_earned, total_marks_available, all_time_estimate,
+             current_estimate, uncertainty, status, trend, first_observed,
+             last_observed, calculation_version, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (student_id, skill, topic, *values.values()),
+        )
+    profile = student_skill_profile(student_id)
+    assert [item["topic"] for item in profile["states"]] == ["Algebra and graphs"]
+    assert all(item["topic"] != "Unclassified" for item in profile["topic_states"])
 
 
 def test_mistake_book_deduplicates_title_and_uses_full_bank_parent():

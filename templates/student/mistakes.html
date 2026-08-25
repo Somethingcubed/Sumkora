@@ -28,9 +28,15 @@
     <div class="flex flex-wrap justify-between gap-3">
       {% set topic_name = topic_label(item.topic)|trim %}
       {% set skill_name = skill_label(item.skill)|trim %}
-      <div><p class="eyebrow">{{ topic_name }}{% if skill_name|lower != topic_name|lower %} · {{ skill_name }}{% endif %}</p><h2 class="font-semibold mt-1">{{ item.paper_title }} — {{ item.question_label }}</h2><p class="text-xs text-slate-500 mt-1">{{ item.paper_date[:10] }} · {{ tr('Estimated', '估分') if item.assessment_mode == 'estimate' else tr('Detailed', '详细批改') }}</p></div>
+      <div>{% if not is_unclassified(item.topic) %}<p class="eyebrow">{{ topic_name }}{% if not is_unclassified(item.skill) and skill_name|lower != topic_name|lower %} · {{ skill_name }}{% endif %}</p>{% endif %}<h2 class="font-semibold mt-1">{{ item.paper_title }} — {{ item.question_label }}</h2><p class="text-xs text-slate-500 mt-1">{{ item.paper_date[:10] }} · {{ tr('Estimated', '估分') if item.assessment_mode == 'estimate' else tr('Detailed', '详细批改') }}</p></div>
       <div class="text-right"><p class="text-2xl font-bold {{ 'text-red-700' if item.outcome == 'incorrect' else 'text-amber-700' }}">{{ item.mark }}/{{ item.maximum_marks }}</p><p class="text-xs text-slate-500">{{ tr('marks', '分') }}</p></div>
     </div>
+    {% if item.has_source_image %}
+    <figure class="mistake-source mt-4">
+      <figcaption>{{ tr('Original question and your work', '原题与作答') }}</figcaption>
+      <img src="/student/mistakes/{{ item.id }}/source-image" loading="lazy" alt="{{ tr('Original page containing', '包含原题的页面') }} {{ item.question_label }}">
+    </figure>
+    {% endif %}
     <div class="math-copy text-sm mt-4 whitespace-pre-line">{{ item.complete_question_text or tr('Question text will be linked when the source paper is added to the question bank.', '原试卷加入题库后将显示完整题目。') }}</div>
     {% if item.has_parent_context %}<p class="context-note">{{ tr('The complete parent question is included so this part can be understood independently.', '已包含完整的母题内容，确保此小题可以独立理解。') }}</p>{% endif %}
     <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm mt-3"><p class="font-medium">{{ tr('What to improve', '需要改进') }}</p><p class="text-slate-600 mt-1">{{ item.error_mechanism_zh if lang == 'zh' and item.error_mechanism_zh else (item.error_mechanism or item.ai_rationale_zh if lang == 'zh' and item.ai_rationale_zh else item.ai_rationale) }}</p></div>

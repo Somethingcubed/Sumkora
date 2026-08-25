@@ -1361,6 +1361,14 @@ def compute_topic_mastery(student_id: int):
     )
     result = []
     for row in rows:
+        if (row["topic"] or "").strip().lower() in {
+            "",
+            "unclassified",
+            "unknown",
+            "uncategorized",
+            "uncategorised",
+        }:
+            continue
         possible = row["possible"] or 0
         earned = row["earned"] or 0
         pct = round(100 * earned / possible, 1) if possible else 0

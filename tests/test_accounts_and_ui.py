@@ -3,8 +3,8 @@ import re
 import fitz
 from fastapi.testclient import TestClient
 
-from accounts import count_label
-from db import query_all, query_one, verify_password
+from accounts import count_label, generate_recovery_code, recovery_code_hash
+from db import execute, query_all, query_one, verify_password
 from main import app
 from self_service import detect_document_texts, detect_documents
 
@@ -67,6 +67,11 @@ def test_student_signup_needs_no_email_and_creates_only_student_access():
     ]
     assert roles == ["student"]
     assert client.get("/research", follow_redirects=False).status_code == 303
+    assert 'name="display_name"' not in response.text
+    assert 'name="password_confirmation"' not in response.text
+    assert 'name="curriculum_id"' not in response.text
+    assert "data-onboarding-tour" in response.text
+    assert "recovery-code" not in response.text
 
 
 def test_username_uniqueness_login_case_and_trim_normalization():
@@ -117,9 +122,18 @@ def test_password_is_hashed_and_unicode_safe():
     assert verify_password(password, user["password_hash"])
 
 
-def test_recovery_code_is_one_time_and_resets_password():
+def test_new_signup_hides_recovery_code_and_legacy_code_still_resets_password():
     response = sign_up("Recoverable")
-    code = re.search(r"[A-F0-9]{4}(?:-[A-F0-9]{4}){5}", response.text).group(0)
+    assert re.search(r"[A-F0-9]{4}(?:-[A-F0-9]{4}){5}", response.text) is None
+    user = query_one(
+        "SELECT id, recovery_code_hash FROM users WHERE username_normalized = 'recoverable'"
+    )
+    assert user["recovery_code_hash"] is None
+    code = generate_recovery_code()
+    execute(
+        "UPDATE users SET recovery_code_hash = ? WHERE id = ?",
+        (recovery_code_hash(code), user["id"]),
+    )
     client.cookies.clear()
     reset = client.post(
         "/recover",

@@ -524,6 +524,19 @@ def student_skill_profile(student_id: int) -> dict:
         """,
         (student_id,),
     )]
+    states = [
+        row
+        for row in states
+        if (row.get("topic") or "").strip().lower() not in {
+            "",
+            "unclassified",
+            "unknown",
+            "uncategorized",
+            "uncategorised",
+        }
+        and (row.get("skill") or "").strip().lower().replace("_", " ")
+        not in {"unclassified", "unknown", "uncategorized", "uncategorised"}
+    ]
     # Missing curriculum topics are deliberately not represented as weakness.
     # The product shows only skills for which the student supplied evidence.
     untested = []
@@ -584,6 +597,8 @@ def student_skill_profile(student_id: int) -> dict:
             item["topic"],
             item["skill"],
         )
+        if item["topic"].strip().lower() == "unclassified":
+            continue
         grouped_topics[item["topic"]].append(item)
     topic_states = []
     for topic_name, observations in grouped_topics.items():
